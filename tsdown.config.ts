@@ -7,10 +7,19 @@
  */
 import { fileURLToPath } from 'node:url'
 import { dirname, relative, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { transform } from 'lightningcss'
 
+/**
+ * Repository root for sourcemap path rewriting. When the bundle is built
+ * inside the harness monorepo (../deepseek-harness exists) the transform maps
+ * sources back to the dsh-vault tree; standalone builds (git install, npm
+ * pack) have no sibling checkout, so the transform falls back to passing
+ * paths through untouched.
+ */
 const REPOSITORY_ROOT = fileURLToPath(new URL('../deepseek-harness', import.meta.url))
+const HAS_SIBLING_REPO = existsSync(REPOSITORY_ROOT)
 
 /** Virtual-id wrapper keeping module CSS away from tsdown's own css pipeline. */
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
@@ -116,6 +125,7 @@ export default {
     entryFileNames: 'client.js',
     sourcemapPathTransform(source: string, sourcemapPath: string) {
       if (!source.startsWith('.')) return source
+      if (!HAS_SIBLING_REPO) return source
       const physical = resolve(dirname(sourcemapPath), source)
       const repositoryPath = relative(REPOSITORY_ROOT, physical).split('/').join('/')
       return repositoryPath.startsWith('dsh-vault/') ? `../../../${repositoryPath}` : source

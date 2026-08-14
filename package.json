@@ -17,9 +17,13 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
@@ -31,23 +35,45 @@
     }
   },
   "files": [
-    "src",
-    "lib"
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
   ],
-  "dependencies": {
-    "@deepseek-ai/dsh-atomic-write": "workspace:^",
-    "@deepseek-ai/dsh-home-paths": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/schemastery": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+  "engines": {
+    "node": ">=20"
   },
+  "dependencies": {},
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/cordis": "workspace:^"
+    "@deepseek-ai/cordis": ">=4.0.0",
+    "@deepseek-ai/dsh-atomic-write": ">=0.0.1-rc.1",
+    "@deepseek-ai/dsh-home-paths": ">=0.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.1",
+    "@deepseek-ai/schemastery": ">=3.0.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-llm": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@deepseek-ai/dsh-atomic-write": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-home-paths": "0.0.1-rc.3",
+    "@types/node": "^22.0.0",
+    "lightningcss": "^1.32.0",
+    "react": "^18.3.1",
+    "tsdown": "^0.22.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.0"
   },
   "scripts": {
+    "build": "npm run build:host && npm run build:client",
+    "build:host": "tsc -p tsconfig.host.json",
+    "build:client": "tsdown",
+    "prepare": "npm run build",
     "test": "vitest run",
-    "build": "tsdown"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
