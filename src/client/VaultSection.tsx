@@ -492,6 +492,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {trashEntries.length === 0 && <p className={css.empty}>{t('trashEmpty')}</p>}
         </ul>
       )}
+      {showTrash && trashEntries.length > 0 && (
+        <button
+          type="button"
+          className={css.dangerButton}
+          onClick={() => {
+            if (!window.confirm(t('clearTrashConfirm'))) return
+            setBusy(true)
+            void Promise.all(trashEntries.map(e => remove(e.id))).then(() => {
+              void trash().then(setTrashEntries)
+              void refresh()
+              setBusy(false)
+            }, () => setBusy(false))
+          }}
+          disabled={busy || readonly}
+        >{t('clearTrash')}</button>
+      )}
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>

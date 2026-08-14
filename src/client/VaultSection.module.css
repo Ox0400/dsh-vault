@@ -354,3 +354,14 @@
   margin-right: 4px;
   font-size: 12px;
 }
+
+.dangerButton {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(229, 72, 77, 0.5);
+  background: transparent;
+  color: #e5484d;
+  cursor: pointer;
+  font-size: 12px;
+  align-self: flex-start;
+}

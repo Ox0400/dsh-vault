@@ -891,6 +891,49 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_rotate_password: generate + store a new password ──────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_rotate_password',
+    description: 'Generate a new strong password, store it on the entry, and return the new value '
+      + 'for the caller to hand to the target service. A one-call convenience for vault_generate_password + vault_update.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      length: { type: 'integer', description: 'New password length (default 20).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { rotated: { type: 'boolean', required: true }, password: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.rotated ? 'password rotated (new value returned)' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_rotate_password')
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) return { rotated: false, password: '' }
+      const password = generatePassword({ length: args.length ?? 20 })
+      await s.update(args.id, { password })
+      emitAudit('write', 'vault_rotate_password', entry.id, entry.title)
+      return { rotated: true, password }
+    },
+  }))
+
+  // ── vault_duplicates: exact-title+kind duplicates ───────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_duplicates',
+    description: 'Find entries that are exact duplicates (same title + kind). Returns groups of '
+      + 'summaries (no secrets) so the caller can merge or delete them.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { groups: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `found ${(v.groups as unknown[]).length} duplicate groups` }] },
+    async execute() {
+      const s = await guardStore()
+      const byKey = new Map<string, VaultEntrySummary[]>()
+      for (const e of s.list()) {
+        const key = `${e.title.toLowerCase()}::${e.kind ?? 'login'}`
+        const list = byKey.get(key) ?? []
+        list.push(toSummary(e))
+        byKey.set(key, list)
+      }
+      const groups = [...byKey.values()].filter(g => g.length > 1)
+      return { groups }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -1157,7 +1200,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (rows.length === 0) return { added: 0, skipped: 0 }
       const headers = rows[0]!.map(h => h.trim())
       const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
-        'apiKey', 'secret', 'notes', 'tags', 'kind', 'sensitivity'])
+        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'notes', 'tags',
+        'kind', 'sensitivity', 'favorite', 'rotationDays'])
       let added = 0
       let skipped = 0
       const now = Date.now()
@@ -1185,6 +1229,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         }
         if (record.sensitivity !== undefined && record.sensitivity !== 'normal' && record.sensitivity !== 'high') {
           delete record.sensitivity
+        }
+        // Restore boolean/numeric types for fields the CSV layer serialized as strings.
+        if (typeof record.favorite === 'string') record.favorite = record.favorite.toLowerCase() === 'true'
+        for (const numKey of ['expiresAt', 'rotationDays']) {
+          if (typeof record[numKey] === 'string' && /^-?\d+$/.test(record[numKey] as string)) {
+            record[numKey] = Number(record[numKey])
+          }
         }
         if (Object.keys(fields).length > 0) record.fields = fields
         const title = record.title as string

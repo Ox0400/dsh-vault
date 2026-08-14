@@ -72,6 +72,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_changes',
       'vault_clipboard',
       'vault_delete',
+      'vault_duplicates',
       'vault_env',
       'vault_expiry',
       'vault_export',
@@ -93,6 +94,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rekey',
       'vault_report',
       'vault_restore',
+      'vault_rotate_password',
       'vault_rotation',
       'vault_search',
       'vault_stats',
@@ -887,5 +889,41 @@ test('vault_totp honors explicit period and digits for bare secrets', async () =
   await withContext(async ctx => {
     const r = await call(ctx, 'vault_totp', { secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', period: 60, digits: 8 }) as { code: string }
     assert.match(r.code, /^\d{8}$/)
+  })
+})
+
+test('vault_rotate_password generates and stores a new password', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Rotate', password: 'old-password' })
+    const r = await call(ctx, 'vault_rotate_password', { id: added.id as string, length: 16 }) as { rotated: boolean; password: string }
+    assert.equal(r.rotated, true)
+    assert.equal(r.password.length, 16)
+    const full = await call(ctx, 'vault_get', { id: added.id as string }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.password, r.password)
+  })
+})
+
+test('vault_duplicates finds exact title+kind duplicates', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Same', kind: 'ssh', host: 'a' })
+    await call(ctx, 'vault_add', { title: 'Same', kind: 'ssh', host: 'b' })
+    await call(ctx, 'vault_add', { title: 'Same', kind: 'login', password: 'x' })
+    const r = await call(ctx, 'vault_duplicates', {}) as { groups: Array<Array<Record<string, unknown>>> }
+    assert.equal(r.groups.length, 1, 'only ssh duplicates group')
+    assert.equal(r.groups[0]!.length, 2)
+  })
+})
+
+test('vault_import_csv restores numeric fields', async () => {
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csv4-'))
+    const { writeFile } = await import('node:fs/promises')
+    const csvPath = join(dir, 'c.csv')
+    await writeFile(csvPath, 'title,expiresAt,rotationDays\nNum,1780000000000,90\n')
+    await call(ctx, 'vault_import_csv', { path: csvPath })
+    const search = await call(ctx, 'vault_search', { query: 'Num' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: search.results[0]!.id }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.expiresAt, 1780000000000)
+    assert.equal(full.entry.rotationDays, 90)
   })
 })
