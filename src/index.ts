@@ -407,6 +407,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       icon: { type: 'string', description: 'Optional emoji/icon shown in the UI (e.g. "🚀").' },
       color: { type: 'string', description: 'Optional accent color (e.g. "red", "#ff0000").' },
       favorite: { type: 'boolean', description: 'Pin/unpin the entry (favorites rank first in search).' },
+      resetRotation: { type: 'boolean', description: 'Reset the rotation timer now (sets updatedAt to now).' },
       otpSecret: { type: 'string', description: 'New TOTP secret.' },
       url: { type: 'string', description: 'New URL.' },
       notes: { type: 'string', description: 'New notes.' },
@@ -442,7 +443,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ;(patch as Record<string, unknown>)[key] = key === 'fields' ? cleanFieldsValue(value) ?? {} : value
         }
       }
-      const updated = await s.update(args.id, patch)
+      const updated = args.resetRotation === true
+        ? await s.update(args.id, patch).then(async u => { if (u) await s.markUsed(args.id); return u })
+        : await s.update(args.id, patch)
       if (!updated) return { found: false }
       emitAudit('write', 'vault_update', updated.id, updated.title)
       return { found: true, entry: toSummaryJson(updated) }
@@ -1168,6 +1171,48 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       })
       emitAudit('write', 'vault_note_secret', entry.id, entry.title)
       return { id: entry.id, title: entry.title }
+    },
+  }))
+
+  // ── vault_search_advanced: multi-criteria filter ────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_search_advanced',
+    description: 'Search with multiple optional criteria: title substring, username/email substring, '
+      + 'kind, tag, and created-after (epoch millis). All provided criteria must match (AND). Returns secret-free summaries.',
+    parameters: {
+      title: { type: 'string', description: 'Title substring.' },
+      username: { type: 'string', description: 'Username/email substring.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind.' },
+      tag: { type: 'string', description: 'Exact tag.' },
+      createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
+      limit: { type: 'number', description: 'Max results (default 20).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { results: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.results) }] },
+    async execute(args) {
+      const s = await guardStore()
+      return { results: s.advancedSearch({
+        ...(args.title !== undefined ? { title: args.title } : {}),
+        ...(args.username !== undefined ? { username: args.username } : {}),
+        ...(args.kind !== undefined ? { kind: args.kind } : {}),
+        ...(args.tag !== undefined ? { tag: args.tag } : {}),
+        ...(args.createdAfter !== undefined ? { createdAfter: args.createdAfter } : {}),
+        ...(args.limit !== undefined ? { limit: validateLimit(args.limit, 'vault_search_advanced') } : {}),
+      }) as unknown as JsonValue[] }
+    },
+  }))
+
+  // ── vault_count: lightweight entry count ────────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_count',
+    description: 'Return the number of active entries (optionally filtered by kind). Lightweight '
+      + 'alternative to vault_stats when you only need a count.',
+    parameters: { kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Count only this kind.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} entries` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const kind = args.kind
+      const count = kind === undefined ? s.list().length : s.list().filter(e => (e.kind ?? 'login') === kind).length
+      return { count }
     },
   }))
 

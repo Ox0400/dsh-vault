@@ -495,6 +495,31 @@ export class VaultStore {
     return report
   }
 
+  /** Advanced multi-criteria search: title/username/kind/tag text + created-after. */
+  advancedSearch(criteria: {
+    title?: string
+    username?: string
+    kind?: string
+    tag?: string
+    createdAfter?: number
+    limit?: number
+  }): VaultEntrySummary[] {
+    const limit = criteria.limit ?? 20
+    const t = criteria.title?.toLowerCase()
+    const u = criteria.username?.toLowerCase()
+    const results: VaultEntrySummary[] = []
+    for (const entry of this.list()) {
+      if (results.length >= limit) break
+      if (t !== undefined && !entry.title.toLowerCase().includes(t)) continue
+      if (u !== undefined && !(entry.username ?? entry.email ?? '').toLowerCase().includes(u)) continue
+      if (criteria.kind !== undefined && (entry.kind ?? 'login') !== criteria.kind) continue
+      if (criteria.tag !== undefined && !(entry.tags ?? []).includes(criteria.tag)) continue
+      if (criteria.createdAfter !== undefined && entry.createdAt < criteria.createdAfter) continue
+      results.push(toSummary(entry))
+    }
+    return results
+  }
+
   /** Vault overview statistics (1Password-style): counts by kind, TOTP,
    * high-sensitivity, expired entries. No secrets. */
   stats(): { total: number; byKind: Record<string, number>; withTotp: number; highSensitivity: number; expired: number; recent7d: number } {
@@ -639,7 +664,10 @@ export class VaultStore {
       entries: Array<EncryptedBlob & { id: string }>
     }
     if (!parsed.kdf || !Array.isArray(parsed.entries)) {
-      throw new Error('vault: invalid export document')
+      throw new Error('vault: invalid export document — expected { kdf, entries[] } from vault_export')
+    }
+    if (parsed.entries.length === 0) {
+      return 0
     }
     const exportKey = await deriveKey(exportPassword, parsed.kdf)
     let added = 0

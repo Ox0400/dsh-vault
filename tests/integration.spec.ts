@@ -73,6 +73,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_bulk_export',
       'vault_changes',
       'vault_clipboard',
+      'vault_count',
       'vault_delete',
       'vault_duplicates',
       'vault_env',
@@ -107,6 +108,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rotate_password',
       'vault_rotation',
       'vault_search',
+      'vault_search_advanced',
       'vault_stats',
       'vault_strength',
       'vault_switch',
@@ -1165,5 +1167,37 @@ test('vault_add stores icon and color metadata', async () => {
     const full = await call(ctx, 'vault_get', { id: added.id as string }) as { entry: Record<string, unknown> }
     assert.equal(full.entry.icon, '🚀')
     assert.equal(full.entry.color, 'red')
+  })
+})
+
+test('vault_search_advanced combines criteria (AND)', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'prod-db', kind: 'ssh', host: 'a', tags: ['prod'] })
+    await call(ctx, 'vault_add', { title: 'prod-api', kind: 'api-key', apiKey: 'k', tags: ['prod'] })
+    const r = await call(ctx, 'vault_search_advanced', { kind: 'ssh', tag: 'prod' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(r.results.length, 1)
+    assert.equal(r.results[0]!.title, 'prod-db')
+    const none = await call(ctx, 'vault_search_advanced', { kind: 'ssh', tag: 'dev' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(none.results.length, 0)
+  })
+})
+
+test('vault_count counts entries optionally by kind', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'A', password: 'p' })
+    await call(ctx, 'vault_add', { title: 'B', kind: 'ssh', host: 'h' })
+    const all = await call(ctx, 'vault_count', {}) as { count: number }
+    assert.ok(all.count >= 2)
+    const ssh = await call(ctx, 'vault_count', { kind: 'ssh' }) as { count: number }
+    assert.equal(ssh.count, 1)
+  })
+})
+
+test('vault_update resetRotation refreshes the rotation clock', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Rot', password: 'pw', rotationDays: 30 })
+    await call(ctx, 'vault_update', { id: added.id as string, resetRotation: true })
+    const r = await call(ctx, 'vault_rotation', {}) as { entries: Array<Record<string, unknown>> }
+    assert.ok(!r.entries.some(e => e.title === 'Rot'), 'rotation clock reset → not due')
   })
 })
