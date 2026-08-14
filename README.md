@@ -159,7 +159,7 @@ Example:
     autoCapture: true
 ```
 
-With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode (read-only / ask-before-write / automatic read-write) with a dropdown to switch it, a kind filter, a health & rotation summary, a trash view, and masked secret fields with a Show/Hide toggle.
+With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode (read-only / ask-before-write / automatic read-write) with a dropdown to switch it, an **auto-capture toggle** (detect credentials shared in chat → offer to save), a kind filter, a health & rotation summary, a trash view, and masked secret fields with a Show/Hide toggle.
 
 The vault is created automatically on first tool use; every launch re-unlocks with the master password. **Forgetting the master password = permanent data loss** (no backdoor — by design).
 

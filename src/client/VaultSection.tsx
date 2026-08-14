@@ -55,6 +55,7 @@ export interface VaultSectionInjected {
   t: TranslateNS<'settings.vault'>
   config: () => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
   setAccessMode: (mode: 'readonly' | 'ask' | 'auto') => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
+  setAutoCapture: (enabled: boolean) => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
   list: () => Promise<VaultSummaryWire[]>
   search: (query: string, limit?: number) => Promise<VaultSummaryWire[]>
   get: (id: string) => Promise<{ found: boolean; entry?: VaultFullWire }>
@@ -132,7 +133,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, list, search, get, add, update, remove, trash, rotation, health, restore, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, restore, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -379,6 +380,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               <option value="ask">{t('modeAsk')}</option>
               <option value="auto">{t('modeAuto')}</option>
             </select>
+          </label>
+          <label className={css.policyField}>
+            <span>{t('autoCaptureLabel')}</span>
+            <input
+              type="checkbox"
+              checked={policy.autoCapture}
+              disabled={busy}
+              onChange={event => {
+                const next = event.target.checked
+                setBusy(true)
+                setMessage(null)
+                void setAutoCapture(next).then(
+                  value => { setPolicy(value); setBusy(false) },
+                  () => { setMessage(t('error')); setBusy(false) },
+                )
+              }}
+            />
           </label>
           <p className={policy.accessMode === 'readonly' ? css.modeReadonly : policy.accessMode === 'ask' ? css.modeAsk : css.modeAuto}>
             {policy.accessMode === 'readonly'

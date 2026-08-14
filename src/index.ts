@@ -951,6 +951,15 @@ export class VaultGateway extends TypertRemoteService {
     return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
   }
 
+  /** Toggle auto-capture (detect credentials in chat → offer to save) from
+   * the Settings UI and persist it. */
+  @Remote('setAutoCapture')
+  async setAutoCapture(enabled: boolean): Promise<{ accessMode: AccessMode; autoCapture: boolean }> {
+    this.accessPolicy.autoCapture = Boolean(enabled)
+    await this.persistPolicy()
+    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
+  }
+
   /** Persist the current policy to `<vault dir>/access.json`. */
   private async persistPolicy(): Promise<void> {
     const file = accessPolicyFile({

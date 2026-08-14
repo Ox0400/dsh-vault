@@ -566,3 +566,20 @@ test('vault_totp_uri builds a valid otpauth provisioning URI', async () => {
     assert.ok(r.uri.includes('period=30') && r.uri.includes('digits=6'))
   })
 })
+
+test('setAutoCapture toggles and persists the capture preference', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    assert.equal((await gateway.config()).autoCapture, false)
+    const on = await gateway.setAutoCapture(true)
+    assert.equal(on.autoCapture, true)
+    // The shared policy mutated: the system prompt should now show capture ON.
+    const assembly = await (ctx.get('systemPrompt') as {
+      assemble: (c?: unknown) => Promise<{ sections: Array<{ name: string; text: string }> }>
+    }).assemble({})
+    const vaultSection = assembly.sections.find(s => s.name === 'dsh-vault')!
+    assert.match(vaultSection.text, /Auto-capture is ON/)
+    const off = await gateway.setAutoCapture(false)
+    assert.equal(off.autoCapture, false)
+  })
+})
