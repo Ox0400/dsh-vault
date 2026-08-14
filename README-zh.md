@@ -128,6 +128,21 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 | `masterPasswordEnv` | 环境变量名，运行时从该变量读取主密码（推荐） |
 | `path` | 保险库文件路径，默认 `$DSH_HOME/vault/default.json` |
 | `name` | 保险库名，用于默认路径（如 `name: work` → `$DSH_HOME/vault/work.json`） |
+| `accessMode` | 模型工具的访问策略：`readwrite`（默认）或 `readonly`。`readonly` 下工具与设置页的增/改/删全部被拒绝。 |
+| `autoCapture` | `false`（默认）。设为 `true` 时，系统提示词会指导模型识别对话中出现的凭据，并**按用户偏好**用 `vault_add` 提供保存。 |
+
+示例：
+
+```yaml
+- id: vault
+  name: dsh-vault
+  config:
+    masterPasswordEnv: DSH_VAULT_PASSWORD
+    accessMode: readwrite
+    autoCapture: true
+```
+
+`autoCapture: true` 时，当你在对话中分享凭据（如 "我的 npm token 是 npm_…"），助手会提议存入；你同意后立即调用 `vault_add`。`autoCapture` 关闭时，只有你明确要求才保存。设置页会显示当前模式，空库提示会引导你开始存入密钥。
 
 首次调用任一工具时自动创建保险库；之后每次启动用主密码重新解锁。**忘记主密码 = 数据永久丢失**（无后门，这是设计使然）。
 

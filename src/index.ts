@@ -42,6 +42,15 @@ export interface Config {
   path?: string
   /** Vault name used for the default path. */
   name?: string
+  /** Access policy for the model tools: `readwrite` (default) lets the model
+   * add/update/delete entries; `readonly` rejects every mutation and only
+   * serves search/read/TOTP. The Settings UI can switch the runtime mode. */
+  accessMode?: 'readonly' | 'readwrite'
+  /** When true, the system prompt instructs the model to detect credentials
+   * in the conversation (API keys, tokens, passwords) and, following user
+   * preference, save them with vault_add. Defaults to false — capture is
+   * opt-in because auto-writing secrets needs explicit consent. */
+  autoCapture?: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -49,10 +58,24 @@ export const Config: Schema<Config> = Schema.object({
   masterPasswordEnv: Schema.string(),
   path: Schema.string(),
   name: Schema.string(),
+  accessMode: Schema.union([
+    Schema.const('readonly'),
+    Schema.const('readwrite'),
+  ]),
+  autoCapture: Schema.boolean(),
 })
 
 export function apply(ctx: Context, config: Config): void {
   const masterPassword = resolveMasterPassword(config)
+  const accessMode = config.accessMode ?? 'readwrite'
+  const autoCapture = config.autoCapture ?? false
+
+  /** Reject mutations when the vault is in readonly mode. */
+  function assertWritable(action: string): void {
+    if (accessMode === 'readonly') {
+      throw new Error(`vault: ${action} is disabled in readonly mode (set accessMode: "readwrite" to enable)`)
+    }
+  }
 
   /** Ensure the shared store is open (lazily on first use, so a missing
    * master password fails at the first tool call with a clear message). */
@@ -65,6 +88,37 @@ export function apply(ctx: Context, config: Config): void {
     const s = await ensureStore()
     return s.get(id)
   }
+
+  // System prompt guidance: tells the model how the vault works, what the
+  // current access mode allows, and — when autoCapture is enabled — to detect
+  // credentials in the conversation and offer to save them via vault_add.
+  const systemPrompt = ctx.get('systemPrompt')
+  systemPrompt?.section({
+    name: 'dsh-vault',
+    order: 150,
+    text: () => {
+      const lines = [
+        '## Encrypted credential vault (dsh-vault)',
+        `Access mode: ${accessMode === 'readonly' ? 'READONLY — you may search/read/generate codes but MUST NOT add, update, or delete entries.' : 'readwrite — you may add, update, delete, search, and read entries.'}`,
+        'Credentials are encrypted at rest (AES-256-GCM) under a master password the user configured; never ask for that password.',
+        'Use vault_search to find entries by title/username/host and vault_get (by id) to read full credentials when the task needs them.',
+        'Do not repeat secrets in the conversation when a credential was obtained via vault_get.',
+      ]
+      if (autoCapture) {
+        lines.push(
+          'Auto-capture is ON: when the user shares an API key, token, password, or other credential in conversation',
+          '(e.g. "my npm token is npm_…", "use this GitHub PAT"), offer to store it with vault_add under a clear title.',
+          'Capture user preference: if they agree (or have previously agreed to auto-save), call vault_add immediately;',
+          'if they decline or it is unclear, do NOT store it. Never auto-save credentials that were not explicitly shared.',
+        )
+      } else {
+        lines.push(
+          'Auto-capture is OFF: do not save credentials from the conversation unless the user explicitly asks you to.',
+        )
+      }
+      return lines.join('\n')
+    },
+  })
 
   ctx.tools.register(defineTool({
     name: 'vault_add',
@@ -116,6 +170,7 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: `${value.message} (id: ${value.id})` }],
     },
     async execute(args) {
+      assertWritable('vault_add')
       if (!args.title.trim()) throw new Error('vault_add: title must not be empty')
       const s = await ensureStore()
       const entry = await s.add({
@@ -253,6 +308,7 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: value.found ? 'entry updated' : 'entry not found' }],
     },
     async execute(args) {
+      assertWritable('vault_update')
       const s = await ensureStore()
       const patch: VaultEntryPatch = {}
       for (const key of [
@@ -288,6 +344,7 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{ type: 'text', text: value.message }],
     },
     async execute(args) {
+      assertWritable('vault_delete')
       const s = await ensureStore()
       const deleted = await s.delete(args.id)
       return { deleted, message: deleted ? 'entry deleted' : 'entry not found' }
@@ -389,6 +446,8 @@ export function apply(ctx: Context, config: Config): void {
     masterPassword,
     ...(config.path !== undefined ? { path: config.path } : {}),
     ...(config.name !== undefined ? { name: config.name } : {}),
+    accessMode,
+    autoCapture,
   })
 }
 
@@ -404,12 +463,16 @@ export class VaultGateway extends TypertRemoteService {
   private readonly masterPassword: string
   private readonly vaultPath: string | undefined
   private readonly vaultName: string | undefined
+  private readonly accessMode: 'readonly' | 'readwrite'
+  private readonly autoCapture: boolean
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'vault')
     this.masterPassword = config.masterPassword ?? resolveMasterPassword(config)
     this.vaultPath = config.path
     this.vaultName = config.name
+    this.accessMode = config.accessMode ?? 'readwrite'
+    this.autoCapture = config.autoCapture ?? false
   }
 
   private async ensureStore(): Promise<VaultStore> {
@@ -417,6 +480,19 @@ export class VaultGateway extends TypertRemoteService {
       ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}),
       ...(this.vaultName !== undefined ? { name: this.vaultName } : {}),
     })
+  }
+
+  /** Reject mutations when the vault is in readonly mode (UI surface). */
+  private assertWritable(action: string): void {
+    if (this.accessMode === 'readonly') {
+      throw new Error(`vault: ${action} is disabled in readonly mode (set accessMode: "readwrite" to enable)`)
+    }
+  }
+
+  /** Current access policy and capture preference, for the Settings UI. */
+  @Remote('config')
+  async config(): Promise<{ accessMode: 'readonly' | 'readwrite'; autoCapture: boolean }> {
+    return { accessMode: this.accessMode, autoCapture: this.autoCapture }
   }
 
   /** List every entry as a non-secret summary. */
@@ -445,6 +521,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Add a new entry; returns its id and summary. */
   @Remote('add')
   async add(patch: VaultEntryPatch & { title: string }): Promise<VaultEntrySummaryWire> {
+    this.assertWritable('add')
     if (!patch.title.trim()) throw new Error('vault: title must not be empty')
     const store = await this.ensureStore()
     const entry = await store.add(patch)
@@ -454,6 +531,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Update an existing entry's fields; returns the updated summary or not-found. */
   @Remote('update')
   async update(id: string, patch: VaultEntryPatch): Promise<{ found: boolean; entry?: VaultEntrySummaryWire }> {
+    this.assertWritable('update')
     const store = await this.ensureStore()
     const updated = await store.update(id, patch)
     if (updated === undefined) return { found: false }
@@ -463,6 +541,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Delete an entry by id. */
   @Remote('delete')
   async delete(id: string): Promise<{ deleted: boolean }> {
+    this.assertWritable('delete')
     const store = await this.ensureStore()
     return { deleted: await store.delete(id) }
   }

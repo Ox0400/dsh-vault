@@ -128,6 +128,38 @@
   opacity: 0.8;
 }
 
+.modeReadonly,
+.modeReadwrite {
+  margin: 0;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-block;
+  width: fit-content;
+}
+
+.modeReadonly {
+  color: #e5484d;
+  border: 1px solid rgba(229, 72, 77, 0.5);
+}
+
+.modeReadwrite {
+  color: #30a46c;
+  border: 1px solid rgba(48, 164, 108, 0.5);
+}
+
+.emptyBox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emptyHint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin: 0;
+}
+
 .error {
   color: #e5484d;
 }

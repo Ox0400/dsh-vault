@@ -130,6 +130,21 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 | `masterPasswordEnv` | Environment variable name holding the master password (recommended) |
 | `path` | Vault file path; defaults to `$DSH_HOME/vault/default.json` |
 | `name` | Vault name for the default path (e.g. `name: work` → `$DSH_HOME/vault/work.json`) |
+| `accessMode` | Access policy for the model tools: `readwrite` (default) or `readonly`. `readonly` rejects every add/update/delete on both the tools and the Settings UI. |
+| `autoCapture` | `false` (default). When `true`, the system prompt instructs the model to detect credentials shared in conversation and — per user preference — offer to save them with `vault_add`. |
+
+Example:
+
+```yaml
+- id: vault
+  name: dsh-vault
+  config:
+    masterPasswordEnv: DSH_VAULT_PASSWORD
+    accessMode: readwrite
+    autoCapture: true
+```
+
+With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode and the empty-vault hint tells you how to get started.
 
 The vault is created automatically on first tool use; every launch re-unlocks with the master password. **Forgetting the master password = permanent data loss** (no backdoor — by design).
 

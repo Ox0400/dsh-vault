@@ -20,13 +20,16 @@ import * as VaultPlugin from '../src/index'
 const signal = new AbortController().signal
 let callCounter = 0
 
-async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): Promise<T> {
+async function withContext<T>(
+  run: (ctx: Context, dir: string) => Promise<T>,
+  pluginConfig: Record<string, unknown> = {},
+): Promise<T> {
   const ctx = new Context()
   const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-ctx-'))
   try {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(VaultPlugin, { masterPassword: 'integration-master', path: join(dir, 'vault.json') })
+    await ctx.plugin(VaultPlugin, { masterPassword: 'integration-master', path: join(dir, 'vault.json'), ...pluginConfig })
     return await run(ctx, dir)
   } finally {
     // Clean up registered plugins; the ephemeral vault dir is removed too.
@@ -191,4 +194,61 @@ test('vault requires a master password at configuration time', async () => {
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)
   }
+})
+
+test('readonly mode rejects mutations but allows reads', async () => {
+  await withContext(async ctx => {
+    const result = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-ro-${++callCounter}`),
+      name: 'vault_add',
+      arguments: { title: 'Blocked', apiKey: 'sk-123' },
+    })
+    assert.equal(result.isError, true)
+    assert.match((result.error?.message ?? ''), /readonly mode/)
+
+    // Reads still work: search returns empty list, no error.
+    const search = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-ro-${++callCounter}`),
+      name: 'vault_search',
+      arguments: { query: 'anything' },
+    })
+    assert.equal(search.isError, false)
+    assert.deepEqual((search.value as { results: unknown[] }).results, [])
+  }, { accessMode: 'readonly' })
+})
+
+test('system prompt section is registered with mode and capture guidance', async () => {
+  await withContext(async ctx => {
+    const sp = ctx.get('systemPrompt') as { sections: unknown } | undefined
+    assert.ok(sp !== undefined, 'systemPrompt service present')
+    // Assemble a prompt and assert our section text is included.
+    const assembly = await (ctx.get('systemPrompt') as {
+      assemble: (context?: unknown) => Promise<{ sections: Array<{ name: string; text: string }> }>
+    }).assemble({})
+    const vaultSection = assembly.sections.find(s => s.name === 'dsh-vault')
+    assert.ok(vaultSection, 'dsh-vault prompt section registered')
+    assert.match(vaultSection!.text, /readwrite/)
+  })
+})
+
+test('autoCapture=true adds capture guidance to the prompt', async () => {
+  await withContext(async ctx => {
+    const assembly = await (ctx.get('systemPrompt') as {
+      assemble: (context?: unknown) => Promise<{ sections: Array<{ name: string; text: string }> }>
+    }).assemble({})
+    const vaultSection = assembly.sections.find(s => s.name === 'dsh-vault')!
+    assert.match(vaultSection.text, /Auto-capture is ON/)
+    assert.match(vaultSection.text, /vault_add/)
+  }, { autoCapture: true })
+})
+
+test('VaultGateway exposes config with access mode', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const cfg = await gateway.config()
+    assert.equal(cfg.accessMode, 'readwrite')
+    assert.equal(cfg.autoCapture, false)
+  })
 })
