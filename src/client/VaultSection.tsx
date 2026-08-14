@@ -40,6 +40,9 @@ export interface VaultFullWire {
   accessToken?: string
   refreshToken?: string
   expiresAt?: number
+  rotationDays?: number
+  sensitivity?: string
+  favorite?: boolean
   otpSecret?: string
   url?: string
   notes?: string
@@ -92,11 +95,30 @@ export type VaultSectionProps =
   & InjectFace<VaultSectionInjected>
 
 /** The editable form fields we render (subset of the full wire). */
-type FormFields = Pick<
-  VaultFullWire, 'title' | 'kind' | 'username' | 'email' | 'phone' | 'password' | 'host' | 'port'
-  | 'privateKey' | 'apiKey' | 'secret' | 'accessToken' | 'refreshToken' | 'otpSecret' | 'url' | 'notes'
-  | 'icon' | 'color'
->
+type FormFields = {
+  title?: string | undefined
+  kind?: string | undefined
+  username?: string | undefined
+  email?: string | undefined
+  phone?: string | undefined
+  password?: string | undefined
+  host?: string | undefined
+  port?: string | undefined
+  privateKey?: string | undefined
+  apiKey?: string | undefined
+  secret?: string | undefined
+  accessToken?: string | undefined
+  refreshToken?: string | undefined
+  otpSecret?: string | undefined
+  url?: string | undefined
+  notes?: string | undefined
+  icon?: string | undefined
+  color?: string | undefined
+  expiresAt?: number | undefined
+  rotationDays?: number | undefined
+  sensitivity?: string | undefined
+  favorite?: boolean | undefined
+}
 
 const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'title', label: 'fieldTitle' },
@@ -114,6 +136,10 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'otpSecret', label: 'fieldOtpSecret' },
   { key: 'url', label: 'fieldUrl' },
   { key: 'notes', label: 'fieldNotes' },
+  { key: 'expiresAt', label: 'fieldExpiresAt' },
+  { key: 'rotationDays', label: 'fieldRotationDays' },
+  { key: 'sensitivity', label: 'fieldSensitivity' },
+  { key: 'favorite', label: 'fieldFavorite' },
   { key: 'icon', label: 'fieldIcon' },
   { key: 'color', label: 'fieldColor' },
 ]
@@ -274,6 +300,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         notes: entry.notes ?? '',
         icon: entry.icon ?? '',
         color: entry.color ?? '',
+        expiresAt: entry.expiresAt,
+        rotationDays: entry.rotationDays,
+        sensitivity: entry.sensitivity,
+        favorite: entry.favorite ?? false,
       })
       setTagsDraft((entry.tags ?? []).join(', '))
       setFieldsDraft(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => `${k}=${String(v)}`).join('\n') : '')
@@ -287,7 +317,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   /** Save the current form (create or update). */
   async function save(): Promise<void> {
-    if (!form.title.trim()) {
+    if (!(form.title ?? '').trim()) {
       setMessage(t('error'))
       return
     }
@@ -304,7 +334,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         fields[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
       }
       const patch: VaultPatch = {
-        title: form.title.trim(),
+        title: (form.title ?? '').trim(),
         ...(form.kind !== undefined ? { kind: form.kind } : {}),
         ...(form.username !== undefined ? { username: form.username } : {}),
         ...(form.email !== undefined ? { email: form.email } : {}),
@@ -322,6 +352,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         ...(form.notes !== undefined ? { notes: form.notes } : {}),
         ...(form.icon !== undefined ? { icon: form.icon } : {}),
         ...(form.color !== undefined ? { color: form.color } : {}),
+        ...(form.expiresAt !== undefined ? { expiresAt: form.expiresAt } : {}),
+        ...(form.rotationDays !== undefined ? { rotationDays: form.rotationDays } : {}),
+        ...(form.sensitivity !== undefined ? { sensitivity: form.sensitivity } : {}),
+        ...(form.favorite !== undefined ? { favorite: form.favorite } : {}),
         // Always send tags: an empty array clears them, and the host store
         // treats empty string values as "clear this field" too.
         tags,
@@ -538,7 +572,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('reportTitle')}</p>
           {report.rotation.length > 0 && (
-            <p className={css.reportLine}>{t('reportRotation')}: {report.rotation.length}</p>
+            <>
+              <p className={css.reportLine}>{t('reportRotation')}: {report.rotation.length}</p>
+              {(report.rotation as Array<{ title?: string; due?: string; daysLeft?: number }>).slice(0, 8).map((item, i) => (
+                <p key={i} className={css.reportSub}>
+                  · {String(item.title ?? '?')}{item.due === 'expired' ? ` (${t('dueExpired')})` : item.due === 'soon' ? ` (${t('dueExpiring')} ${item.daysLeft ?? 0}d)` : ` (${t('dueNow')})`}
+                </p>
+              ))}
+            </>
           )}
           {report.weak.length > 0 && (
             <p className={css.reportLine}>{t('reportWeak')}: {report.weak.length}</p>
@@ -764,6 +805,45 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       onClick={() => setRevealed(previous => ({ ...previous, [field.key]: !previous[field.key] }))}
                     >{revealed[field.key] ? t('hide') : t('show')}</button>
                   </span>
+                ) : field.key === 'expiresAt' ? (
+                  <input
+                    type="datetime-local"
+                    value={form.expiresAt !== undefined ? new Date(form.expiresAt).toISOString().slice(0, 16) : ''}
+                    onChange={event => {
+                      const raw = event.target.value
+                      const epoch = raw.length > 0 ? Date.parse(raw) : NaN
+                      setForm(previous => ({ ...previous, expiresAt: Number.isNaN(epoch) ? undefined : epoch }))
+                    }}
+                  />
+                ) : field.key === 'rotationDays' ? (
+                  <input
+                    type="number"
+                    min={0}
+                    max={3650}
+                    placeholder={t('rotationClearHint')}
+                    value={form.rotationDays ?? ''}
+                    onChange={event => {
+                      const raw = event.target.value
+                      setForm(previous => ({ ...previous, rotationDays: raw.length > 0 ? Number(raw) : undefined }))
+                    }}
+                  />
+                ) : field.key === 'sensitivity' ? (
+                  <select
+                    value={form.sensitivity ?? 'normal'}
+                    onChange={event => setForm(previous => ({ ...previous, sensitivity: event.target.value === 'high' ? 'high' : 'normal' }))}
+                  >
+                    <option value="normal">{t('sensitivityNormal')}</option>
+                    <option value="high">{t('sensitivityHigh')}</option>
+                  </select>
+                ) : field.key === 'favorite' ? (
+                  <label className={css.checkField}>
+                    <input
+                      type="checkbox"
+                      checked={form.favorite ?? false}
+                      onChange={event => setForm(previous => ({ ...previous, favorite: event.target.checked }))}
+                    />
+                    {t('favoriteHint')}
+                  </label>
                 ) : (
                   <input
                     type="text"

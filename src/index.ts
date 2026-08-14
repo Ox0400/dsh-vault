@@ -21,12 +21,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
-import { generatePassword } from './password.ts'
+import { generatePassword, generatePassphrase } from './password.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -584,9 +584,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   ctx.tools.register(defineTool({
     name: 'vault_generate_password',
-    description: 'Generate a cryptographically strong random password with configurable length and character classes. '
-      + 'Use this when a user needs a new password; the generated value is returned and is not stored automatically — '
-      + 'call vault_add or vault_update to persist it.',
+    description: 'Generate a cryptographically strong random password (configurable length/classes) or a '
+      + 'memorable passphrase (passphrase: true, EFF-style word list). Use when a user needs a new password; '
+      + 'the generated value is returned and is not stored automatically — call vault_add or vault_update to persist it.',
     parameters: {
       length: { type: 'integer', description: 'Total length (default 20, min = number of selected classes).' },
       lowercase: { type: 'boolean', description: 'Include lowercase (default true).' },
@@ -597,6 +597,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       group: { type: 'integer', description: 'Insert "-" every N characters (e.g. 3 → vK7-mQ2-zt9).' },
       prefix: { type: 'string', description: 'Fixed prefix prepended to the random core (site requirements).' },
       suffix: { type: 'string', description: 'Fixed suffix appended to the random core (site requirements).' },
+      passphrase: { type: 'boolean', description: 'Generate a memorable passphrase instead of a random password (ignores length/classes/group).' },
+      words: { type: 'integer', description: 'Number of words for passphrase mode (default 4, 2–12).' },
+      separator: { type: 'string', description: 'Separator between passphrase words (default "-").' },
+      wordDigits: { type: 'boolean', description: 'Append two random digits in passphrase mode (default true).' },
     },
     output: {
       schema: {
@@ -610,6 +614,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       render: (_args, value) => [{ type: 'text', text: value.password }],
     },
     async execute(args) {
+      if (args.passphrase === true) {
+        const password = generatePassphrase({
+          ...(args.words !== undefined ? { words: args.words } : {}),
+          ...(args.separator !== undefined ? { separator: args.separator } : {}),
+          ...(args.wordDigits !== undefined ? { wordDigits: args.wordDigits } : {}),
+        })
+        return { password, length: password.length }
+      }
       const password = generatePassword({
         ...(args.length !== undefined ? { length: args.length } : {}),
         ...(args.lowercase !== undefined ? { lowercase: args.lowercase } : {}),
@@ -899,7 +911,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, ${v.trashCount} trashed (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
       return s.stats()
@@ -2016,18 +2028,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_backup',
     description: 'Create a timestamped backup of the vault file (a copy of the on-disk encrypted '
-      + 'document, not a plaintext export). Returns the backup path. Safe to run anytime.',
-    parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path}` }] },
-    async execute() {
+      + 'document, not a plaintext export). Old backups beyond maxBackups (default 10) are pruned '
+      + 'automatically (newest kept). Returns the backup path and retention stats.',
+    parameters: { maxBackups: { type: 'integer', description: 'Keep at most this many backups (default 10, min 1).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, kept: { type: 'integer', required: true }, pruned: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path} (kept ${v.kept}, pruned ${v.pruned})` }] },
+    async execute(args) {
       const s = await guardStore()
       const source = resolveVaultPath(config)
-      const backup = join(dirname(source), `vault-backup-${Date.now()}.json`)
+      const dir = dirname(source)
+      const maxBackups = args.maxBackups === undefined ? 10 : args.maxBackups
+      if (!Number.isInteger(maxBackups) || maxBackups < 1 || maxBackups > 100) {
+        throw new Error('vault_backup: maxBackups must be an integer 1–100')
+      }
+      const backup = join(dir, `vault-backup-${Date.now()}.json`)
       const raw = await readFile(source, 'utf8')
-      await mkdir(dirname(backup), { recursive: true, mode: 0o700 })
+      await mkdir(dir, { recursive: true, mode: 0o700 })
       await writeFile(backup, raw, { mode: 0o600 })
+      // Retention: keep the newest maxBackups vault-backup-*.json files.
+      let backups: string[] = []
+      try {
+        const names = await readdir(dir)
+        backups = names.filter(n => /^vault-backup-\d+\.json$/.test(n))
+          .map(n => join(dir, n))
+          .sort((a, b) => b.localeCompare(a)) // newest first (timestamp in name)
+      } catch {
+        backups = []
+      }
+      backups = backups.filter(n => n !== backup)
+      let pruned = 0
+      for (const stale of backups.slice(maxBackups - 1)) {
+        try { await unlink(stale); pruned++ } catch { /* best-effort */ }
+      }
       void s
-      return { path: backup }
+      return { path: backup, kept: Math.min(backups.length + 1, maxBackups), pruned }
     },
   }))
 

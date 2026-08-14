@@ -1613,3 +1613,48 @@ test('vault_import_csv with overwrite updates existing entries instead of duplic
     await rm(dir, { recursive: true, force: true })
   })
 })
+
+test('vault_backup prunes old backups beyond maxBackups', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Retention', password: 'pw' })
+    const first = await call(ctx, 'vault_backup', {}) as { path: string; kept: number; pruned: number }
+    assert.equal(first.pruned, 0)
+    assert.equal(first.kept, 1)
+    // Two more with maxBackups 2: the oldest must be pruned.
+    const second = await call(ctx, 'vault_backup', { maxBackups: 2 }) as { path: string; kept: number; pruned: number }
+    assert.equal(second.pruned, 0)
+    const third = await call(ctx, 'vault_backup', { maxBackups: 2 }) as { path: string; pruned: number }
+    assert.equal(third.pruned, 1)
+    const { readdir } = await import('node:fs/promises')
+    const { dirname } = await import('node:path')
+    const dir = dirname(first.path)
+    const backups = (await readdir(dir)).filter(n => /^vault-backup-\d+\.json$/.test(n))
+    assert.equal(backups.length, 2, 'exactly maxBackups remain')
+    assert.ok(!backups.includes(first.path.split('/').pop()!), 'oldest backup pruned')
+  })
+})
+
+test('vault_stats reports trashCount', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Keep', password: 'pw' })
+    const gone = await call(ctx, 'vault_add', { title: 'Gone', password: 'pw' }) as { id: string }
+    await call(ctx, 'vault_delete', { id: gone.id })
+    const stats = await call(ctx, 'vault_stats', {}) as { total: number; trashCount: number }
+    assert.equal(stats.total, 1)
+    assert.equal(stats.trashCount, 1)
+  })
+})
+
+test('vault_generate_password passphrase mode returns word phrase', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_generate_password', { passphrase: true, words: 4, wordDigits: false }) as { password: string; length: number }
+    const parts = r.password.split('-')
+    assert.equal(parts.length, 4, 'four words joined by "-"')
+    for (const part of parts) {
+      assert.ok(/^[a-z]+$/.test(part), `word "${part}" is lowercase alpha`)
+    }
+    assert.equal(r.length, r.password.length)
+    const withDigits = await call(ctx, 'vault_generate_password', { passphrase: true }) as { password: string }
+    assert.ok(/\d/.test(withDigits.password), 'digits appended by default')
+  })
+})

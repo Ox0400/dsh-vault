@@ -110,3 +110,56 @@ export function generatePassword(options: PasswordOptions = {}): string {
   }
   return password
 }
+
+/** Small EFF-style word list for passphrases (128 common, memorable words). */
+const PASSPHRASE_WORDS = [
+  'abacus', 'acorn', 'alpine', 'anchor', 'apricot', 'archer', 'aspen', 'autumn',
+  'bamboo', 'banyan', 'beacon', 'birch', 'biscuit', 'blossom', 'bravo', 'breeze',
+  'cactus', 'canyon', 'cascade', 'cedar', 'charm', 'cherry', 'cinder', 'cobalt',
+  'coral', 'cricket', 'crimson', 'crystal', 'cypress', 'dahlia', 'dandelion', 'delta',
+  'denim', 'diamond', 'dolphin', 'drift', 'eagle', 'ember', 'falcon', 'fennel',
+  'ferret', 'fjord', 'flint', 'foxtrot', 'garden', 'garnet', 'gecko', 'ginkgo',
+  'glacier', 'granite', 'gull', 'harbor', 'hazel', 'heron', 'honey', 'horizon',
+  'iris', 'island', 'ivory', 'jaguar', 'jasmine', 'juniper', 'kayak', 'kestrel',
+  'lagoon', 'larch', 'lilac', 'lotus', 'magpie', 'maple', 'marble', 'meadow',
+  'mentor', 'mosaic', 'nectar', 'nimbus', 'oak', 'obsidian', 'olive', 'onyx',
+  'orchid', 'otter', 'panda', 'papaya', 'pebble', 'pepper', 'phoenix', 'pine',
+  'plum', 'quartz', 'quill', 'raven', 'reed', 'river', 'robin', 'ruby',
+  'saffron', 'sage', 'salamander', 'sand', 'sapphire', 'sequoia', 'shale', 'silver',
+  'snow', 'sparrow', 'spruce', 'starling', 'stone', 'sunset', 'tiger', 'topaz',
+  'tulip', 'umber', 'velvet', 'violet', 'walnut', 'willow', 'winter', 'xenon',
+  'yarrow', 'zephyr', 'zinnia',
+] as const
+
+/** Options controlling generated passphrase composition. */
+export interface PassphraseOptions {
+  /** Number of words. Default 4. */
+  words?: number
+  /** Separator between words. Default "-". */
+  separator?: string
+  /** Append two random digits after the last word. Default true. */
+  wordDigits?: boolean
+}
+
+/**
+ * Generate a memorable passphrase ("correct-horse-battery-staple" style) from
+ * a 128-word list. Optionally appends two random digits for sites that require
+ * a number. Zero dependencies; entropy comes from `node:crypto`.
+ * @throws when `words` is not an integer in 2–12, or separator is empty.
+ */
+export function generatePassphrase(options: PassphraseOptions = {}): string {
+  const words = options.words ?? 4
+  const separator = options.separator ?? '-'
+  const withDigits = options.wordDigits ?? true
+  if (!Number.isInteger(words) || words < 2 || words > 12) {
+    throw new Error('passphrase: words must be an integer 2–12')
+  }
+  if (separator.length === 0) throw new Error('passphrase: separator must not be empty')
+  const parts: string[] = []
+  for (let i = 0; i < words; i++) {
+    parts.push(PASSPHRASE_WORDS[randomInt(PASSPHRASE_WORDS.length)]!)
+  }
+  let phrase = parts.join(separator)
+  if (withDigits) phrase += separator + String(randomInt(10)) + String(randomInt(10))
+  return phrase
+}

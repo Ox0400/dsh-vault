@@ -51,15 +51,17 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_restore` / `vault_purge` | Bring a trashed entry back / permanently remove it from disk |
 | `vault_lock` / `vault_unlock` | Explicitly lock the vault (wipe the in-memory key) / re-unlock it |
 | `vault_totp` | Generate the current 6-digit code for a stored otpSecret (or a bare Base32 / otpauth URI) |
-| `vault_generate_password` | Generate a strong random password (length/character classes/ambiguity exclusion/grouping; `group` must be an integer ≥ 2) |
+| `vault_generate_password` | Generate a strong random password (length/classes/grouping) **or a memorable passphrase** (`passphrase: true`, EFF-style word list, `words`/`separator`/`wordDigits`) |
 | `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
+| `vault_backup` | Timestamped encrypted backup with retention: prunes old copies beyond `maxBackups` (default 10) |
 | `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
 | `vault_apply_tags` | Bulk add/remove/replace tags on every entry matching a query (dry-run supported, no secrets) |
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
 | `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials (no secrets) |
 | `vault_health` | Scan for weak passwords and credentials reused across entries (no secrets) |
+| `vault_stats` | Overview counts incl. `trashCount` (no secrets) |
 | `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |

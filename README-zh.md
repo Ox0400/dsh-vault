@@ -49,15 +49,17 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_restore` / `vault_purge` | 从回收站恢复 / 从磁盘永久移除 |
 | `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |
 | `vault_totp` | 为存储的 otpSecret（或直接传入的 Base32/otpauth URI）生成当前 6 位动态验证码 |
-| `vault_generate_password` | 生成强随机密码（长度/字符集/去歧义/分组可选；`group` 须为 ≥2 的整数） |
+| `vault_generate_password` | 生成强随机密码（长度/字符集/分组可选）**或易记口令短语**（`passphrase: true`，EFF 词表，`words`/`separator`/`wordDigits`） |
 | `vault_strength` | 零依赖密码强度评估（0–100 分，weak/fair/strong/very strong） |
 | `vault_rekey` | 原地升级 scrypt KDF 参数并重加密 |
+| `vault_backup` | 带时间戳的加密备份，支持保留策略：超过 `maxBackups`（默认 10）的旧备份自动清理 |
 | `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields；`overwrite: true` 合并字段到已有条目，不再产生重复） |
 | `vault_apply_tags` | 按查询批量增/删/替换条目标签（支持 dry-run，不含密钥） |
 | `vault_totp_uri` | 为存储的或裸 TOTP 密钥生成 otpauth:// 配置 URI |
 | `vault_switch` / `vault_list` | 按名称切换当前保险库 / 列出可用保险库 |
 | `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据（不含密钥） |
 | `vault_health` | 扫描弱密码与跨条目复用凭据（不含密钥） |
+| `vault_stats` | 概览计数，含 `trashCount`（不含密钥） |
 | `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
 | `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
 | `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 |
