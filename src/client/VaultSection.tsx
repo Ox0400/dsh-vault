@@ -142,6 +142,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [codeMap, setCodeMap] = useState<Record<string, string>>({})
   const [tagsDraft, setTagsDraft] = useState('')
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -491,9 +492,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     value={form.title ?? ''}
                     onChange={event => setForm(previous => ({ ...previous, title: event.target.value }))}
                   />
+                ) : field.key === 'password' || field.key === 'otpSecret' || field.key === 'apiKey'
+                  || field.key === 'secret' || field.key === 'accessToken' || field.key === 'refreshToken'
+                  || field.key === 'privateKey' ? (
+                  <span className={css.secretField}>
+                    <input
+                      type={revealed[field.key] ? 'text' : 'password'}
+                      value={(form[field.key] as string | undefined) ?? ''}
+                      onChange={event => setForm(previous => ({ ...previous, [field.key]: event.target.value }))}
+                    />
+                    <button
+                      type="button"
+                      className={css.revealButton}
+                      onClick={() => setRevealed(previous => ({ ...previous, [field.key]: !previous[field.key] }))}
+                    >{revealed[field.key] ? t('hide') : t('show')}</button>
+                  </span>
                 ) : (
                   <input
-                    type={field.key === 'password' || field.key === 'otpSecret' ? 'password' : 'text'}
+                    type="text"
                     value={(form[field.key] as string | undefined) ?? ''}
                     onChange={event => setForm(previous => ({ ...previous, [field.key]: event.target.value }))}
                   />
