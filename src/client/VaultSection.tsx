@@ -70,7 +70,7 @@ export interface VaultSectionInjected {
   stats: () => Promise<Record<string, unknown>>
   recent: () => Promise<unknown[]>
   backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
-  health: () => Promise<{ weak: unknown[]; reused: unknown[] }>
+  health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
@@ -163,7 +163,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
-  const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[] } | null>(null)
+  const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null } | null>(null)
+  const [dueMap, setDueMap] = useState<Record<string, { due: string; daysLeft: number }>>({})
   const [recentEvents, setRecentEvents] = useState<Array<Record<string, unknown>>>([])
   const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
   const [backupInfo, setBackupInfo] = useState<{ daysSinceBackup: number; backups: number } | null>(null)
@@ -219,7 +220,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
-        setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]) })
+        setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]), strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null })
+        const due: Record<string, { due: string; daysLeft: number }> = {}
+        for (const item of (rot ?? []) as Array<{ id?: string; due?: string; daysLeft?: number }>) {
+          if (item.id !== undefined && item.due !== undefined) due[item.id] = { due: item.due, daysLeft: item.daysLeft ?? 0 }
+        }
+        setDueMap(due)
         setRecentEntries((rc ?? []) as Array<Record<string, unknown>>)
       })
     }
@@ -611,7 +617,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : 0).map(entry => {
             const code = codeMap[entry.id]
             return (
-              <li key={entry.id} className={css.row}>
+              <li key={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}`}>
                 <div className={css.rowMain} onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}>
                   <span className={css.title}>
                     <span className={css.kindIcon}>{kindIcon(entry.kind)}</span>
@@ -621,6 +627,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     {entry.title}
                     {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
                       <span className={css.highBadge}>{t('highSensitivity')}</span>
+                    )}
+                    {dueMap[entry.id] !== undefined && (
+                      <span className={`${css.dueBadge} ${dueMap[entry.id]!.due === 'expired' ? css.badgeDanger : css.badgeWarn}`}>
+                        {dueMap[entry.id]!.due === 'expired' ? t('dueExpired') : dueMap[entry.id]!.due === 'soon' ? `${t('dueExpiring')} ${dueMap[entry.id]!.daysLeft}d` : t('dueNow')}
+                      </span>
                     )}
                   </span>
                   <span className={css.identity}>{identityLine(entry)}</span>
@@ -681,6 +692,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && (
             <span className={css.badge}>{t('highSensitivity')}: {String(vaultStats.highSensitivity)}</span>
+          )}
+          {report !== null && report.strength !== null && (
+            <span className={`${css.badge} ${report.strength.weak > 0 ? css.badgeDanger : css.badgeOk}`}>
+              {t('healthStrength')}: {report.strength.weak}W/{report.strength.fair}F/{report.strength.strong}S
+            </span>
           )}
           {report !== null && report.rotation.length > 0 && (
             <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>

@@ -68,7 +68,7 @@ export function apply(ctx: ClientContext): void {
     stats: () => invoke<Record<string, unknown>>('stats'),
     recent: () => invoke<{ entries: unknown[] }>('recent').then(r => r.entries),
     backupStatus: () => invoke<{ daysSinceBackup: number; backups: number }>('backupStatus'),
-    health: () => invoke<{ weak: unknown[]; reused: unknown[] }>('health'),
+    health: () => invoke<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>('health'),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),
     undeleteAll: () => invoke<{ restored: number }>('undeleteAll'),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),

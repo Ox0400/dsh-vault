@@ -52,7 +52,8 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_generate_password` | 生成强随机密码（长度/字符集/去歧义/分组可选；`group` 须为 ≥2 的整数） |
 | `vault_strength` | 零依赖密码强度评估（0–100 分，weak/fair/strong/very strong） |
 | `vault_rekey` | 原地升级 scrypt KDF 参数并重加密 |
-| `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields） |
+| `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields；`overwrite: true` 合并字段到已有条目，不再产生重复） |
+| `vault_apply_tags` | 按查询批量增/删/替换条目标签（支持 dry-run，不含密钥） |
 | `vault_totp_uri` | 为存储的或裸 TOTP 密钥生成 otpauth:// 配置 URI |
 | `vault_switch` / `vault_list` | 按名称切换当前保险库 / 列出可用保险库 |
 | `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据（不含密钥） |

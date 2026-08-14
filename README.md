@@ -54,7 +54,8 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_generate_password` | Generate a strong random password (length/character classes/ambiguity exclusion/grouping; `group` must be an integer ≥ 2) |
 | `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
-| `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields) |
+| `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
+| `vault_apply_tags` | Bulk add/remove/replace tags on every entry matching a query (dry-run supported, no secrets) |
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
 | `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials (no secrets) |

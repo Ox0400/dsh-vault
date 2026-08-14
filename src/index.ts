@@ -980,6 +980,61 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_apply_tags: bulk tag management across matching entries ──────────
+  ctx.tools.register(defineTool({
+    name: 'vault_apply_tags',
+    description: 'Bulk add, remove, or replace tags on every entry matching a search query. '
+      + 'Give at least one of add/remove/replace. Matches titles, usernames, emails, hosts, urls, notes, '
+      + 'tags and custom-field values (case-insensitive); empty query = every active entry. No secrets.',
+    parameters: {
+      query: { type: 'string', description: 'Search text selecting which entries to update. Omit to update all active entries.' },
+      add: { type: 'array', items: { type: 'string' }, description: 'Tags to add (union).' },
+      remove: { type: 'array', items: { type: 'string' }, description: 'Tags to remove.' },
+      replace: { type: 'array', items: { type: 'string' }, description: 'Replace the whole tag list with these tags.' },
+      dryRun: { type: 'boolean', description: 'Only report how many entries would change, without writing.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { matched: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `matched ${v.matched}, updated ${v.updated} entries` }] },
+    async execute(args) {
+      assertWritable('vault_apply_tags')
+      const add = normalizeTags(args.add ?? [])
+      const remove = normalizeTags(args.remove ?? [])
+      const replace = args.replace !== undefined ? normalizeTags(args.replace) : undefined
+      if (add.length === 0 && remove.length === 0 && replace === undefined) {
+        throw new Error('vault_apply_tags: provide at least one of add, remove, or replace')
+      }
+      const s = await guardStore()
+      const all = s.list()
+      const query = typeof args.query === 'string' ? args.query.trim() : ''
+      const matched = query.length === 0
+        ? all
+        : all.filter(e => {
+            const haystack = [e.title, e.username, e.email, e.phone, e.host, e.url, ...(e.tags ?? []), ...Object.values(e.fields ?? {})]
+              .filter((v): v is string => v !== undefined)
+              .join('\n').toLowerCase()
+            return haystack.includes(query.toLowerCase())
+          })
+      const changed: Array<{ id: string; title: string; tags: string[] }> = []
+      let updatedCount = 0
+      for (const e of matched) {
+        const current = [...(e.tags ?? [])]
+        let next: string[]
+        if (replace !== undefined) next = [...replace]
+        else {
+          next = [...current]
+          for (const t of add) if (!next.includes(t)) next.push(t)
+          next = next.filter(t => !remove.includes(t))
+        }
+        if (next.length === current.length && next.every((t, i) => t === current[i])) continue
+        updatedCount++
+        if (!args.dryRun) {
+          await s.update(e.id, { tags: next })
+          changed.push({ id: e.id, title: e.title, tags: next })
+        }
+      }
+      return { matched: matched.length, updated: updatedCount, entries: changed }
+    },
+  }))
+
   // ── vault_generate_username: random username/email suggestion ───────────────
   ctx.tools.register(defineTool({
     name: 'vault_generate_username',
@@ -1260,14 +1315,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_count: lightweight entry count ────────────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_count',
-    description: 'Return the number of active entries (optionally filtered by kind). Lightweight '
+    description: 'Return the number of active entries (optionally filtered by kind and/or tag). Lightweight '
       + 'alternative to vault_stats when you only need a count.',
-    parameters: { kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Count only this kind.' } },
+    parameters: {
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Count only this kind.' },
+      tag: { type: 'string', description: 'Count only entries carrying this tag.' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} entries` }] },
     async execute(args) {
       const s = await guardStore()
       const kind = args.kind
-      const count = kind === undefined ? s.list().length : s.list().filter(e => (e.kind ?? 'login') === kind).length
+      const tag = typeof args.tag === 'string' ? args.tag.trim() : ''
+      const count = s.list().filter(e => {
+        if (kind !== undefined && (e.kind ?? 'login') !== kind) return false
+        if (tag.length > 0 && !(e.tags ?? []).includes(tag)) return false
+        return true
+      }).length
       return { count }
     },
   }))
@@ -1416,14 +1479,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Import a browser password-manager CSV (name,url,username,password — Chrome/Firefox/'
       + 'Edge export format). Rows without a name are skipped; returns added/skipped counts.',
     parameters: { path: { type: 'string', required: true, description: 'Absolute path of the browser CSV.' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_browser')
       const s = await guardStore()
       const raw = await readFile(args.path, 'utf8')
       const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
       const rows = parseCsv(cleaned)
-      if (rows.length === 0) return { added: 0, skipped: 0 }
+      if (rows.length === 0) return { added: 0, skipped: 0, updated: 0 }
       // Header may be name,url,username,password or url,name,username,password.
       const header = rows[0]!.map(h => h.trim().toLowerCase())
       const idx = {
@@ -1432,9 +1495,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         username: header.indexOf('username'),
         password: header.indexOf('password'),
       }
-      if (idx.name < 0 || idx.password < 0) return { added: 0, skipped: rows.length - 1 }
+      if (idx.name < 0 || idx.password < 0) return { added: 0, skipped: rows.length - 1, updated: 0 }
       let added = 0
       let skipped = 0
+      let updated = 0
       const now = Date.now()
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i]!
@@ -1454,7 +1518,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         added++
       }
       await s.persist()
-      return { added, skipped }
+      return { added, skipped, updated: 0 }
     },
   }))
 
@@ -1620,7 +1684,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'an entry titled by its filename; the first line is the password, remaining lines are parsed as '
       + 'login:/email:/url: metadata. Returns added/skipped.',
     parameters: { dir: { type: 'string', required: true, description: 'Absolute pass directory.' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_wallet')
       const s = await guardStore()
@@ -1653,7 +1717,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         added++
       }
       await s.persist()
-      return { added, skipped }
+      return { added, skipped, updated: 0 }
     },
   }))
 
@@ -1978,20 +2042,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       delimiter: { type: 'string', description: 'CSV delimiter (default ",").' },
       overwrite: { type: 'boolean', description: 'Replace entries with the same title (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_csv')
       const s = await guardStore()
       const raw = await readFile(args.path, 'utf8')
       const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
       const rows = parseCsv(cleaned, args.delimiter ?? ',')
-      if (rows.length === 0) return { added: 0, skipped: 0 }
+      if (rows.length === 0) return { added: 0, skipped: 0, updated: 0 }
       const headers = rows[0]!.map(h => h.trim())
       const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
         'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'notes', 'tags',
         'kind', 'sensitivity', 'favorite', 'rotationDays'])
       let added = 0
       let skipped = 0
+      let updated = 0
       const now = Date.now()
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i]!
@@ -2032,9 +2097,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const recordKind = typeof record.kind === 'string' ? record.kind : 'login'
         // Dedupe on title + kind: the same title with a different kind is a
         // distinct entry (e.g. "prod" as ssh vs api-key).
-        const exists = s.list().some(e => e.title === title && (e.kind ?? 'login') === recordKind)
-        if (exists && !args.overwrite) {
+        const existing = s.list().find(e => e.title === title && (e.kind ?? 'login') === recordKind)
+        if (existing && !args.overwrite) {
           skipped++
+          continue
+        }
+        if (existing && args.overwrite) {
+          // overwrite: merge CSV fields into the existing entry instead of
+          // inserting a duplicate. Empty CSV cells are ignored so a partial
+          // row can never blank a credential.
+          const patch = pickDefinedFromRecord(record)
+          delete patch.title
+          await s.update(existing.id, patch as VaultEntryPatch)
+          updated++
           continue
         }
         const entry: VaultEntry = {
@@ -2048,7 +2123,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         added++
       }
       await s.persist()
-      return { added, skipped }
+      return { added, skipped, updated }
     },
   }))
 
@@ -2272,7 +2347,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Health scan findings (no secrets). */
   @Remote('health')
-  async health(): Promise<{ weak: unknown[]; reused: unknown[] }> {
+  async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }> {
     const store = await this.ensureStore()
     return store.health()
   }

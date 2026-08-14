@@ -68,6 +68,7 @@ test('dsh-vault registers all tools in the registry', async () => {
     const names = ctx.tools.schemas().map(entry => entry.name).sort()
     assert.deepEqual(names, [
       'vault_add',
+      'vault_apply_tags',
       'vault_autofill_check',
       'vault_backup',
       'vault_backup_now',
@@ -1541,5 +1542,74 @@ test('vault_search honors createdAfter / createdBefore time range', async () => 
     assert.ok(!r2.results.some(e => e.id === old.id), 'old entry excluded by future createdAfter')
     const r3 = await call(ctx, 'vault_search', { query: 'OldEntry', createdBefore: now - 86_400_000 }) as { results: Array<{ id: string }> }
     assert.ok(!r3.results.some(e => e.id === old.id), 'old entry excluded by past createdBefore')
+  })
+})
+
+test('vault_apply_tags adds, removes, and replaces tags in bulk', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'Alpha', username: 'alice', tags: ['dev'] }) as { id: string }
+    const b = await call(ctx, 'vault_add', { title: 'Beta', username: 'bob', tags: ['prod'] }) as { id: string }
+    // Add 'team' to every entry matching query 'a' (Alpha only).
+    const r1 = await call(ctx, 'vault_apply_tags', { query: 'alice', add: ['team'] }) as { matched: number; updated: number; entries: Array<{ id: string; tags: string[] }> }
+    assert.equal(r1.matched, 1)
+    assert.equal(r1.updated, 1)
+    assert.deepEqual([...r1.entries[0]!.tags].sort(), ['dev', 'team'])
+    // Replace tags on both via empty query.
+    const r2 = await call(ctx, 'vault_apply_tags', { replace: ['all'] }) as { matched: number; updated: number }
+    assert.equal(r2.matched, 2)
+    assert.equal(r2.updated, 2)
+    const a2 = await call(ctx, 'vault_get', { id: a.id }) as { entry: { tags: string[] } }
+    assert.deepEqual(a2.entry.tags, ['all'])
+    // Remove that tag: matches 2, updates 2 (tags become empty).
+    const r3 = await call(ctx, 'vault_apply_tags', { remove: ['all'] }) as { updated: number }
+    assert.equal(r3.updated, 2)
+    // dryRun never mutates.
+    const r4 = await call(ctx, 'vault_apply_tags', { add: ['dry'], dryRun: true }) as { updated: number; entries: unknown[] }
+    assert.equal(r4.updated, 2)
+    assert.equal(r4.entries.length, 0)
+    const after = await call(ctx, 'vault_search', { query: '' }) as { results: Array<{ tags?: string[] }> }
+    assert.ok(!after.results.some(e => (e.tags ?? []).includes('dry')), 'dryRun wrote nothing')
+  })
+})
+
+test('vault_count filters by kind and tag', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'G1', kind: 'api-key', tags: ['dev'] })
+    await call(ctx, 'vault_add', { title: 'G2', kind: 'api-key', tags: ['prod'] })
+    await call(ctx, 'vault_add', { title: 'G3', kind: 'ssh', tags: ['dev'] })
+    const all = await call(ctx, 'vault_count', {}) as { count: number }
+    assert.equal(all.count, 3)
+    const byKind = await call(ctx, 'vault_count', { kind: 'api-key' }) as { count: number }
+    assert.equal(byKind.count, 2)
+    const byTag = await call(ctx, 'vault_count', { tag: 'dev' }) as { count: number }
+    assert.equal(byTag.count, 2)
+    const both = await call(ctx, 'vault_count', { kind: 'api-key', tag: 'dev' }) as { count: number }
+    assert.equal(both.count, 1)
+  })
+})
+
+test('vault_import_csv with overwrite updates existing entries instead of duplicating', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csv-overwrite-'))
+    const file = join(dir, 'import.csv')
+    await writeFile(file, 'title,password,username\nsvc,oldpass,first\n')
+    const r1 = await call(ctx, 'vault_import_csv', { path: file }) as { added: number; skipped: number; updated: number }
+    assert.equal(r1.added, 1)
+    assert.equal(r1.updated, 0)
+    // Same title, new password + username: overwrite must update, not duplicate.
+    await writeFile(file, 'title,password,username\nsvc,newpass,second\n')
+    const r2 = await call(ctx, 'vault_import_csv', { path: file, overwrite: true }) as { added: number; skipped: number; updated: number }
+    assert.equal(r2.added, 0)
+    assert.equal(r2.updated, 1)
+    const listed = await call(ctx, 'vault_search', { query: '' }) as { results: Array<{ id: string }> }
+    assert.equal(listed.results.length, 1, 'no duplicate created')
+    const found = await call(ctx, 'vault_search', { query: 'svc' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { password: string; username: string } }
+    assert.equal(full.entry.password, 'newpass')
+    assert.equal(full.entry.username, 'second')
+    await rm(dir, { recursive: true, force: true })
   })
 })
