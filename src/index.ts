@@ -1601,6 +1601,50 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_wallet: import from a pass directory ──────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_wallet',
+    description: 'Import entries from a pass directory tree: each .gpg file (or plaintext file) becomes '
+      + 'an entry titled by its filename; the first line is the password, remaining lines are parsed as '
+      + 'login:/email:/url: metadata. Returns added/skipped.',
+    parameters: { dir: { type: 'string', required: true, description: 'Absolute pass directory.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_wallet')
+      const s = await guardStore()
+      let added = 0
+      let skipped = 0
+      const entries = await readdir(args.dir, { withFileTypes: true })
+      for (const ent of entries) {
+        if (!ent.isFile()) continue
+        const name = ent.name.replace(/\.gpg$/i, '')
+        if (s.list().some(e => e.title === name)) { skipped++; continue }
+        const content = await readFile(join(args.dir, ent.name), 'utf8')
+        const lines = content.split('\n')
+        const password = lines[0] ?? ''
+        const entry: VaultEntry = {
+          id: randomUUID(),
+          title: name,
+          password,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }
+        for (const line of lines.slice(1)) {
+          const m = /^(login|email|url|notes):\s*(.*)$/.exec(line.trim())
+          if (!m) continue
+          if (m[1] === 'login' && m[2]) entry.username = m[2]
+          else if (m[1] === 'email' && m[2]) entry.email = m[2]
+          else if (m[1] === 'url' && m[2]) entry.url = m[2]
+          else if (m[1] === 'notes' && m[2]) entry.notes = (entry.notes ? entry.notes + '\n' : '') + m[2]
+        }
+        s.insertDirect(entry)
+        added++
+      }
+      await s.persist()
+      return { added, skipped }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -1672,12 +1716,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Export the entire vault (including trash) as a single encrypted document under a '
       + 'separate export password (from the exportPasswordEnv config). Use for backup or migration; '
       + 'the export can be re-imported with vault_import. Never pass the password as an argument.',
-    parameters: {},
+    parameters: { ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' } },
     output: { schema: { type: 'object', additionalProperties: false, properties: { exported: { type: 'boolean', required: true }, note: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
-    async execute() {
+    async execute(args) {
       const exportPassword = resolveExportPassword(config)
       const s = await guardStore()
-      const blob = await s.exportEncrypted(exportPassword)
+      const blob = args.ids !== undefined && args.ids.length > 0
+        ? await s.exportEncrypted(exportPassword, Date.now(), new Set(args.ids))
+        : await s.exportEncrypted(exportPassword)
       const file = join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.json`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
       await writeFile(file, blob, { mode: 0o600 })
@@ -1735,12 +1781,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'secrets. Returns the lines so the caller can write them to a file (user-authorized).',
     parameters: {
       kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
       mask: { type: 'boolean', description: 'Return masked values (secrets replaced with ***) instead of the real values.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { lines: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.lines.join('\n') }] },
     async execute(args) {
       const s = await guardStore()
-      const raw = await envLines(s, args.kind)
+      const raw = await envLines(s, args.kind, args.ids)
       const lines = args.mask === true
         ? raw.map(line => line.replace(/=(.*)$/, (m, v: string) => '=' + (v.length > 8 ? v.slice(0, 4) + '***' : '***')))
         : raw
@@ -2092,6 +2139,18 @@ export class VaultGateway extends TypertRemoteService {
   async trash(): Promise<{ entries: VaultEntrySummaryWire[] }> {
     const store = await this.ensureStore()
     return { entries: store.listTrash().map(toSummary) }
+  }
+
+  /** Restore every trashed entry; returns how many were restored. */
+  @Remote('undeleteAll')
+  async undeleteAll(): Promise<{ restored: number }> {
+    this.assertWritable('undeleteAll')
+    const store = await this.ensureStore()
+    let restored = 0
+    for (const e of store.listTrash()) {
+      if (await store.restore(e.id)) restored++
+    }
+    return { restored }
   }
 
   /** Restore a trashed entry (non-secret summary returned). */
@@ -2586,12 +2645,13 @@ function totpWith(input: string, nowMs: number, period: number, digits: number):
 /** Accept tags as an array or a comma/semicolon-separated string. */
 
 /** Compute env lines for env-flagged entries (optionally kind-filtered). */
-async function envLines(store: VaultStore, kind?: string): Promise<string[]> {
+async function envLines(store: VaultStore, kind?: string, ids?: string[]): Promise<string[]> {
   const lines: string[] = []
   const seen = new Set<string>()
   const keyOf = (title: string, field: string): string => title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
   for (const entry of store.list()) {
     if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
+    if (ids !== undefined && ids.length > 0 && !ids.includes(entry.id)) continue
     if (!(entry.tags ?? []).includes('env')) continue
     for (const [field, value] of Object.entries(entry)) {
       if (typeof value !== 'string' || value.length === 0) continue

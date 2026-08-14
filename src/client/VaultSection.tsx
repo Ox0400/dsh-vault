@@ -72,6 +72,7 @@ export interface VaultSectionInjected {
   backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
   health: () => Promise<{ weak: unknown[]; reused: unknown[] }>
   restore: (id: string) => Promise<{ restored: boolean }>
+  undeleteAll: () => Promise<{ restored: number }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
 }
 
@@ -142,7 +143,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, recent, restore, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, recent, restore, undeleteAll, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -549,20 +550,35 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </ul>
       )}
       {showTrash && trashEntries.length > 0 && (
-        <button
-          type="button"
-          className={css.dangerButton}
-          onClick={() => {
-            if (!window.confirm(t('clearTrashConfirm'))) return
-            setBusy(true)
-            void Promise.all(trashEntries.map(e => remove(e.id))).then(() => {
-              void trash().then(setTrashEntries)
-              void refresh()
-              setBusy(false)
-            }, () => setBusy(false))
-          }}
-          disabled={busy || readonly}
-        >{t('clearTrash')}</button>
+        <>
+          <button
+            type="button"
+            className={css.trashButton}
+            onClick={() => {
+              setBusy(true)
+              void undeleteAll().then(() => {
+                void trash().then(setTrashEntries)
+                void refresh()
+                setBusy(false)
+              }, () => setBusy(false))
+            }}
+            disabled={busy || readonly}
+          >{t('restoreAll')}</button>
+          <button
+            type="button"
+            className={css.dangerButton}
+            onClick={() => {
+              if (!window.confirm(t('clearTrashConfirm'))) return
+              setBusy(true)
+              void Promise.all(trashEntries.map(e => remove(e.id))).then(() => {
+                void trash().then(setTrashEntries)
+                void refresh()
+                setBusy(false)
+              }, () => setBusy(false))
+            }}
+            disabled={busy || readonly}
+          >{t('clearTrash')}</button>
+        </>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (

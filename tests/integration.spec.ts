@@ -100,6 +100,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import',
       'vault_import_browser',
       'vault_import_csv',
+      'vault_import_wallet',
       'vault_last_modified',
       'vault_list',
       'vault_lock',
@@ -1461,5 +1462,42 @@ test('vault_export_wallet writes pass-compatible files', async () => {
     const content = await readFile(join(dir, 'My_Site.gpg'), 'utf8')
     assert.ok(content.includes('pw'))
     assert.ok(content.includes('login: u'))
+  })
+})
+
+test('vault_import_wallet imports pass files', async () => {
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(join(dir, 'site.gpg'), 'pw123\nlogin: user1\nurl: https://example.com\n')
+    const r = await call(ctx, 'vault_import_wallet', { dir }) as { added: number }
+    assert.equal(r.added, 1)
+    const search = await call(ctx, 'vault_search', { query: 'site' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: search.results[0]!.id }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.password, 'pw123')
+    assert.equal(full.entry.username, 'user1')
+  })
+})
+
+test('vault_export with ids exports only a subset', async () => {
+  await withContext(async ctx => {
+    process.env.DSH_VAULT_EXPORT_PW2 = 'export-pw-2'
+    const a = await call(ctx, 'vault_add', { title: 'Keep', password: 'ka' })
+    await call(ctx, 'vault_add', { title: 'Drop', password: 'da' })
+    const exported = await call(ctx, 'vault_export', { ids: [a.id as string] }) as { note: string }
+    const file = exported.note.replace('vault exported to ', '')
+    const { readFile } = await import('node:fs/promises')
+    const blob = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(blob.entries.length, 1)
+    delete process.env.DSH_VAULT_EXPORT_PW2
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW2' })
+})
+
+test('vault_get on a trashed entry returns not found', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'ToTrash', password: 'pw' })
+    await call(ctx, 'vault_delete', { id: added.id as string })
+    const r = await call(ctx, 'vault_get', { id: added.id as string }) as { found: boolean }
+    assert.equal(r.found, false)
   })
 })

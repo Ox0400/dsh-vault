@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'backupStatus', 'config', 'delete', 'get', 'health', 'history', 'list', 'recent', 'restore', 'rotation',
-      'search', 'setAccessMode', 'setAutoCapture', 'stats', 'totp', 'trash', 'update',
+      'search', 'setAccessMode', 'setAutoCapture', 'stats', 'totp', 'trash', 'undeleteAll', 'update',
     ])
   })
 })

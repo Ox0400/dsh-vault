@@ -641,14 +641,17 @@ export class VaultStore {
    * a separate export password: a portable, machine-independent document that
    * can be re-imported elsewhere. Returns the armored JSON string.
    */
-  async exportEncrypted(exportPassword: string, now = Date.now()): Promise<string> {
+  async exportEncrypted(exportPassword: string, now = Date.now(), onlyIds?: Set<string>): Promise<string> {
     if (exportPassword.length === 0) throw new Error('vault: export password must not be empty')
     const exportKdf = newKdfParams()
     const exportKey = await deriveKey(exportPassword, exportKdf)
+    const entries = onlyIds === undefined
+      ? [...this.entries.values()]
+      : [...this.entries.values()].filter(e => onlyIds.has(e.id))
     const payload = {
       exportedAt: now,
       kdf: exportKdf,
-      entries: [...this.entries.values()].map(entry => ({
+      entries: entries.map(entry => ({
         id: entry.id,
         ...encrypt(Buffer.from(JSON.stringify(entry), 'utf8'), exportKey),
       })),
