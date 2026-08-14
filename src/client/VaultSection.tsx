@@ -148,6 +148,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [kindFilter, setKindFilter] = useState('')
+  const [tagFilter, setTagFilter] = useState('')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -382,6 +383,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <option key={value} value={value}>{t(key)}</option>
           ))}
         </select>
+        <select className={css.kindFilter} value={tagFilter} onChange={e => setTagFilter(e.target.value)} aria-label={t('fieldTags')}>
+          <option value="">{t('allTags')}</option>
+          {[...new Set(state.status === 'ready' ? state.entries.flatMap(e => e.tags ?? []) : [])].sort().map(tag => (
+            <option key={tag} value={tag}>{tag}</option>
+          ))}
+        </select>
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly}>
           + {t('add')}
         </button>
@@ -524,7 +531,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>
-          {state.entries.filter(entry => kindFilter === '' || entry.kind === kindFilter).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).map(entry => {
             const code = codeMap[entry.id]
             return (
               <li key={entry.id} className={css.row}>

@@ -329,6 +329,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       query: { type: 'string', description: 'Search text; matches case-insensitively. Omit to list all (optionally filtered by kind).' },
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
+      regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
     },
     output: {
@@ -354,7 +355,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       const s = await guardStore()
       const limit = validateLimit(args.limit, 'vault_search')
-      const results = s.search(args.query ?? '', limit)
+      const results = args.regex === true
+        ? s.searchRegex(args.query ?? '', limit)
+        : s.search(args.query ?? '', limit)
       const kind = args.kind
       let filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
       if (args.favoriteOnly === true) filtered = filtered.filter(r => (r as VaultEntrySummary & { favorite?: boolean }).favorite)
@@ -421,13 +424,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       ] as const) {
         const value = args[key]
         if (value !== undefined) {
-          ;(patch as Record<string, unknown>)[key] = value
+          ;(patch as Record<string, unknown>)[key] = key === 'fields' ? cleanFieldsValue(value) ?? {} : value
         }
       }
       const updated = await s.update(args.id, patch)
       if (!updated) return { found: false }
       emitAudit('write', 'vault_update', updated.id, updated.title)
       return { found: true, entry: toSummaryJson(updated) }
+      void cleanFieldsValue
     },
   }))
 
@@ -1156,28 +1160,33 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'secrets. Returns the lines so the caller can write them to a file (user-authorized).',
     parameters: {
       kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      mask: { type: 'boolean', description: 'Return masked values (secrets replaced with ***) instead of the real values.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { lines: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.lines.join('\n') }] },
     async execute(args) {
       const s = await guardStore()
-      const lines: string[] = []
-      const seen = new Set<string>()
-      const keyOf = (title: string, field: string): string => title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
-      const kind = args.kind
-      for (const entry of s.list()) {
-        if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
-        if (!(entry.tags ?? []).includes('env')) continue
-        for (const [field, value] of Object.entries(entry)) {
-          if (typeof value !== 'string' || value.length === 0) continue
-          if (['id', 'title', 'kind', 'sensitivity', 'favorite', 'host', 'url', 'notes', 'createdAt', 'updatedAt', 'deletedAt'].includes(field)) continue
-          if (['username', 'email', 'phone', 'port', 'tags'].includes(field)) continue
-          const key = keyOf(entry.title, field)
-          if (seen.has(key)) continue // first entry wins; avoid duplicate exports
-          seen.add(key)
-          lines.push(`${key}=${shellQuote(value)}`)
-        }
-      }
+      const raw = await envLines(s, args.kind)
+      const lines = args.mask === true
+        ? raw.map(line => line.replace(/=(.*)$/, (m, v: string) => '=' + (v.length > 8 ? v.slice(0, 4) + '***' : '***')))
+        : raw
       return { lines }
+    },
+  }))
+
+  // ── vault_export_env: write env-flagged entries to a .env file ──────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_env',
+    description: 'Write env-flagged entries (tags contain "env") to a .env file at the given path '
+      + 'as KEY=VALUE lines (values shell-quoted). Returns the path and how many lines were written.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute path of the .env file to write.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, lines: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `wrote ${v.lines} lines to ${v.path}` }] },
+    async execute(args) {
+      assertWritable('vault_export_env')
+      const s = await guardStore()
+      const lines = await envLines(s)
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, lines.join('\n') + (lines.length > 0 ? '\n' : ''), { mode: 0o600 })
+      return { path: args.path, lines: lines.length }
     },
   }))
 
@@ -1962,10 +1971,44 @@ function totpWith(input: string, nowMs: number, period: number, digits: number):
 
 
 /** Accept tags as an array or a comma/semicolon-separated string. */
+
+/** Compute env lines for env-flagged entries (optionally kind-filtered). */
+async function envLines(store: VaultStore, kind?: string): Promise<string[]> {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  const keyOf = (title: string, field: string): string => title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
+  for (const entry of store.list()) {
+    if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
+    if (!(entry.tags ?? []).includes('env')) continue
+    for (const [field, value] of Object.entries(entry)) {
+      if (typeof value !== 'string' || value.length === 0) continue
+      if (['id', 'title', 'kind', 'sensitivity', 'favorite', 'host', 'url', 'notes', 'createdAt', 'updatedAt', 'deletedAt'].includes(field)) continue
+      if (['username', 'email', 'phone', 'port', 'tags'].includes(field)) continue
+      const key = keyOf(entry.title, field)
+      if (seen.has(key)) continue // first entry wins; avoid duplicate exports
+      seen.add(key)
+      lines.push(`${key}=${shellQuote(value)}`)
+    }
+  }
+  return lines
+}
+
 function normalizeTags(tags: unknown): string[] {
   if (Array.isArray(tags)) return tags.filter((t): t is string => typeof t === 'string')
   if (typeof tags === 'string') return tags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
   return []
+}
+
+
+/** Remove empty-string entries from a fields map (caller-side hygiene). */
+function cleanFieldsValue(fields: unknown): Record<string, unknown> | undefined {
+  if (typeof fields !== 'object' || fields === null || Array.isArray(fields)) return undefined
+  const clean: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(fields as Record<string, unknown>)) {
+    if (v === '') continue
+    clean[k] = v as string | number | boolean | null
+  }
+  return clean
 }
 
 function stripTimestamps(entry: VaultEntry): JsonValue {

@@ -78,6 +78,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_expiry',
       'vault_export',
       'vault_export_csv',
+      'vault_export_env',
       'vault_export_totp',
       'vault_fill',
       'vault_find',
@@ -1013,5 +1014,50 @@ test('vault_add accepts comma-separated tags string', async () => {
     const tags = search.results[0]!.tags as string[]
     assert.deepEqual(tags, ['dev', 'prod', 'ops'])
     void added
+  })
+})
+
+test('vault_export_env writes a .env file', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'stripe', apiKey: 'sk_live_xyz', tags: ['env'] })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-env-'))
+    const envPath = join(dir, '.env')
+    const r = await call(ctx, 'vault_export_env', { path: envPath }) as { lines: number }
+    assert.ok(r.lines >= 1)
+    const { readFile } = await import('node:fs/promises')
+    const content = await readFile(envPath, 'utf8')
+    assert.ok(content.includes('STRIPE_APIKEY='))
+  })
+})
+
+test('vault_search regex mode matches patterns', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'prod-db-a', host: 'a.example.com' })
+    await call(ctx, 'vault_add', { title: 'staging', host: 'b.example.com' })
+    const r = await call(ctx, 'vault_search', { query: '^prod-', regex: true }) as { results: Array<Record<string, unknown>> }
+    assert.equal(r.results.length, 1)
+    assert.equal(r.results[0]!.title, 'prod-db-a')
+  })
+})
+
+test('vault_env mask option hides secret values', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'secretapi', apiKey: 'sk_live_supersecret', tags: ['env'] })
+    const r = await call(ctx, 'vault_env', { mask: true }) as { lines: string[] }
+    const line = r.lines.find(l => l.startsWith('SECRETAPI_APIKEY='))
+    assert.ok(line !== undefined)
+    assert.ok(!line!.includes('sk_live_supersecret'))
+    assert.ok(line!.includes('***'))
+  })
+})
+
+test('vault_update strips empty values from fields', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'F', fields: { keep: 'v', drop: 'x' } })
+    await call(ctx, 'vault_update', { id: added.id as string, fields: { keep: 'v', drop: '' } })
+    const full = await call(ctx, 'vault_get', { id: added.id as string }) as { entry: Record<string, unknown> }
+    const fields = full.entry.fields as Record<string, unknown>
+    assert.equal(fields.keep, 'v')
+    assert.ok(!('drop' in fields), 'empty field value removed')
   })
 })

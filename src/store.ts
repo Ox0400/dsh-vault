@@ -314,6 +314,22 @@ export class VaultStore {
     return ranked.slice(0, limit).map(r => toSummary(r.entry))
   }
 
+  /** Search using a regular expression (case-insensitive); no secrets in results. */
+  searchRegex(pattern: string, limit = 20): VaultEntrySummary[] {
+    let re: RegExp
+    try {
+      re = new RegExp(pattern, 'i')
+    } catch {
+      return []
+    }
+    const results: VaultEntrySummary[] = []
+    for (const entry of this.list()) {
+      if (results.length >= limit) break
+      if (regexMatches(entry, re)) results.push(toSummary(entry))
+    }
+    return results
+  }
+
   /** Add a new entry; returns the stored entry with its assigned id. Empty
    * strings and empty arrays from the client form are dropped (a blank form
    * field means "not provided", not "store an empty value"). */
@@ -719,6 +735,18 @@ function relevanceRank(entry: VaultEntry, terms: string[]): number {
   if (title.startsWith(primary)) return 0
   if (title.includes(primary)) return 1
   return terms.some(term => matches(entry, term)) ? 2 : -1
+}
+
+/** Regex match across the entry's searchable fields. */
+function regexMatches(entry: VaultEntry, re: RegExp): boolean {
+  const fieldValues: string[] = []
+  collectSearchable(entry.fields ?? {}, fieldValues)
+  const haystack = [
+    entry.title, entry.kind, entry.username, entry.email, entry.phone, entry.host, entry.port,
+    entry.url, entry.notes, ...(entry.tags ?? []), ...fieldValues,
+  ].filter(Boolean).join('\n')
+  re.lastIndex = 0
+  return re.test(haystack)
 }
 
 /** Case-insensitive substring match across the entry's searchable fields. */
