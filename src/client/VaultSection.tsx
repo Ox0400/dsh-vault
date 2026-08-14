@@ -463,6 +463,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.emptyBox}>
           <p className={css.empty}>{t('empty')}</p>
           <p className={css.emptyHint}>{readonly ? t('emptyHintReadonly') : t('emptyHint')}</p>
+          {!readonly && (
+            <button type="button" className={css.addButton} onClick={startCreate}>{t('quickAdd')}</button>
+          )}
         </div>
       )}
 

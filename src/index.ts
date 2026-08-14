@@ -348,6 +348,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
       regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
+      sortBy: { type: 'string', enum: ['alpha', 'recent'], description: 'Sort results alphabetically (default) or by updatedAt desc.' },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
     },
     output: {
@@ -379,6 +380,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const kind = args.kind
       let filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
       if (args.favoriteOnly === true) filtered = filtered.filter(r => (r as VaultEntrySummary & { favorite?: boolean }).favorite)
+      if (args.sortBy === 'recent') {
+        filtered = [...filtered].sort((a, b) => {
+          const au = (a as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
+          const bu = (b as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
+          return bu - au
+        })
+      }
       return { results: filtered, total: filtered.length }
     },
   }))
@@ -1268,6 +1276,42 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_migrate_keepass: KeePass-compatible CSV export ────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_migrate_keepass',
+    description: 'Export entries in KeePass 2.x import CSV format '
+      + '(Group,Title,Username,Password,URL,Notes) for migrating into KeePass. Writes the file.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute output .csv path.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+      const rows = [['Group', 'Title', 'Username', 'Password', 'URL', 'Notes'].join(',')]
+      for (const e of s.list()) {
+        const group = e.kind === undefined ? 'General' : String(e.kind)
+        rows.push([group, e.title, e.username ?? e.email ?? '', e.password ?? '', e.url ?? '', e.notes ?? ''].map(esc).join(','))
+      }
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, rows.join('\n') + '\n', { mode: 0o600 })
+      return { path: args.path, count: rows.length - 1 }
+    },
+  }))
+
+  // ── vault_last_modified: most recently updated entries ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_last_modified',
+    description: 'List entries most recently modified (updatedAt), newest first. Similar to vault_recent '
+      + 'but includes updates (not just creation). No secrets.',
+    parameters: { limit: { type: 'number', description: 'Max results (default 10).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.entries) }] },
+    async execute(args) {
+      const s = await guardStore()
+      const limit = validateLimit(args.limit, 'vault_last_modified')
+      const entries = [...s.list()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit).map(e => toSummary(e))
+      return { entries: entries as unknown as JsonValue[] }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -1535,7 +1579,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       assertWritable('vault_import_csv')
       const s = await guardStore()
       const raw = await readFile(args.path, 'utf8')
-      const rows = parseCsv(raw, args.delimiter ?? ',')
+      const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      const rows = parseCsv(cleaned, args.delimiter ?? ',')
       if (rows.length === 0) return { added: 0, skipped: 0 }
       const headers = rows[0]!.map(h => h.trim())
       const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',

@@ -93,10 +93,12 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_history',
       'vault_import',
       'vault_import_csv',
+      'vault_last_modified',
       'vault_list',
       'vault_lock',
       'vault_mask',
       'vault_merge',
+      'vault_migrate_keepass',
       'vault_note_secret',
       'vault_notes',
       'vault_pin',
@@ -1234,5 +1236,52 @@ test('vault_describe summarizes an entry without secrets', async () => {
     assert.ok(r.description.includes('ssh'))
     assert.ok(r.description.includes('h.internal'))
     assert.ok(!r.description.includes('top-secret'))
+  })
+})
+
+test('vault_migrate_keepass writes KeePass CSV', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'K', kind: 'ssh', host: 'h', username: 'u', password: 'pw' })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-kp-'))
+    const outPath = join(dir, 'keepass.csv')
+    const r = await call(ctx, 'vault_migrate_keepass', { path: outPath }) as { count: number }
+    assert.ok(r.count >= 1)
+    const { readFile } = await import('node:fs/promises')
+    const csv = await readFile(outPath, 'utf8')
+    assert.ok(csv.startsWith('Group,Title,Username,Password,URL,Notes'))
+    assert.ok(csv.includes('ssh'))
+  })
+})
+
+test('vault_last_modified lists recently updated entries', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'First', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'Second', password: 'pw' })
+    await call(ctx, 'vault_touch', { id: a.id as string })
+    const r = await call(ctx, 'vault_last_modified', { limit: 5 }) as { entries: Array<Record<string, unknown>> }
+    assert.equal(r.entries[0]!.title, 'First', 'touched entry modified most recently')
+  })
+})
+
+test('vault_import_csv strips a UTF-8 BOM', async () => {
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bom-'))
+    const { writeFile } = await import('node:fs/promises')
+    const csvPath = join(dir, 'bom.csv')
+    await writeFile(csvPath, '\uFEFFtitle,password\nBom,pw\n')
+    const r = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number }
+    assert.equal(r.added, 1)
+    const search = await call(ctx, 'vault_search', { query: 'Bom' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(search.results.length, 1)
+  })
+})
+
+test('vault_search sortBy recent orders by updatedAt', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'Zed', password: 'pw' })
+    await call(ctx, 'vault_touch', { id: a.id as string })
+    const r = await call(ctx, 'vault_search', { query: 'Zed', sortBy: 'recent' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(r.results.length, 1)
+    assert.equal(r.results[0]!.title, 'Zed')
   })
 })
