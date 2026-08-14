@@ -130,7 +130,7 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 | `masterPasswordEnv` | Environment variable name holding the master password (recommended) |
 | `path` | Vault file path; defaults to `$DSH_HOME/vault/default.json` |
 | `name` | Vault name for the default path (e.g. `name: work` → `$DSH_HOME/vault/work.json`) |
-| `accessMode` | Access policy for the model tools: `readwrite` (default) or `readonly`. `readonly` rejects every add/update/delete on both the tools and the Settings UI. |
+| `accessMode` | Access policy for the model tools. Three states: `readonly` (mutations rejected on tools + UI), `ask` (default — reads free, every add/update/delete goes through the harness approval channel so the user confirms each write), or `auto` (automatic read-write, no per-call prompt). The Settings UI offers this exact three-way choice and persists it to `<vault dir>/access.json`. |
 | `autoCapture` | `false` (default). When `true`, the system prompt instructs the model to detect credentials shared in conversation and — per user preference — offer to save them with `vault_add`. |
 
 Example:
@@ -140,11 +140,11 @@ Example:
   name: dsh-vault
   config:
     masterPasswordEnv: DSH_VAULT_PASSWORD
-    accessMode: readwrite
+    accessMode: ask
     autoCapture: true
 ```
 
-With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode and the empty-vault hint tells you how to get started.
+With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode (read-only / ask-before-write / automatic read-write) with a dropdown to switch it, and the empty-vault hint tells you how to get started.
 
 The vault is created automatically on first tool use; every launch re-unlocks with the master password. **Forgetting the master password = permanent data loss** (no backdoor — by design).
 

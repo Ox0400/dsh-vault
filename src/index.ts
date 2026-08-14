@@ -21,6 +21,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultStore } from './store.ts'
 import { totp } from './totp.ts'
 import { generatePassword } from './password.ts'
@@ -42,10 +44,15 @@ export interface Config {
   path?: string
   /** Vault name used for the default path. */
   name?: string
-  /** Access policy for the model tools: `readwrite` (default) lets the model
-   * add/update/delete entries; `readonly` rejects every mutation and only
-   * serves search/read/TOTP. The Settings UI can switch the runtime mode. */
-  accessMode?: 'readonly' | 'readwrite'
+  /** Access policy for the model tools:
+   * - `readonly`: mutations are rejected outright (tools + UI).
+   * - `ask` (default): reads are free; each add/update/delete routes through
+   *   the harness approval channel, so the user confirms every write
+   *   ("prompt before writing").
+   * - `auto`: reads and writes both run without a per-call prompt
+   *   ("automatic read-write").
+   * The Settings UI offers this exact three-way choice. */
+  accessMode?: 'readonly' | 'ask' | 'auto'
   /** When true, the system prompt instructs the model to detect credentials
    * in the conversation (API keys, tokens, passwords) and, following user
    * preference, save them with vault_add. Defaults to false — capture is
@@ -60,22 +67,38 @@ export const Config: Schema<Config> = Schema.object({
   name: Schema.string(),
   accessMode: Schema.union([
     Schema.const('readonly'),
-    Schema.const('readwrite'),
+    Schema.const('ask'),
+    Schema.const('auto'),
   ]),
   autoCapture: Schema.boolean(),
 })
 
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   const masterPassword = resolveMasterPassword(config)
-  const accessMode = config.accessMode ?? 'readwrite'
-  const autoCapture = config.autoCapture ?? false
+  const WRITE_TOOLS = new Set(['vault_add', 'vault_update', 'vault_delete'])
+
+  /** Shared access policy; resolved once, mutated by the UI via setAccessMode. */
+  const policy = await sharedAccessPolicy(config)
 
   /** Reject mutations when the vault is in readonly mode. */
   function assertWritable(action: string): void {
-    if (accessMode === 'readonly') {
-      throw new Error(`vault: ${action} is disabled in readonly mode (set accessMode: "readwrite" to enable)`)
+    if (policy.mode === 'readonly') {
+      throw new Error(`vault: ${action} is disabled in readonly mode (set accessMode to "ask" or "auto" to enable)`)
     }
   }
+
+  /**
+   * Route writes through the harness approval channel in `ask` mode: the user
+   * confirms every add/update/delete ("prompt before writing"). `auto` allows
+   * without a prompt; `readonly` denies in assertWritable. This listener must
+   * call `next()` (waterfall event).
+   */
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    if (policy.mode === 'ask' && exec?.name !== undefined && WRITE_TOOLS.has(exec.name)) {
+      return { kind: 'ask', reason: `dsh-vault: ${exec.name} requires your confirmation in "ask" (prompt-before-write) mode` }
+    }
+    return next()
+  })
 
   /** Ensure the shared store is open (lazily on first use, so a missing
    * master password fails at the first tool call with a clear message). */
@@ -99,12 +122,16 @@ export function apply(ctx: Context, config: Config): void {
     text: () => {
       const lines = [
         '## Encrypted credential vault (dsh-vault)',
-        `Access mode: ${accessMode === 'readonly' ? 'READONLY — you may search/read/generate codes but MUST NOT add, update, or delete entries.' : 'readwrite — you may add, update, delete, search, and read entries.'}`,
+        policy.mode === 'readonly'
+          ? 'Access mode: READONLY — you may search/read/generate codes but MUST NOT add, update, or delete entries.'
+          : policy.mode === 'ask'
+            ? 'Access mode: ASK (prompt-before-write) — reads are free; every add/update/delete will ask the user for confirmation through the approval channel.'
+            : 'Access mode: AUTO (automatic read-write) — you may add, update, delete, search, and read entries without a per-call prompt.',
         'Credentials are encrypted at rest (AES-256-GCM) under a master password the user configured; never ask for that password.',
         'Use vault_search to find entries by title/username/host and vault_get (by id) to read full credentials when the task needs them.',
         'Do not repeat secrets in the conversation when a credential was obtained via vault_get.',
       ]
-      if (autoCapture) {
+      if (policy.autoCapture) {
         lines.push(
           'Auto-capture is ON: when the user shares an API key, token, password, or other credential in conversation',
           '(e.g. "my npm token is npm_…", "use this GitHub PAT"), offer to store it with vault_add under a clear title.',
@@ -446,8 +473,7 @@ export function apply(ctx: Context, config: Config): void {
     masterPassword,
     ...(config.path !== undefined ? { path: config.path } : {}),
     ...(config.name !== undefined ? { name: config.name } : {}),
-    accessMode,
-    autoCapture,
+    accessPolicy: policy,
   })
 }
 
@@ -463,16 +489,14 @@ export class VaultGateway extends TypertRemoteService {
   private readonly masterPassword: string
   private readonly vaultPath: string | undefined
   private readonly vaultName: string | undefined
-  private readonly accessMode: 'readonly' | 'readwrite'
-  private readonly autoCapture: boolean
+  private readonly accessPolicy: AccessPolicy
 
-  constructor(ctx: Context, config: Config) {
+  constructor(ctx: Context, config: Config & { accessPolicy?: AccessPolicy }) {
     super(ctx, 'vault')
     this.masterPassword = config.masterPassword ?? resolveMasterPassword(config)
     this.vaultPath = config.path
     this.vaultName = config.name
-    this.accessMode = config.accessMode ?? 'readwrite'
-    this.autoCapture = config.autoCapture ?? false
+    this.accessPolicy = config.accessPolicy ?? { mode: config.accessMode ?? 'ask', autoCapture: config.autoCapture ?? false }
   }
 
   private async ensureStore(): Promise<VaultStore> {
@@ -484,15 +508,36 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Reject mutations when the vault is in readonly mode (UI surface). */
   private assertWritable(action: string): void {
-    if (this.accessMode === 'readonly') {
-      throw new Error(`vault: ${action} is disabled in readonly mode (set accessMode: "readwrite" to enable)`)
+    if (this.accessPolicy.mode === 'readonly') {
+      throw new Error(`vault: ${action} is disabled in readonly mode (set accessMode to "ask" or "auto" to enable)`)
     }
   }
 
   /** Current access policy and capture preference, for the Settings UI. */
   @Remote('config')
-  async config(): Promise<{ accessMode: 'readonly' | 'readwrite'; autoCapture: boolean }> {
-    return { accessMode: this.accessMode, autoCapture: this.autoCapture }
+  async config(): Promise<{ accessMode: AccessMode; autoCapture: boolean }> {
+    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
+  }
+
+  /** Switch the runtime access mode from the Settings UI and persist it. */
+  @Remote('setAccessMode')
+  async setAccessMode(mode: AccessMode): Promise<{ accessMode: AccessMode; autoCapture: boolean }> {
+    if (mode !== 'readonly' && mode !== 'ask' && mode !== 'auto') {
+      throw new Error(`vault: invalid accessMode "${String(mode)}" (expected readonly, ask, or auto)`)
+    }
+    this.accessPolicy.mode = mode
+    await this.persistPolicy()
+    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
+  }
+
+  /** Persist the current policy to `<vault dir>/access.json`. */
+  private async persistPolicy(): Promise<void> {
+    const file = accessPolicyFile({
+      ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}),
+      ...(this.vaultName !== undefined ? { name: this.vaultName } : {}),
+    })
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+    await writeFile(file, JSON.stringify(this.accessPolicy, null, 2), { mode: 0o600 })
   }
 
   /** List every entry as a non-secret summary. */
@@ -637,10 +682,53 @@ function resolveMasterPassword(config: Config): string {
  */
 const sharedVaultStores = new Map<string, Promise<VaultStore>>()
 
+/** Runtime access policy shared between the model tools and the Settings UI.
+ * The `mode` may be changed from the UI (`setAccessMode`); the value is
+ * persisted to `<vault dir>/access.json` and restored on the next launch. */
+export type AccessMode = 'readonly' | 'ask' | 'auto'
+
+interface AccessPolicy {
+  mode: AccessMode
+  autoCapture: boolean
+}
+
+const sharedAccessPolicies = new Map<string, AccessPolicy>()
+
 /** Resolve the canonical vault file path for a config (path override or name). */
 function resolveVaultPath(config: Config): string {
   if (config.path !== undefined) return config.path
   return defaultVaultPath(config.name)
+}
+
+/** The `<vault dir>/access.json` path holding the persisted access policy. */
+function accessPolicyFile(config: Config): string {
+  return join(dirname(resolveVaultPath(config)), 'access.json')
+}
+
+/** Read a persisted access policy, defaulting to the configured values. */
+async function loadAccessPolicy(config: Config): Promise<AccessPolicy> {
+  const fallback: AccessPolicy = { mode: config.accessMode ?? 'ask', autoCapture: config.autoCapture ?? false }
+  const file = accessPolicyFile(config)
+  try {
+    const raw = await readFile(file, 'utf8')
+    const parsed = JSON.parse(raw) as Partial<AccessPolicy>
+    return {
+      mode: parsed.mode === 'readonly' || parsed.mode === 'ask' || parsed.mode === 'auto' ? parsed.mode : fallback.mode,
+      autoCapture: typeof parsed.autoCapture === 'boolean' ? parsed.autoCapture : fallback.autoCapture,
+    }
+  } catch {
+    return fallback
+  }
+}
+
+/** Open (or reuse) the shared access policy for one vault path. */
+async function sharedAccessPolicy(config: Config): Promise<AccessPolicy> {
+  const path = resolveVaultPath(config)
+  const existing = sharedAccessPolicies.get(path)
+  if (existing !== undefined) return existing
+  const policy = await loadAccessPolicy(config)
+  sharedAccessPolicies.set(path, policy)
+  return policy
 }
 
 /**

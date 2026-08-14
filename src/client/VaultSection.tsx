@@ -52,7 +52,8 @@ export type VaultPatch = Partial<Omit<VaultFullWire, 'id'>>
 /** Registration-side business face supplied by the plugin entry. */
 export interface VaultSectionInjected {
   t: TranslateNS<'settings.vault'>
-  config: () => Promise<{ accessMode: 'readonly' | 'readwrite'; autoCapture: boolean }>
+  config: () => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
+  setAccessMode: (mode: 'readonly' | 'ask' | 'auto') => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
   list: () => Promise<VaultSummaryWire[]>
   search: (query: string, limit?: number) => Promise<VaultSummaryWire[]>
   get: (id: string) => Promise<{ found: boolean; entry?: VaultFullWire }>
@@ -67,7 +68,8 @@ export type VaultSectionTypes = {
   entries: VaultSummaryWire[]
   fullEntry: VaultFullWire
   summaryEntry: VaultSummaryWire
-  config: { accessMode: 'readonly' | 'readwrite'; autoCapture: boolean }
+  config: { accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }
+  accessModes: Array<'readonly' | 'ask' | 'auto'>
 }
 
 /** Full component props assembled by the Settings slot renderer. */
@@ -125,7 +127,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, list, search, get, add, update, remove, totp } = props
+  const { t, config, setAccessMode, list, search, get, add, update, remove, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -136,7 +138,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [codeMap, setCodeMap] = useState<Record<string, string>>({})
   const [tagsDraft, setTagsDraft] = useState('')
-  const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'readwrite'; autoCapture: boolean } | null>(null)
+  const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -341,10 +343,36 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>
 
       {policy !== null && (
-        <p className={readonly ? css.modeReadonly : css.modeReadwrite}>
-          {readonly ? t('modeReadonly') : t('modeReadwrite')}
-          {policy.autoCapture ? ` · ${t('autoCaptureOn')}` : ` · ${t('autoCaptureOff')}`}
-        </p>
+        <div className={css.policyBar}>
+          <label className={css.policyField}>
+            <span>{t('modeLabel')}</span>
+            <select
+              value={policy.accessMode}
+              disabled={busy}
+              onChange={event => {
+                const next = event.target.value as 'readonly' | 'ask' | 'auto'
+                setBusy(true)
+                setMessage(null)
+                void setAccessMode(next).then(
+                  value => { setPolicy(value); setBusy(false) },
+                  () => { setMessage(t('error')); setBusy(false) },
+                )
+              }}
+            >
+              <option value="readonly">{t('modeReadonly')}</option>
+              <option value="ask">{t('modeAsk')}</option>
+              <option value="auto">{t('modeAuto')}</option>
+            </select>
+          </label>
+          <p className={policy.accessMode === 'readonly' ? css.modeReadonly : policy.accessMode === 'ask' ? css.modeAsk : css.modeAuto}>
+            {policy.accessMode === 'readonly'
+              ? t('modeReadonlyHint')
+              : policy.accessMode === 'ask'
+                ? t('modeAskHint')
+                : t('modeAutoHint')}
+            {policy.autoCapture ? ` · ${t('autoCaptureOn')}` : ` · ${t('autoCaptureOff')}`}
+          </p>
+        </div>
       )}
 
       {message !== null && <p role="alert" className={css.error}>{message}</p>}

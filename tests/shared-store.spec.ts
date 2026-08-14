@@ -23,7 +23,7 @@ async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): P
   try {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(VaultPlugin, { masterPassword: 'shared-test', path: join(dir, 'vault.json') })
+    await ctx.plugin(VaultPlugin, { masterPassword: 'shared-test', path: join(dir, 'vault.json'), accessMode: 'auto' })
     return await run(ctx, dir)
   } finally {
     ctx.registry.delete(VaultPlugin)

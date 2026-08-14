@@ -29,7 +29,9 @@ async function withContext<T>(
   try {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(VaultPlugin, { masterPassword: 'integration-master', path: join(dir, 'vault.json'), ...pluginConfig })
+    // CRUD tests assume writes succeed; the access-mode tests pass their own
+    // accessMode explicitly. Default to 'auto' here (no approval prompts).
+    await ctx.plugin(VaultPlugin, { masterPassword: 'integration-master', path: join(dir, 'vault.json'), accessMode: 'auto', ...pluginConfig })
     return await run(ctx, dir)
   } finally {
     // Clean up registered plugins; the ephemeral vault dir is removed too.
@@ -229,7 +231,8 @@ test('system prompt section is registered with mode and capture guidance', async
     }).assemble({})
     const vaultSection = assembly.sections.find(s => s.name === 'dsh-vault')
     assert.ok(vaultSection, 'dsh-vault prompt section registered')
-    assert.match(vaultSection!.text, /readwrite/)
+    // Default mode is 'ask' (prompt-before-write).
+    assert.match(vaultSection!.text, /Access mode: AUTO/)
   })
 })
 
@@ -244,11 +247,64 @@ test('autoCapture=true adds capture guidance to the prompt', async () => {
   }, { autoCapture: true })
 })
 
-test('VaultGateway exposes config with access mode', async () => {
+test('VaultGateway exposes config with default mode', async () => {
   await withContext(async ctx => {
     const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
     const cfg = await gateway.config()
-    assert.equal(cfg.accessMode, 'readwrite')
+    assert.equal(cfg.accessMode, 'auto')
     assert.equal(cfg.autoCapture, false)
   })
+})
+
+test('setAccessMode persists the choice and mutates the shared policy', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    // Switch to readonly — the model tools must now reject writes.
+    const after = await gateway.setAccessMode('readonly')
+    assert.equal(after.accessMode, 'readonly')
+
+    const result = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-sam-${++callCounter}`),
+      name: 'vault_add',
+      arguments: { title: 'Blocked after switch', apiKey: 'sk-1' },
+    })
+    assert.equal(result.isError, true)
+    assert.match((result.error?.message ?? ''), /readonly mode/)
+
+    // Switch back to auto — writes succeed without approval.
+    await gateway.setAccessMode('auto')
+    const ok = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-sam-${++callCounter}`),
+      name: 'vault_add',
+      arguments: { title: 'Allowed', apiKey: 'sk-2' },
+    })
+    assert.equal(ok.isError, false)
+    assert.ok((ok.value as { id: string }).id)
+  })
+})
+
+test('ask mode routes writes through the pre-execute approval gate', async () => {
+  await withContext(async ctx => {
+    // ask mode: a write must be denied when no approval service is composed
+    // (the harness seam degrades ask → deny).
+    const result = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-ask-${++callCounter}`),
+      name: 'vault_add',
+      arguments: { title: 'Needs approval', apiKey: 'sk-3' },
+    })
+    assert.equal(result.isError, true)
+    assert.match((result.error?.message ?? ''), /requires your confirmation/i)
+
+    // Reads are unaffected in ask mode.
+    const search = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-ask-${++callCounter}`),
+      name: 'vault_search',
+      arguments: { query: 'x' },
+    })
+    assert.equal(search.isError, false)
+  }, { accessMode: 'ask' })
 })

@@ -129,7 +129,8 @@
 }
 
 .modeReadonly,
-.modeReadwrite {
+.modeAsk,
+.modeAuto {
   margin: 0;
   font-size: 12px;
   padding: 4px 10px;
@@ -143,9 +144,37 @@
   border: 1px solid rgba(229, 72, 77, 0.5);
 }
 
-.modeReadwrite {
+.modeAsk {
+  color: #f5a524;
+  border: 1px solid rgba(245, 165, 36, 0.5);
+}
+
+.modeAuto {
   color: #30a46c;
   border: 1px solid rgba(48, 164, 108, 0.5);
+}
+
+.policyBar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.policyField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.policyField select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #444);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
 }
 
 .emptyBox {
