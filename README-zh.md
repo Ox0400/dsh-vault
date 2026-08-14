@@ -41,13 +41,18 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 |---|---|
 | `vault_add` | 新增条目（上述字段任意组合；空字符串/空数组字段会被忽略） |
 | `vault_get` | 按 id 读取完整条目（含全部密钥） |
-| `vault_search` | 跨标题/分类/用户名/邮箱/手机/主机/端口/URL/备注/标签/自定义字段（含数字/布尔/嵌套值）检索，返回无密摘要；`limit` 须为 1–100 的整数 |
+| `vault_search` | 跨标题/分类/用户名/邮箱/手机/主机/端口/URL/备注/标签/自定义字段（含数字/布尔/嵌套值；空格分隔多词 OR 命中）检索，返回无密摘要；`limit` 须为 1–100 的整数 |
 | `vault_update` | 按 id 更新字段（未提供的字段保留；空字符串清除该字段；`title` 可改名） |
 | `vault_delete` | 软删除条目（移入回收站，磁盘上仍加密保留） |
 | `vault_restore` / `vault_purge` | 从回收站恢复 / 从磁盘永久移除 |
 | `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |
 | `vault_totp` | 为存储的 otpSecret（或直接传入的 Base32/otpauth URI）生成当前 6 位动态验证码 |
 | `vault_generate_password` | 生成强随机密码（长度/字符集/去歧义/分组可选；`group` 须为 ≥2 的整数） |
+| `vault_strength` | 零依赖密码强度评估（0–100 分，weak/fair/strong/very strong） |
+| `vault_rekey` | 原地升级 scrypt KDF 参数并重加密 |
+| `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields） |
+| `vault_totp_uri` | 为存储的或裸 TOTP 密钥生成 otpauth:// 配置 URI |
+| `vault_switch` / `vault_list` | 按名称切换当前保险库 / 列出可用保险库 |
 | `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据（不含密钥） |
 | `vault_health` | 扫描弱密码与跨条目复用凭据（不含密钥） |
 | `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
@@ -152,7 +157,7 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
     autoCapture: true
 ```
 
-`autoCapture: true` 时，当你在对话中分享凭据（如 "我的 npm token 是 npm_…"），助手会提议存入；你同意后立即调用 `vault_add`。`autoCapture` 关闭时，只有你明确要求才保存。设置页显示当前模式（只读 / 写入前询问 / 自动读写），可用下拉切换，空库提示会引导你开始存入密钥。
+`autoCapture: true` 时，当你在对话中分享凭据（如 "我的 npm token 是 npm_…"），助手会提议存入；你同意后立即调用 `vault_add`。`autoCapture` 关闭时，只有你明确要求才保存。设置页显示当前模式（只读 / 写入前询问 / 自动读写）可用下拉切换，还有类型筛选、健康与轮换摘要、回收站视图、以及默认遮罩的密钥字段（显示/隐藏切换）。
 
 首次调用任一工具时自动创建保险库；之后每次启动用主密码重新解锁。**忘记主密码 = 数据永久丢失**（无后门，这是设计使然）。
 

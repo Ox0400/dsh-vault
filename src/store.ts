@@ -292,14 +292,15 @@ export class VaultStore {
     return this.entries.get(id)
   }
 
-  /** Search entries across text fields; returns summaries without secrets. */
+  /** Search entries across text fields; returns summaries without secrets.
+   * Multiple whitespace-separated terms match when ANY term hits (OR). */
   search(query: string, limit = 20): VaultEntrySummary[] {
-    const needle = query.trim().toLowerCase()
-    if (needle.length === 0) return []
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (terms.length === 0) return []
     const results: VaultEntrySummary[] = []
     for (const entry of this.list()) {
       if (results.length >= limit) break
-      if (matches(entry, needle)) results.push(toSummary(entry))
+      if (terms.some(term => matches(entry, term))) results.push(toSummary(entry))
     }
     return results
   }

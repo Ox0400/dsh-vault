@@ -43,13 +43,18 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 |---|---|
 | `vault_add` | Add an entry (any combination of fields; empty strings/arrays are ignored) |
 | `vault_get` | Read a full entry by id (including all secrets) |
-| `vault_search` | Search titles/categories/usernames/emails/phones/hosts/ports/URLs/notes/tags/custom fields (incl. numeric/boolean/nested values); returns secret-free summaries; `limit` must be an integer 1–100 |
+| `vault_search` | Search titles/categories/usernames/emails/phones/hosts/ports/URLs/notes/tags/custom fields (incl. numeric/boolean/nested values; whitespace-separated terms OR-match); returns secret-free summaries; `limit` must be an integer 1–100 |
 | `vault_update` | Update fields by id (unprovided fields kept; empty string clears a field; `title` is renamable) |
 | `vault_delete` | Soft-delete an entry (moves it to the trash, still encrypted on disk) |
 | `vault_restore` / `vault_purge` | Bring a trashed entry back / permanently remove it from disk |
 | `vault_lock` / `vault_unlock` | Explicitly lock the vault (wipe the in-memory key) / re-unlock it |
 | `vault_totp` | Generate the current 6-digit code for a stored otpSecret (or a bare Base32 / otpauth URI) |
 | `vault_generate_password` | Generate a strong random password (length/character classes/ambiguity exclusion/grouping; `group` must be an integer ≥ 2) |
+| `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
+| `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
+| `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields) |
+| `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
+| `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials (no secrets) |
 | `vault_health` | Scan for weak passwords and credentials reused across entries (no secrets) |
 | `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
@@ -154,7 +159,7 @@ Example:
     autoCapture: true
 ```
 
-With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode (read-only / ask-before-write / automatic read-write) with a dropdown to switch it, and the empty-vault hint tells you how to get started.
+With `autoCapture: true`, when you share a credential in chat (e.g. "my npm token is npm_…"), the assistant offers to store it; on your consent it calls `vault_add` immediately. With `autoCapture` off, credentials are only saved when you explicitly ask. The Settings UI shows the current mode (read-only / ask-before-write / automatic read-write) with a dropdown to switch it, a kind filter, a health & rotation summary, a trash view, and masked secret fields with a Show/Hide toggle.
 
 The vault is created automatically on first tool use; every launch re-unlocks with the master password. **Forgetting the master password = permanent data loss** (no backdoor — by design).
 

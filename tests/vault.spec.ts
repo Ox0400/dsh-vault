@@ -464,3 +464,17 @@ test('store: rekey upgrades KDF and keeps all entries readable', async () => {
     assert.equal(reloaded.list().find(e => e.title === 'One')?.password, 'pw-1')
   })
 })
+
+test('store: search matches multiple whitespace-separated terms (OR)', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    await vault.add({ title: 'GitHub personal', username: 'ada', tags: ['dev'] })
+    await vault.add({ title: 'AWS prod', username: 'deploy', tags: ['prod'] })
+    // Single-term behavior unchanged.
+    assert.equal(vault.search('github').length, 1)
+    // Multi-term OR: either term may hit either entry.
+    assert.equal(vault.search('github aws').length, 2)
+    assert.equal(vault.search('github deploy').length, 2)
+    assert.equal(vault.search('nothing here').length, 0)
+  })
+})
