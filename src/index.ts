@@ -19,12 +19,15 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultStore } from './store.ts'
 import { totp } from './totp.ts'
 import { generatePassword } from './password.ts'
+
+/** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
+ * the published bundle builds without depending on the dsh-session package). */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
 export const name = 'dsh-vault'
 export const inject = ['tools']
