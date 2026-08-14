@@ -1658,3 +1658,42 @@ test('vault_generate_password passphrase mode returns word phrase', async () => 
     assert.ok(/\d/.test(withDigits.password), 'digits appended by default')
   })
 })
+
+test('vault_quick_add supports tags and notes', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_quick_add', { title: 'QuickTags', kind: 'api-key', secret: 'sk-1', tags: ['dev', 'ci'], notes: 'built by CI' }) as { id: string }
+    const full = await call(ctx, 'vault_get', { id: r.id }) as { entry: { tags: string[]; notes: string; apiKey: string } }
+    assert.deepEqual([...full.entry.tags].sort(), ['ci', 'dev'])
+    assert.equal(full.entry.notes, 'built by CI')
+    assert.equal(full.entry.apiKey, 'sk-1')
+  })
+})
+
+test('vault_merge keepSource preserves the source entry', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'MergSrc', password: 'pw-a' }) as { id: string }
+    const b = await call(ctx, 'vault_add', { title: 'MergDst', username: 'u' }) as { id: string }
+    const r = await call(ctx, 'vault_merge', { fromId: a.id, toId: b.id, keepSource: true }) as { merged: boolean }
+    assert.equal(r.merged, true)
+    const mergedFull = await call(ctx, 'vault_get', { id: b.id }) as { entry: { password?: string } }
+    assert.equal(mergedFull.entry.password, 'pw-a', 'gap filled from source')
+    const exists = await call(ctx, 'vault_get', { id: a.id }) as { found: boolean }
+    assert.equal(exists.found, true, 'source kept')
+    // Default (no keepSource) deletes the source.
+    const c = await call(ctx, 'vault_add', { title: 'MergSrc2', password: 'pw-b' }) as { id: string }
+    const d = await call(ctx, 'vault_add', { title: 'MergDst2' }) as { id: string }
+    await call(ctx, 'vault_merge', { fromId: c.id, toId: d.id })
+    const gone = await call(ctx, 'vault_get', { id: c.id }) as { found: boolean }
+    assert.equal(gone.found, false, 'source deleted by default')
+  })
+})
+
+test('vault_expiry with 0 clears the expiry', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'ExpClear', expiresAt: Date.now() + 86_400_000 }) as { id: string }
+    const cleared = await call(ctx, 'vault_expiry', { id: added.id, expiresAt: 0 }) as { updated: boolean }
+    assert.equal(cleared.updated, true)
+    const full = await call(ctx, 'vault_get', { id: added.id }) as { entry: { expiresAt?: number } }
+    assert.ok(!('expiresAt' in full.entry), 'expiry removed')
+  })
+})

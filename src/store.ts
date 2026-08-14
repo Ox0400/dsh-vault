@@ -414,12 +414,18 @@ export class VaultStore {
       }
     }
     this.entries.set(id, updated)
-    // rotationDays: 0 means "never rotate" — clear the field entirely instead
-    // of keeping a zero interval that would report due forever.
+    // rotationDays: 0 means "never rotate"; expiresAt: 0 means "no expiry".
+    // Clear the field entirely instead of keeping a zero value that would
+    // report due/expired forever.
+    const record2 = updated as unknown as Record<string, unknown>
     if ('rotationDays' in patch && (patch.rotationDays ?? 0) === 0) {
-      delete (updated as unknown as Record<string, unknown>).rotationDays
-      this.entries.set(id, updated)
+      delete record2.rotationDays
     }
+    if ('expiresAt' in patch && (patch.expiresAt ?? 0) === 0) {
+      delete record2.expiresAt
+    }
+    // `updated` is the same object stored in the map, so the deletes above
+    // already took effect in place.
     this.recordHistory('update', id, updated.title)
     await this.persist()
     return updated
@@ -471,7 +477,7 @@ export class VaultStore {
    * their last update, or whose `expiresAt` is near/past. Returns only
    * summaries plus the computed due state (no secrets).
    */
-  rotationReport(now = Date.now()): Array<VaultEntrySummary & { due: 'expired' | 'due' | 'soon'; daysLeft: number }> {
+  rotationReport(now = Date.now(), soonWindowDays = 7): Array<VaultEntrySummary & { due: 'expired' | 'due' | 'soon'; daysLeft: number }> {
     const report: Array<VaultEntrySummary & { due: 'expired' | 'due' | 'soon'; daysLeft: number }> = []
     for (const entry of this.list()) {
       const base = entry.updatedAt ?? entry.createdAt
@@ -488,12 +494,12 @@ export class VaultStore {
         daysLeft = 0
       } else if (expiresAt !== undefined) {
         daysLeft = Math.ceil((expiresAt - now) / 86_400_000)
-        if (daysLeft <= 7) {
+        if (daysLeft <= soonWindowDays) {
           due = 'soon'
         }
       } else if (rotationAt !== undefined) {
         daysLeft = Math.ceil((rotationAt - now) / 86_400_000)
-        if (daysLeft <= 7) {
+        if (daysLeft <= soonWindowDays) {
           due = 'soon'
         }
       } else {
@@ -557,7 +563,7 @@ export class VaultStore {
 
   /** Merge `fromId` into `toId`: non-empty fields of `from` fill gaps in `to`,
    * then `from` is purged. Returns the merged entry or undefined. */
-  async merge(fromId: string, toId: string): Promise<VaultEntry | undefined> {
+  async merge(fromId: string, toId: string, options: { keepSource?: boolean } = {}): Promise<VaultEntry | undefined> {
     const from = this.entries.get(fromId)
     const to = this.entries.get(toId)
     if (!from || !to || from.deletedAt !== undefined || to.deletedAt !== undefined) return undefined
@@ -571,7 +577,9 @@ export class VaultStore {
     }
     merged.updatedAt = Date.now()
     this.entries.set(toId, merged)
-    this.entries.delete(fromId)
+    if (options.keepSource !== true) {
+      this.entries.delete(fromId)
+    }
     this.recordHistory('merge', toId, to.title)
     await this.persist()
     return merged

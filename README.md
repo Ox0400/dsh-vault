@@ -59,8 +59,11 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_apply_tags` | Bulk add/remove/replace tags on every entry matching a query (dry-run supported, no secrets) |
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
 | `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
-| `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials (no secrets) |
+| `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials; `soonWindowDays` (1-90, default 7) tunes the soon horizon (no secrets) |
 | `vault_health` | Scan for weak passwords and credentials reused across entries (no secrets) |
+| `vault_merge` | Merge one entry into another; `keepSource: true` keeps the source after merging |
+| `vault_quick_add` | Fast capture (title + one secret) with optional tags/notes |
+| `vault_expiry` | Set/clear expiry (`expiresAt: 0` removes it) |
 | `vault_stats` | Overview counts incl. `trashCount` (no secrets) |
 | `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |

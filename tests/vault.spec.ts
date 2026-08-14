@@ -492,3 +492,33 @@ test('store: rotationDays 0 clears rotation (never rotate)', async () => {
     assert.ok(!report.some(r => r.title === 'Rot'), 'no rotation due for cleared entry')
   })
 })
+
+test('store: expiresAt 0 clears expiry and rotationReport honors soonWindowDays', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const now = Date.now()
+    const e = await vault.add({ title: 'Window', password: 'pw', expiresAt: now + 3 * 86_400_000 })
+    // soon within the default 7-day window.
+    assert.equal(vault.rotationReport(now).find(r => r.title === 'Window')?.due, 'soon')
+    // not soon when the window is 2 days.
+    assert.ok(!vault.rotationReport(now, 2).some(r => r.title === 'Window'), 'outside 2-day window')
+    // expiresAt: 0 clears the expiry entirely.
+    await vault.update(e.id, { expiresAt: 0 })
+    const updated = vault.get(e.id)!
+    assert.ok(!('expiresAt' in updated), 'expiresAt cleared by 0')
+    assert.ok(!vault.rotationReport(now).some(r => r.title === 'Window'), 'no expiry after clear')
+  })
+})
+
+test('store: merge with keepSource keeps the source entry', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const a = await vault.add({ title: 'Src', password: 'pw-a', username: 'src-user' })
+    const b = await vault.add({ title: 'Dst', username: 'dst-user' })
+    const merged = await vault.merge(a.id, b.id, { keepSource: true })
+    assert.equal(merged?.title, 'Dst')
+    assert.equal(merged?.password, 'pw-a', 'gap filled from source')
+    assert.ok(vault.get(a.id) !== undefined, 'source kept with keepSource')
+    assert.equal(vault.list().length, 2)
+  })
+})

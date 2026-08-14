@@ -372,6 +372,15 @@
   line-height: 1;
   padding: 4px 10px;
 }
+.backupButton {
+  border: 1px solid var(--dsh-color-border, #ccc);
+  border-radius: 999px;
+  background: var(--dsh-color-surface-2, #f7f7f8);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 10px;
+}
 .badgeOk {
   border-color: #2e9e5b;
   color: #2e9e5b;

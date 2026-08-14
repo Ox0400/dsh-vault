@@ -772,8 +772,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       assertWritable('vault_expiry')
       const s = await guardStore()
-      const patch: VaultEntryPatch = args.expiresAt === 0 ? { expiresAt: '' as unknown as number } : { expiresAt: args.expiresAt }
-      const updated = await s.update(args.id, patch)
+      const updated = await s.update(args.id, { expiresAt: args.expiresAt })
       return { updated: updated !== undefined }
     },
   }))
@@ -1195,6 +1194,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind (default login).' },
       secret: { type: 'string', description: 'The secret value: stored into apiKey for api-key, password for login, secret otherwise.' },
       username: { type: 'string', description: 'Optional username.' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Searchable tags.' },
+      notes: { type: 'string', description: 'Optional free-form notes.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, title: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `added ${v.title} (id: ${v.id})` }] },
     async execute(args) {
@@ -1209,6 +1210,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         title: args.title.trim(),
         kind,
         ...(args.username !== undefined ? { username: args.username } : {}),
+        ...(args.tags !== undefined ? { tags: normalizeTags(args.tags) } : {}),
+        ...(args.notes !== undefined ? { notes: args.notes } : {}),
         ...(kind === 'api-key' ? { apiKey: args.secret } : kind === 'login' ? { password: args.secret } : { secret: args.secret }),
       })
       emitAudit('write', 'vault_quick_add', entry.id, entry.title)
@@ -1220,16 +1223,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_merge',
     description: 'Merge one entry INTO another (Bitwarden-style duplicate cleanup): non-empty fields of '
-      + 'the source fill gaps in the target, then the source is permanently removed. Returns the merged summary.',
+      + 'the source fill gaps in the target, then the source is permanently removed (unless keepSource). '
+      + 'Returns the merged summary.',
     parameters: {
       fromId: { type: 'string', required: true, description: 'Source entry id (merged into the target, then deleted).' },
       toId: { type: 'string', required: true, description: 'Target entry id (kept, gaps filled).' },
+      keepSource: { type: 'boolean', description: 'Keep the source entry after merging (default false = delete it).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { merged: { type: 'boolean', required: true }, entry: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.merged ? 'entries merged' : 'merge failed (one/both not found or in trash)' }] },
     async execute(args) {
       assertWritable('vault_merge')
       const s = await guardStore()
-      const merged = await s.merge(args.fromId, args.toId)
+      const merged = await s.merge(args.fromId, args.toId, { keepSource: args.keepSource === true })
       return merged === undefined ? { merged: false } : { merged: true, entry: toSummaryJson(merged) }
     },
   }))
@@ -1789,15 +1794,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
     description: 'Report credentials that are expired, due for rotation (rotationDays elapsed), '
-      + 'or expiring within 7 days. Returns summaries with a due state — never secrets.',
-    parameters: {},
+      + 'or expiring soon. Returns summaries with a due state — never secrets.',
+    parameters: { soonWindowDays: { type: 'integer', description: 'How many days ahead counts as "expiring soon" (default 7, 1–90).' } },
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } },
       render: (_a, v) => [{ type: 'text', text: v.entries.length === 0 ? 'no rotation items' : JSON.stringify(v.entries) }],
     },
-    async execute() {
+    async execute(args) {
       const s = await guardStore()
-      return { entries: s.rotationReport() }
+      const window = args.soonWindowDays === undefined ? 7 : args.soonWindowDays
+      if (!Number.isInteger(window) || window < 1 || window > 90) {
+        throw new Error('vault_rotation: soonWindowDays must be an integer 1–90')
+      }
+      return { entries: s.rotationReport(Date.now(), window) }
     },
   }))
 
@@ -2334,6 +2343,27 @@ export class VaultGateway extends TypertRemoteService {
   }
 
   /** Days since last backup + backup count (no secrets). */
+  @Remote('backup')
+  async backup(maxBackups = 10): Promise<{ path: string; kept: number; pruned: number }> {
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
+    const source = this.vaultPath ?? defaultVaultPath(this.vaultName)
+    const backup = join(dir, `vault-backup-${Date.now()}.json`)
+    const raw = await readFile(source, 'utf8')
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    await writeFile(backup, raw, { mode: 0o600 })
+    let total = 1
+    let pruned = 0
+    try {
+      const names = (await readdir(dir)).filter(n => /^vault-backup-\d+\.json$/.test(n))
+        .map(n => join(dir, n)).sort((a, b) => b.localeCompare(a))
+      total = names.length
+      for (const stale of names.filter(n => n !== backup).slice(maxBackups - 1)) {
+        try { await unlink(stale); pruned++ } catch { /* best-effort */ }
+      }
+    } catch { /* no dir yet */ }
+    return { path: backup, kept: Math.max(1, Math.min(total, maxBackups)), pruned }
+  }
+
   @Remote('backupStatus')
   async backupStatus(): Promise<{ daysSinceBackup: number; backups: number }> {
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
@@ -2373,9 +2403,10 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Rotation/expiry report (no secrets). */
   @Remote('rotation')
-  async rotation(): Promise<{ entries: unknown[] }> {
+  async rotation(soonWindowDays?: number): Promise<{ entries: unknown[] }> {
     const store = await this.ensureStore()
-    return { entries: store.rotationReport() }
+    const window = soonWindowDays === undefined ? 7 : soonWindowDays
+    return { entries: store.rotationReport(Date.now(), window) as unknown as unknown[] }
   }
 
   /** Health scan findings (no secrets). */

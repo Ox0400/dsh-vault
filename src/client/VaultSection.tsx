@@ -73,6 +73,7 @@ export interface VaultSectionInjected {
   stats: () => Promise<Record<string, unknown>>
   recent: () => Promise<unknown[]>
   backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
+  backup: (maxBackups?: number) => Promise<{ path: string; kept: number; pruned: number }>
   health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -169,7 +170,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, recent, restore, undeleteAll, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -197,6 +198,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [recentEntries, setRecentEntries] = useState<Array<Record<string, unknown>>>([])
 
   const readonly = policy?.accessMode === 'readonly'
+
+  /** Run an encrypted backup now and refresh the backup-age badge. */
+  async function backupNow(): Promise<void> {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await backup(10)
+      setBackupInfo({ daysSinceBackup: 0, backups: result.kept })
+      setMessage(`${t('backupDone')} (${result.kept} kept, ${result.pruned} pruned)`)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     let current = true
@@ -756,6 +773,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               {t('healthBackup')}: {backupInfo.daysSinceBackup}d
             </span>
           )}
+          <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>
+            {t('backupNow')}
+          </button>
         </div>
       )}
       {state.status === 'ready' && (

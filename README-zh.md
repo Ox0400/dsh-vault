@@ -57,8 +57,11 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_apply_tags` | 按查询批量增/删/替换条目标签（支持 dry-run，不含密钥） |
 | `vault_totp_uri` | 为存储的或裸 TOTP 密钥生成 otpauth:// 配置 URI |
 | `vault_switch` / `vault_list` | 按名称切换当前保险库 / 列出可用保险库 |
-| `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据（不含密钥） |
+| `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据；`soonWindowDays`（1-90，默认 7）调整即将窗口（不含密钥） |
 | `vault_health` | 扫描弱密码与跨条目复用凭据（不含密钥） |
+| `vault_merge` | 合并一个条目到另一个；`keepSource: true` 保留源条目 |
+| `vault_quick_add` | 快速录入（标题 + 一个密钥），支持 tags/notes |
+| `vault_expiry` | 设置/清除过期（`expiresAt: 0` 移除） |
 | `vault_stats` | 概览计数，含 `trashCount`（不含密钥） |
 | `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
 | `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
