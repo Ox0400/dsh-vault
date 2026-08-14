@@ -238,3 +238,34 @@
   cursor: pointer;
   font-size: 13px;
 }
+
+.reportBox {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 165, 36, 0.4);
+  font-size: 12px;
+}
+
+.reportTitle {
+  font-weight: 600;
+  margin: 0;
+}
+
+.reportLine {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.trashButton {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #444);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  align-self: flex-start;
+}

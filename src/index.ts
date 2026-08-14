@@ -58,6 +58,13 @@ export interface Config {
    * preference, save them with vault_add. Defaults to false — capture is
    * opt-in because auto-writing secrets needs explicit consent. */
   autoCapture?: boolean
+  /** Auto-lock: after this many seconds of inactivity the vault re-locks and
+   * every read/write requires vault_unlock again. `0`/absent disables. */
+  lockTimeoutSeconds?: number
+  /** Name of an environment variable holding the export/import password for
+   * vault_export / vault_import. When absent, those tools require the master
+   * password value to be passed explicitly (not recommended). */
+  exportPasswordEnv?: string
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -71,11 +78,14 @@ export const Config: Schema<Config> = Schema.object({
     Schema.const('auto'),
   ]),
   autoCapture: Schema.boolean(),
+  lockTimeoutSeconds: Schema.number(),
+  exportPasswordEnv: Schema.string(),
 })
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const masterPassword = resolveMasterPassword(config)
   const WRITE_TOOLS = new Set(['vault_add', 'vault_update', 'vault_delete'])
+  const lockTimeoutSeconds = config.lockTimeoutSeconds ?? 0
 
   /** Shared access policy; resolved once, mutated by the UI via setAccessMode. */
   const policy = await sharedAccessPolicy(config)
@@ -103,12 +113,30 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   /** Ensure the shared store is open (lazily on first use, so a missing
    * master password fails at the first tool call with a clear message). */
   async function ensureStore(): Promise<VaultStore> {
-    return sharedVaultStore(masterPassword, config)
+    const store = await sharedVaultStore(masterPassword, config)
+    // Install the auto-lock policy once per store instance.
+    if (lockTimeoutSeconds > 0) store.setAutoLock(lockTimeoutSeconds * 1000)
+    return store
   }
 
-  /** Read a full entry (with secrets) by id. */
+  /** Guard every tool: enforce auto-lock (relock when idle, refuse when
+   * locked) and touch the activity timestamp. */
+  async function guardStore(): Promise<VaultStore> {
+    const store = await ensureStore()
+    if (store.expired) {
+      store.lock()
+      throw new Error('vault is locked (idle timeout) — call vault_unlock to re-open it')
+    }
+    if (store.isLocked) {
+      throw new Error('vault is locked — call vault_unlock to re-open it')
+    }
+    store.touch()
+    return store
+  }
+
+  /** Read a full entry (with secrets) by id (respects locking). */
   async function readEntry(id: string): Promise<VaultEntry | undefined> {
-    const s = await ensureStore()
+    const s = await guardStore()
     return s.get(id)
   }
 
@@ -199,7 +227,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       assertWritable('vault_add')
       if (!args.title.trim()) throw new Error('vault_add: title must not be empty')
-      const s = await ensureStore()
+      const s = await guardStore()
       const entry = await s.add({
         title: args.title.trim(),
         ...(args.kind !== undefined ? { kind: args.kind } : {}),
@@ -281,7 +309,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }],
     },
     async execute(args) {
-      const s = await ensureStore()
+      const s = await guardStore()
       const limit = validateLimit(args.limit, 'vault_search')
       const results = s.search(args.query, limit)
       return { results, total: results.length }
@@ -336,7 +364,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
     async execute(args) {
       assertWritable('vault_update')
-      const s = await ensureStore()
+      const s = await guardStore()
       const patch: VaultEntryPatch = {}
       for (const key of [
         'title', 'kind', 'username', 'email', 'phone', 'password', 'host', 'port', 'privateKey',
@@ -372,7 +400,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
     async execute(args) {
       assertWritable('vault_delete')
-      const s = await ensureStore()
+      const s = await guardStore()
       const deleted = await s.delete(args.id)
       return { deleted, message: deleted ? 'entry deleted' : 'entry not found' }
     },
@@ -464,6 +492,200 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_lock / vault_unlock: explicit lock & unlock ──────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_lock',
+    description: 'Lock the vault immediately: wipe the derived key from memory so every '
+      + 'subsequent read/write requires vault_unlock. Use when leaving the machine.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { locked: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.locked ? 'vault locked' : 'vault not unlocked' }] },
+    async execute() {
+      const s = await ensureStore()
+      const was = s.isLocked
+      s.lock()
+      return { locked: !was }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'vault_unlock',
+    description: 'Unlock the vault with the master password (the deployment owns the password; '
+      + 'the model never supplies it). Needed after an explicit vault_lock or an auto-lock idle timeout.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { unlocked: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.unlocked ? 'vault unlocked' : 'vault already unlocked' }] },
+    async execute() {
+      const s = await ensureStore()
+      if (!s.isLocked) return { unlocked: false }
+      await s.unlock()
+      return { unlocked: true }
+    },
+  }))
+
+  // ── vault_rotation: expiry / rotation report ───────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_rotation',
+    description: 'Report credentials that are expired, due for rotation (rotationDays elapsed), '
+      + 'or expiring within 7 days. Returns summaries with a due state — never secrets.',
+    parameters: {},
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } },
+      render: (_a, v) => [{ type: 'text', text: v.entries.length === 0 ? 'no rotation items' : JSON.stringify(v.entries) }],
+    },
+    async execute() {
+      const s = await guardStore()
+      return { entries: s.rotationReport() }
+    },
+  }))
+
+  // ── vault_health: weak / reused credential scan ────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_health',
+    description: 'Scan the vault for weak passwords (shorter than 12 chars) and credentials reused '
+      + 'across entries. Returns non-secret findings (entry summaries grouped by the reused value).',
+    parameters: {},
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { weak: { type: 'array', required: true, items: { type: 'json' } }, reused: { type: 'array', required: true, items: { type: 'json' } } } },
+      render: (_a, v) => [{ type: 'text', text: `weak: ${v.weak.length}, reused groups: ${v.reused.length}` }],
+    },
+    async execute() {
+      const s = await guardStore()
+      return s.health()
+    },
+  }))
+
+  // ── vault_restore / vault_purge: trash management ──────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_restore',
+    description: 'Restore a soft-deleted entry from the vault trash back into the active set.',
+    parameters: { id: { type: 'string', required: true, description: 'The trashed entry id.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { restored: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.restored ? 'entry restored' : 'entry not found in trash' }] },
+    async execute(args) {
+      assertWritable('vault_restore')
+      const s = await guardStore()
+      return { restored: await s.restore(args.id) }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'vault_purge',
+    description: 'Permanently delete an entry (active or trashed). Cannot be undone — prefer vault_delete '
+      + '(soft delete) unless the entry must be removed from disk.',
+    parameters: { id: { type: 'string', required: true, description: 'The entry id to purge.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { purged: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.purged ? 'entry purged' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_purge')
+      const s = await guardStore()
+      return { purged: await s.purge(args.id) }
+    },
+  }))
+
+  // ── vault_export / vault_import: portable encrypted transfer ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export',
+    description: 'Export the entire vault (including trash) as a single encrypted document under a '
+      + 'separate export password (from the exportPasswordEnv config). Use for backup or migration; '
+      + 'the export can be re-imported with vault_import. Never pass the password as an argument.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { exported: { type: 'boolean', required: true }, note: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
+    async execute() {
+      const exportPassword = resolveExportPassword(config)
+      const s = await guardStore()
+      const blob = await s.exportEncrypted(exportPassword)
+      const file = join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.json`)
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+      await writeFile(file, blob, { mode: 0o600 })
+      return { exported: true, note: `vault exported to ${file}` }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'vault_import',
+    description: 'Import a previously exported vault document (see vault_export), merging entries by '
+      + 'id. Pass the document path; the export password comes from the exportPasswordEnv config.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute path of the exported vault JSON file.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { imported: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.imported} entries` }] },
+    async execute(args) {
+      assertWritable('vault_import')
+      const exportPassword = resolveExportPassword(config)
+      const s = await guardStore()
+      const blob = await readFile(args.path, 'utf8')
+      const count = await s.importEncrypted(blob, exportPassword)
+      return { imported: count }
+    },
+  }))
+
+  // ── vault_fill: find the credential that fits a target ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_fill',
+    description: 'Find the vault entry that fits a target (host/URL/username/title) and return the '
+      + 'ready-to-use credentials (secrets included, as the caller needs them for the actual login). '
+      + 'Use instead of vault_search+vault_get when you know what you are connecting to.',
+    parameters: {
+      target: { type: 'string', required: true, description: 'Host, URL, username, or title to match.' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, entry: { type: 'json' } } },
+      render: (_a, v) => [{ type: 'text', text: v.found ? `matched: ${(v.entry as { title?: string })?.title ?? 'entry'}` : 'no matching entry' }],
+    },
+    async execute(args) {
+      const s = await guardStore()
+      const needle = args.target.trim().toLowerCase()
+      for (const entry of s.list()) {
+        const haystack = [entry.title, entry.host, entry.url, entry.username, entry.email].filter(Boolean).join(' ').toLowerCase()
+        if (needle.length > 0 && haystack.includes(needle)) {
+          return { found: true, entry: stripTimestamps(entry) }
+        }
+      }
+      return { found: false }
+    },
+  }))
+
+  // ── vault_env: environment-variable export ─────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_env',
+    description: 'Render entries flagged for environment export (tags contain "env") as KEY=VALUE lines '
+      + 'suitable for .env or export statements. Keys derive from the title + field name; values are the '
+      + 'secrets. Returns the lines so the caller can write them to a file (user-authorized).',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { lines: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.lines.join('\n') }] },
+    async execute() {
+      const s = await guardStore()
+      const lines: string[] = []
+      const keyOf = (title: string, field: string): string => title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
+      for (const entry of s.list()) {
+        if (!(entry.tags ?? []).includes('env')) continue
+        for (const [field, value] of Object.entries(entry)) {
+          if (typeof value !== 'string' || value.length === 0) continue
+          if (['id', 'title', 'kind', 'sensitivity', 'host', 'url', 'notes', 'createdAt', 'updatedAt', 'deletedAt'].includes(field)) continue
+          if (['username', 'email', 'phone', 'port', 'tags'].includes(field)) continue
+          lines.push(`${keyOf(entry.title, field)}=${value}`)
+        }
+      }
+      return { lines }
+    },
+  }))
+
+  // ── vault_templates: field templates by kind ───────────────────────────────
+  const TEMPLATES: Record<string, Record<string, string>> = {
+    login: { username: 'account username', email: 'account email', password: 'account password' },
+    ssh: { host: 'server host', port: 'port (e.g. 22)', username: 'login user', password: 'password or passphrase', privateKey: 'PEM private key' },
+    'api-key': { apiKey: 'the API key', url: 'API base URL', username: 'owner/account (optional)' },
+    oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)' },
+    secret: { secret: 'the shared secret', notes: 'what it is for' },
+    custom: { fields: 'arbitrary key/value pairs' },
+  }
+  ctx.tools.register(defineTool({
+    name: 'vault_templates',
+    description: 'Return the recommended fields for a credential kind, so vault_add can be called with '
+      + 'the right field names (e.g. kind ssh → host/port/username/password/privateKey).',
+    parameters: { kind: { type: 'string', description: 'Entry kind; default login.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string', required: true }, fields: { type: 'json', required: true } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.fields) }] },
+    async execute(args) {
+      const kind = args.kind ?? 'login'
+      return { kind, fields: TEMPLATES[kind] ?? TEMPLATES.login! }
+    },
+  }))
+
   // UI-facing Remote gateway: the browser Settings Vault page talks to these
   // methods through the /api RPC channel (loopback-trusted), bypassing the
   // model-tool layer entirely. Secrets are returned because the UI is the
@@ -545,6 +767,35 @@ export class VaultGateway extends TypertRemoteService {
   async list(): Promise<{ entries: VaultEntrySummaryWire[] }> {
     const store = await this.ensureStore()
     return { entries: store.list().map(toSummary) }
+  }
+
+  /** List trashed (soft-deleted) entries as non-secret summaries. */
+  @Remote('trash')
+  async trash(): Promise<{ entries: VaultEntrySummaryWire[] }> {
+    const store = await this.ensureStore()
+    return { entries: store.listTrash().map(toSummary) }
+  }
+
+  /** Restore a trashed entry (non-secret summary returned). */
+  @Remote('restore')
+  async restore(id: string): Promise<{ restored: boolean }> {
+    this.assertWritable('restore')
+    const store = await this.ensureStore()
+    return { restored: await store.restore(id) }
+  }
+
+  /** Rotation/expiry report (no secrets). */
+  @Remote('rotation')
+  async rotation(): Promise<{ entries: unknown[] }> {
+    const store = await this.ensureStore()
+    return { entries: store.rotationReport() }
+  }
+
+  /** Health scan findings (no secrets). */
+  @Remote('health')
+  async health(): Promise<{ weak: unknown[]; reused: unknown[] }> {
+    const store = await this.ensureStore()
+    return store.health()
   }
 
   /** Read one full entry (including secrets) by id. */
@@ -671,6 +922,19 @@ function resolveMasterPassword(config: Config): string {
   throw new Error('dsh-vault: configure masterPassword or masterPasswordEnv to unlock the vault')
 }
 
+/** Resolve the export/import password from the configured environment
+ * variable, or fail loudly (the model must never pass it as an argument). */
+function resolveExportPassword(config: Config): string {
+  if (config.exportPasswordEnv !== undefined) {
+    const fromEnv = process.env[config.exportPasswordEnv]
+    if (fromEnv === undefined || fromEnv.length === 0) {
+      throw new Error(`dsh-vault: environment variable ${config.exportPasswordEnv} is not set (needed for vault_export/import)`)
+    }
+    return fromEnv
+  }
+  throw new Error('dsh-vault: configure exportPasswordEnv to use vault_export / vault_import')
+}
+
 /**
  * Shared vault-store instances keyed by resolved path + master password. The
  * model tools and the UI-facing VaultGateway must observe ONE store so writes
@@ -731,6 +995,51 @@ async function sharedAccessPolicy(config: Config): Promise<AccessPolicy> {
   return policy
 }
 
+/** Meta file: plaintext brute-force bookkeeping (no secrets). */
+interface VaultMeta {
+  failedAttempts: number
+  lockedUntil?: number
+}
+
+const MAX_ATTEMPTS = 5
+const LOCKOUT_MS = 5 * 60 * 1000
+
+/** `<vault dir>/meta.json` — failed-attempt counter and lockout window. */
+function metaFile(config: Config): string {
+  return join(dirname(resolveVaultPath(config)), 'meta.json')
+}
+
+async function readMeta(config: Config): Promise<VaultMeta> {
+  try {
+    const raw = await readFile(metaFile(config), 'utf8')
+    return JSON.parse(raw) as VaultMeta
+  } catch {
+    return { failedAttempts: 0 }
+  }
+}
+
+async function writeMeta(config: Config, meta: VaultMeta): Promise<void> {
+  const file = metaFile(config)
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+  await writeFile(file, JSON.stringify(meta), { mode: 0o600 })
+}
+
+/** Record one failed unlock: increment the counter, start a lockout when the
+ * threshold is crossed. */
+async function recordFailedAttempt(config: Config): Promise<void> {
+  const meta = await readMeta(config)
+  meta.failedAttempts = (meta.failedAttempts ?? 0) + 1
+  if (meta.failedAttempts >= MAX_ATTEMPTS) {
+    meta.lockedUntil = Date.now() + LOCKOUT_MS
+  }
+  await writeMeta(config, meta)
+}
+
+/** Clear the counter after a successful unlock. */
+async function clearFailedAttempts(config: Config): Promise<void> {
+  await writeMeta(config, { failedAttempts: 0 })
+}
+
 /**
  * Open (or reuse) the vault store for one deployment configuration. All
  * callers within the process share the same instance for the same path and
@@ -739,21 +1048,34 @@ async function sharedAccessPolicy(config: Config): Promise<AccessPolicy> {
  */
 async function sharedVaultStore(masterPassword: string, config: Config): Promise<VaultStore> {
   const path = resolveVaultPath(config)
+  // Brute-force guard: refuse to even attempt while a lockout window is open.
+  const meta = await readMeta(config)
+  if (meta.lockedUntil !== undefined && Date.now() < meta.lockedUntil) {
+    const minutes = Math.ceil((meta.lockedUntil - Date.now()) / 60000)
+    throw new Error(`vault is temporarily locked after ${MAX_ATTEMPTS} failed password attempts — retry in ~${minutes} min`)
+  }
   // The master password is part of the identity: a different password must
   // open its own store (and fail authentication) rather than reuse a store
   // unlocked with another password.
   const cacheKey = `${path}\0${masterPassword}`
   const existing = sharedVaultStores.get(cacheKey)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    // A successful re-open of a cached store clears the failure counter.
+    await clearFailedAttempts(config)
+    return existing
+  }
   const opening = openVault({
     masterPassword,
     path,
-  }).catch((error: unknown) => {
-    // A failed open must not poison the cache for later retries.
+  }).catch(async (error: unknown) => {
+    // A failed open must not poison the cache for later retries, and counts
+    // toward the brute-force lockout.
     sharedVaultStores.delete(cacheKey)
+    await recordFailedAttempt(config)
     throw error
   })
   sharedVaultStores.set(cacheKey, opening)
+  await clearFailedAttempts(config)
   return opening
 }
 

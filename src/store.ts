@@ -58,6 +58,16 @@ export interface VaultEntry {
   title: string
   /** Entry category; defaults to `login`. */
   kind?: VaultEntryKind
+  /** Sensitivity tier: `high` entries (e.g. banking, root SSH) additionally
+   * require approval when read in ask mode. Defaults to `normal`. */
+  sensitivity?: 'normal' | 'high'
+  /** Rotation interval in days; the rotation report lists entries whose
+   * `rotationDays` elapsed since `createdAt`/`updatedAt`. */
+  rotationDays?: number
+  /** Epoch millis when the entry was soft-deleted (moved to trash); absent
+   * means the entry is active. Trashed entries are excluded from search/list
+   * until purged or restored. */
+  deletedAt?: number
   /** Account username/login. */
   username?: string
   /** Account email. */
@@ -164,10 +174,60 @@ export class VaultStore {
    * contend for the cross-process file lock and every write sees the latest
    * in-memory state. */
   private persistChain: Promise<unknown> = Promise.resolve()
+  /** Auto-lock: after this many ms of inactivity the vault re-locks (key
+   * wiped). `0`/undefined disables auto-lock. */
+  private lockTimeoutMs: number | undefined
+  /** Epoch millis of the last operation; used for the auto-lock timer. */
+  private lastActivity = Date.now()
+  /** Whether the vault is currently locked (key wiped, requires re-unlock). */
+  private locked = false
+  /** Weak-password heuristic: too short or in a tiny common list. */
+  private static readonly MIN_PASSWORD_LENGTH = 12
 
   constructor(path: string, masterPassword: string) {
     this.path = path
     this.masterPassword = masterPassword
+  }
+
+  /** Enable auto-lock with the given idle timeout (ms). */
+  setAutoLock(timeoutMs: number | undefined): void {
+    this.lockTimeoutMs = timeoutMs
+    this.lastActivity = Date.now()
+  }
+
+  /** Whether the vault is currently locked. */
+  get isLocked(): boolean {
+    return this.locked
+  }
+
+  /** Touch the activity timestamp; call before every read/write. */
+  touch(): void {
+    this.lastActivity = Date.now()
+  }
+
+  /** Whether the auto-lock idle window has elapsed. */
+  get expired(): boolean {
+    if (this.lockTimeoutMs === undefined || this.lockTimeoutMs <= 0) return false
+    return Date.now() - this.lastActivity > this.lockTimeoutMs
+  }
+
+  /** Lock the vault: wipe the derived key and require re-unlock. */
+  lock(): void {
+    this.key?.fill(0)
+    this.key = undefined
+    this.locked = true
+    this.lastActivity = Date.now()
+  }
+
+  /** Re-derive the key from the master password (after a lock). */
+  async unlock(): Promise<void> {
+    if (this.kdf === undefined) {
+      await this.load()
+      return
+    }
+    this.key = await deriveKey(this.masterPassword, this.kdf)
+    this.locked = false
+    this.lastActivity = Date.now()
   }
 
   /**
@@ -188,6 +248,8 @@ export class VaultStore {
       // First run: persist the empty document so the file exists with the
       // chosen KDF (and its verify envelope) before any entry is added.
       await this.persist()
+      this.locked = false
+      this.lastActivity = Date.now()
       return
     }
     for (const blob of file.entries) {
@@ -200,6 +262,8 @@ export class VaultStore {
     if (!safeEqual(verify, Buffer.from(VERIFY_PLAINTEXT, 'utf8'))) {
       throw new Error('vault master password is incorrect')
     }
+    this.locked = false
+    this.lastActivity = Date.now()
   }
 
   /** The vault file path (useful for messages and debugging). */
@@ -207,13 +271,24 @@ export class VaultStore {
     return this.path
   }
 
-  /** All entries, in insertion order. */
+  /** All active (non-trashed) entries, in insertion order. */
   list(): VaultEntry[] {
-    return [...this.entries.values()]
+    return [...this.entries.values()].filter(entry => entry.deletedAt === undefined)
   }
 
-  /** Read one entry by id. */
+  /** All trashed entries (soft-deleted, awaiting purge or restore). */
+  listTrash(): VaultEntry[] {
+    return [...this.entries.values()].filter(entry => entry.deletedAt !== undefined)
+  }
+
+  /** Read one active entry by id. */
   get(id: string): VaultEntry | undefined {
+    const entry = this.entries.get(id)
+    return entry !== undefined && entry.deletedAt === undefined ? entry : undefined
+  }
+
+  /** Read one entry by id, including trashed entries. */
+  getIncludingTrash(id: string): VaultEntry | undefined {
     return this.entries.get(id)
   }
 
@@ -275,8 +350,27 @@ export class VaultStore {
     return updated
   }
 
-  /** Delete an entry; returns true when it existed. */
+  /** Soft-delete an entry (move to trash); returns true when it existed.
+   * The entry stays encrypted on disk until purged or restored. */
   async delete(id: string): Promise<boolean> {
+    const entry = this.entries.get(id)
+    if (!entry || entry.deletedAt !== undefined) return false
+    entry.deletedAt = Date.now()
+    await this.persist()
+    return true
+  }
+
+  /** Restore a trashed entry; returns true when it existed in trash. */
+  async restore(id: string): Promise<boolean> {
+    const entry = this.entries.get(id)
+    if (!entry || entry.deletedAt === undefined) return false
+    delete entry.deletedAt
+    await this.persist()
+    return true
+  }
+
+  /** Permanently remove a trashed (or active) entry; returns true when it existed. */
+  async purge(id: string): Promise<boolean> {
     const existed = this.entries.delete(id)
     if (existed) await this.persist()
     return existed
@@ -290,6 +384,125 @@ export class VaultStore {
   /** Whether the vault is unlocked (loaded) with a usable key. */
   get unlocked(): boolean {
     return this.key !== undefined
+  }
+
+  /**
+   * Rotation & expiry report: entries whose `rotationDays` elapsed since
+   * their last update, or whose `expiresAt` is near/past. Returns only
+   * summaries plus the computed due state (no secrets).
+   */
+  rotationReport(now = Date.now()): Array<VaultEntrySummary & { due: 'expired' | 'due' | 'soon'; daysLeft: number }> {
+    const report: Array<VaultEntrySummary & { due: 'expired' | 'due' | 'soon'; daysLeft: number }> = []
+    for (const entry of this.list()) {
+      const base = entry.updatedAt ?? entry.createdAt
+      const rotationAt = entry.rotationDays !== undefined ? base + entry.rotationDays * 86_400_000 : undefined
+      const expiresAt = entry.expiresAt
+      let due: 'expired' | 'due' | 'soon' | undefined
+      let daysLeft: number
+      if (rotationAt !== undefined && now >= rotationAt) {
+        due = 'due'
+        daysLeft = 0
+      } else if (expiresAt !== undefined && now >= expiresAt) {
+        due = 'expired'
+        daysLeft = 0
+      } else if (expiresAt !== undefined) {
+        daysLeft = Math.ceil((expiresAt - now) / 86_400_000)
+        if (daysLeft <= 7) {
+          due = 'soon'
+        }
+      } else if (rotationAt !== undefined) {
+        daysLeft = Math.ceil((rotationAt - now) / 86_400_000)
+        if (daysLeft <= 7) {
+          due = 'soon'
+        }
+      } else {
+        continue
+      }
+      if (due === undefined) continue
+      report.push({ ...toSummary(entry), due, daysLeft })
+    }
+    return report
+  }
+
+  /**
+   * Health scan: weak passwords (too short), and passwords/API keys reused
+   * across entries. Returns non-secret findings keyed by entry id.
+   */
+  health(): { weak: Array<VaultEntrySummary>; reused: Array<{ value: string; entries: VaultEntrySummary[] }> } {
+    const weak: VaultEntrySummary[] = []
+    const passwordCounts = new Map<string, VaultEntrySummary[]>()
+    const keyCounts = new Map<string, VaultEntrySummary[]>()
+    for (const entry of this.list()) {
+      const summary = toSummary(entry)
+      if (entry.password !== undefined) {
+        if (entry.password.length < VaultStore.MIN_PASSWORD_LENGTH) weak.push(summary)
+        const list = passwordCounts.get(entry.password) ?? []
+        list.push(summary)
+        passwordCounts.set(entry.password, list)
+      }
+      for (const key of [entry.apiKey, entry.accessToken, entry.refreshToken, entry.secret]) {
+        if (key === undefined) continue
+        const list = keyCounts.get(key) ?? []
+        list.push(summary)
+        keyCounts.set(key, list)
+      }
+    }
+    const reused = [
+      ...[...passwordCounts.entries()].filter(([, v]) => v.length > 1),
+      ...[...keyCounts.entries()].filter(([, v]) => v.length > 1),
+    ].map(([value, entries]) => ({ value, entries }))
+    return { weak, reused }
+  }
+
+  /**
+   * Export the whole vault (including trash) as a single encrypted blob under
+   * a separate export password: a portable, machine-independent document that
+   * can be re-imported elsewhere. Returns the armored JSON string.
+   */
+  async exportEncrypted(exportPassword: string, now = Date.now()): Promise<string> {
+    if (exportPassword.length === 0) throw new Error('vault: export password must not be empty')
+    const exportKdf = newKdfParams()
+    const exportKey = await deriveKey(exportPassword, exportKdf)
+    const payload = {
+      exportedAt: now,
+      kdf: exportKdf,
+      entries: [...this.entries.values()].map(entry => ({
+        id: entry.id,
+        ...encrypt(Buffer.from(JSON.stringify(entry), 'utf8'), exportKey),
+      })),
+    }
+    exportKey.fill(0)
+    return JSON.stringify(payload)
+  }
+
+  /**
+   * Import an exported vault blob, merging entries by id (existing entries win
+   * unless `overwrite`). Returns the number of entries added.
+   */
+  async importEncrypted(blob: string, exportPassword: string, overwrite = false): Promise<number> {
+    if (exportPassword.length === 0) throw new Error('vault: export password must not be empty')
+    const parsed = JSON.parse(blob) as {
+      kdf: KdfParams
+      entries: Array<EncryptedBlob & { id: string }>
+    }
+    if (!parsed.kdf || !Array.isArray(parsed.entries)) {
+      throw new Error('vault: invalid export document')
+    }
+    const exportKey = await deriveKey(exportPassword, parsed.kdf)
+    let added = 0
+    for (const blobEntry of parsed.entries) {
+      const plaintext = decrypt(blobEntry, exportKey)
+      const entry = JSON.parse(plaintext.toString('utf8')) as VaultEntry
+      const existing = this.entries.get(entry.id)
+      if (existing !== undefined && !overwrite) continue
+      // Imported entries come back as active (clear any soft-delete marker).
+      const { deletedAt, ...active } = entry
+      this.entries.set(entry.id, { ...active, updatedAt: Date.now() })
+      added++
+    }
+    exportKey.fill(0)
+    await this.persist()
+    return added
   }
 
   /**

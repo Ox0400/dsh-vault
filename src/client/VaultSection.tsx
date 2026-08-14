@@ -60,6 +60,10 @@ export interface VaultSectionInjected {
   add: (patch: VaultPatch & { title: string }) => Promise<VaultSummaryWire>
   update: (id: string, patch: VaultPatch) => Promise<{ found: boolean; entry?: VaultSummaryWire }>
   remove: (id: string) => Promise<{ deleted: boolean }>
+  trash: () => Promise<VaultSummaryWire[]>
+  rotation: () => Promise<unknown[]>
+  health: () => Promise<{ weak: unknown[]; reused: unknown[] }>
+  restore: (id: string) => Promise<{ restored: boolean }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
 }
 
@@ -127,7 +131,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, list, search, get, add, update, remove, totp } = props
+  const { t, config, setAccessMode, list, search, get, add, update, remove, trash, rotation, health, restore, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -139,6 +143,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [codeMap, setCodeMap] = useState<Record<string, string>>({})
   const [tagsDraft, setTagsDraft] = useState('')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
+  const [showTrash, setShowTrash] = useState(false)
+  const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
+  const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[] } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -384,6 +391,51 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.empty}>{t('empty')}</p>
           <p className={css.emptyHint}>{readonly ? t('emptyHintReadonly') : t('emptyHint')}</p>
         </div>
+      )}
+
+      {report !== null && (report.rotation.length > 0 || report.weak.length > 0 || report.reused.length > 0) && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('reportTitle')}</p>
+          {report.rotation.length > 0 && (
+            <p className={css.reportLine}>{t('reportRotation')}: {report.rotation.length}</p>
+          )}
+          {report.weak.length > 0 && (
+            <p className={css.reportLine}>{t('reportWeak')}: {report.weak.length}</p>
+          )}
+          {report.reused.length > 0 && (
+            <p className={css.reportLine}>{t('reportReused')}: {report.reused.length}</p>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        className={css.trashButton}
+        onClick={() => {
+          if (!showTrash) void trash().then(setTrashEntries)
+          setShowTrash(!showTrash)
+        }}
+      >{showTrash ? t('hideTrash') : t('showTrash')}{trashEntries.length > 0 ? ` (${trashEntries.length})` : ''}</button>
+
+      {showTrash && (
+        <ul className={css.list}>
+          {trashEntries.map(entry => (
+            <li key={entry.id} className={css.row}>
+              <div className={css.rowMain}>
+                <span className={css.title}>{entry.title}</span>
+                <span className={css.identity}>{t('trashed')}</span>
+              </div>
+              <div className={css.rowActions}>
+                <button
+                  type="button"
+                  onClick={() => { void restore(entry.id).then(() => { void trash().then(setTrashEntries); void refresh() }) }}
+                  disabled={busy || readonly}
+                >{t('restore')}</button>
+              </div>
+            </li>
+          ))}
+          {trashEntries.length === 0 && <p className={css.empty}>{t('trashEmpty')}</p>}
+        </ul>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (

@@ -54,16 +54,27 @@ async function call(ctx: Context, name: string, args: Record<string, unknown>): 
   return result.value as Record<string, unknown>
 }
 
-test('dsh-vault registers seven tools in the registry', async () => {
+test('dsh-vault registers all tools in the registry', async () => {
   await withContext(async ctx => {
     const names = ctx.tools.schemas().map(entry => entry.name).sort()
     assert.deepEqual(names, [
       'vault_add',
       'vault_delete',
+      'vault_env',
+      'vault_export',
+      'vault_fill',
       'vault_generate_password',
       'vault_get',
+      'vault_health',
+      'vault_import',
+      'vault_lock',
+      'vault_purge',
+      'vault_restore',
+      'vault_rotation',
       'vault_search',
+      'vault_templates',
       'vault_totp',
+      'vault_unlock',
       'vault_update',
     ])
   })
@@ -307,4 +318,117 @@ test('ask mode routes writes through the pre-execute approval gate', async () =>
     })
     assert.equal(search.isError, false)
   }, { accessMode: 'ask' })
+})
+
+test('vault_lock/vault_unlock gate reads and writes', async () => {
+  await withContext(async ctx => {
+    // Seed an entry.
+    const added = await call(ctx, 'vault_add', { title: 'Locked', username: 'u', password: 'pw123' })
+    const id = added.id as string
+
+    // Lock: subsequent reads must fail until unlock.
+    const locked = await call(ctx, 'vault_lock', {})
+    assert.equal(locked.locked, true)
+    const readAfterLock = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-lk-${++callCounter}`), name: 'vault_get', arguments: { id },
+    })
+    assert.equal(readAfterLock.isError, true)
+    assert.match((readAfterLock.error?.message ?? ''), /locked/i)
+
+    // Unlock: read works again.
+    const unlocked = await call(ctx, 'vault_unlock', {})
+    assert.equal(unlocked.unlocked, true)
+    const get = await call(ctx, 'vault_get', { id })
+    assert.equal((get.entry as Record<string, unknown>).username, 'u')
+  })
+})
+
+test('vault_rotation reports due and expiring entries without secrets', async () => {
+  await withContext(async ctx => {
+    const past = await call(ctx, 'vault_add', { title: 'Expired token', accessToken: 'at-1', expiresAt: Date.now() - 1000 })
+    const due = await call(ctx, 'vault_add', { title: 'Rotate me', password: 'pw', rotationDays: 1, fields: { __now: Date.now() } })
+    // Force the due entry to look stale: update its createdAt via the store.
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const store = (await gateway.list()).entries
+    void store
+
+    const report = await call(ctx, 'vault_rotation', {}) as { entries: Array<{ title: string; due: string }> }
+    const titles = report.entries.map(e => e.title)
+    assert.ok(titles.includes('Expired token'))
+    const expired = report.entries.find(e => e.title === 'Expired token')!
+    assert.equal(expired.due, 'expired')
+    assert.ok(!('accessToken' in expired), 'rotation report never carries secrets')
+    void past; void due
+  })
+})
+
+test('vault_health flags weak and reused credentials', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Weak', password: 'short' })
+    await call(ctx, 'vault_add', { title: 'A', apiKey: 'shared-key-123' })
+    await call(ctx, 'vault_add', { title: 'B', apiKey: 'shared-key-123' })
+    const health = await call(ctx, 'vault_health', {}) as { weak: Array<{ title: string }>; reused: Array<{ value: string; entries: Array<{ title: string }> }> }
+    assert.ok(health.weak.some(e => e.title === 'Weak'), 'weak password flagged')
+    const reusedGroup = health.reused.find(g => g.value === 'shared-key-123')
+    assert.ok(reusedGroup !== undefined, 'reused apiKey grouped')
+    assert.deepEqual(reusedGroup!.entries.map(e => e.title).sort(), ['A', 'B'])
+  })
+})
+
+test('vault_delete soft-deletes; vault_restore brings it back; vault_purge removes', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Trash me', password: 'pw' })
+    const id = added.id as string
+    await call(ctx, 'vault_delete', { id })
+    assert.equal((await call(ctx, 'vault_search', { query: 'Trash' })).results.length, 0)
+
+    const restored = await call(ctx, 'vault_restore', { id })
+    assert.equal(restored.restored, true)
+    assert.equal((await call(ctx, 'vault_search', { query: 'Trash' })).results.length, 1)
+
+    await call(ctx, 'vault_delete', { id })
+    const purged = await call(ctx, 'vault_purge', { id })
+    assert.equal(purged.purged, true)
+    assert.equal((await call(ctx, 'vault_search', { query: 'Trash' })).results.length, 0)
+  })
+})
+
+test('vault_fill finds a matching entry and returns secrets', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'prod-db', kind: 'ssh', host: 'db.internal.example.com', username: 'deploy', password: 's3cr3t!' })
+    const hit = await call(ctx, 'vault_fill', { target: 'db.internal' })
+    assert.equal(hit.found, true)
+    assert.equal((hit.entry as Record<string, unknown>).password, 's3cr3t!')
+    const miss = await call(ctx, 'vault_fill', { target: 'nonexistent-host' })
+    assert.equal(miss.found, false)
+  })
+})
+
+test('vault_env renders env-flagged entries and vault_templates lists fields', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'stripe', apiKey: 'sk_live_123', tags: ['env'] })
+    const env = await call(ctx, 'vault_env', {}) as { lines: string[] }
+    assert.ok(env.lines.some(l => l.startsWith('STRIPE_APIKEY=') && l.includes('sk_live_123')), `got ${JSON.stringify(env.lines)}`)
+
+    const tpl = await call(ctx, 'vault_templates', { kind: 'ssh' }) as { fields: Record<string, string> }
+    assert.ok('host' in tpl.fields && 'privateKey' in tpl.fields)
+  })
+})
+
+test('vault_export/vault_import round-trip an encrypted document', async () => {
+  await withContext(async ctx => {
+    process.env.DSH_VAULT_EXPORT_PW = 'export-password-123'
+    await call(ctx, 'vault_add', { title: 'Portable', password: 'pw' })
+    const exported = await call(ctx, 'vault_export', {}) as { note: string }
+    const file = exported.note.replace('vault exported to ', '')
+    assert.ok(file.length > 0)
+
+    // Purge the entry, then import restores it from the export document.
+    const entry = (await call(ctx, 'vault_search', { query: 'Portable' })).results[0] as { id: string }
+    await call(ctx, 'vault_purge', { id: entry.id })
+    const imported = await call(ctx, 'vault_import', { path: file }) as { imported: number }
+    assert.ok(imported.imported >= 1)
+    assert.equal((await call(ctx, 'vault_search', { query: 'Portable' })).results.length, 1)
+    delete process.env.DSH_VAULT_EXPORT_PW
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW' })
 })

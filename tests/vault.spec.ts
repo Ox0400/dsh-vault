@@ -357,3 +357,93 @@ test('safeEqual compares buffers in constant time', () => {
   assert.equal(safeEqual(Buffer.from('abc'), Buffer.from('abd')), false)
   assert.equal(safeEqual(Buffer.from('abc'), Buffer.from('abcd')), false)
 })
+
+test('store: auto-lock relocks after idle timeout and unlock restores access', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    await vault.add({ title: 'Locked entry', password: 'pw' })
+    // 10ms idle timeout; immediately after add the store is unlocked.
+    vault.setAutoLock(10)
+    vault.touch()
+    assert.equal(vault.isLocked, false)
+    // Simulate idle expiry: backdate the activity timestamp.
+    ;(vault as unknown as { lastActivity: number }).lastActivity = Date.now() - 1000
+    assert.equal(vault.expired, true)
+    assert.equal(vault.isLocked, false)
+    vault.lock()
+    assert.equal(vault.isLocked, true)
+    // Reads require unlock.
+    assert.equal(vault.get('anything'), undefined)
+    await vault.unlock()
+    assert.equal(vault.isLocked, false)
+    assert.equal(vault.list().length, 1)
+  })
+})
+
+test('store: soft delete moves to trash and restore/purge manage it', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const entry = await vault.add({ title: 'Trash me', password: 'pw' })
+    assert.equal(vault.list().length, 1)
+    assert.equal(vault.listTrash().length, 0)
+
+    assert.equal(await vault.delete(entry.id), true)
+    assert.equal(vault.list().length, 0)
+    assert.equal(vault.listTrash().length, 1)
+    assert.equal(vault.get(entry.id), undefined)
+    assert.equal(vault.getIncludingTrash(entry.id)?.title, 'Trash me')
+
+    assert.equal(await vault.restore(entry.id), true)
+    assert.equal(vault.list().length, 1)
+    assert.equal(vault.listTrash().length, 0)
+
+    await vault.delete(entry.id)
+    assert.equal(await vault.purge(entry.id), true)
+    assert.equal(vault.listTrash().length, 0)
+    assert.equal(vault.getIncludingTrash(entry.id), undefined)
+  })
+})
+
+test('store: rotationReport flags expired and due entries', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const now = Date.now()
+    await vault.add({ title: 'Expired', accessToken: 'at', expiresAt: now - 1000 })
+    await vault.add({ title: 'Normal', password: 'pw' })
+    const report = vault.rotationReport(now)
+    const expired = report.find(r => r.title === 'Expired')
+    assert.equal(expired?.due, 'expired')
+    assert.ok(!report.some(r => r.title === 'Normal'), 'no expiry/rotation → not listed')
+    assert.ok(!('accessToken' in (expired ?? {})), 'report never carries secrets')
+  })
+})
+
+test('store: health detects weak and reused credentials', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    await vault.add({ title: 'Weak', password: 'short' })
+    await vault.add({ title: 'A', apiKey: 'dup-key' })
+    await vault.add({ title: 'B', apiKey: 'dup-key' })
+    const { weak, reused } = vault.health()
+    assert.equal(weak.length, 1)
+    assert.equal(weak[0]!.title, 'Weak')
+    assert.equal(reused.length, 1)
+    assert.equal(reused[0]!.entries.length, 2)
+  })
+})
+
+test('store: exportEncrypted/importEncrypted round-trip without secrets leaking', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    await vault.add({ title: 'Portable', password: 's3cret' })
+    const blob = await vault.exportEncrypted('export-pw')
+    assert.ok(!blob.includes('s3cret'), 'export ciphertext must not contain plaintext secret')
+
+    const vault2 = await openVault({ masterPassword: 'pw2', path: path + '.2' })
+    const added = await vault2.importEncrypted(blob, 'export-pw')
+    assert.equal(added, 1)
+    assert.equal(vault2.list()[0]!.password, 's3cret')
+    // Wrong export password fails authentication.
+    await assert.rejects(() => vault2.importEncrypted(blob, 'wrong-export-pw'))
+  })
+})

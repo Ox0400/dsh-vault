@@ -34,7 +34,10 @@ async function withGateway<T>(run: (gateway: VaultGateway) => Promise<T>): Promi
 test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
-    expect(methods).toEqual(['add', 'config', 'delete', 'get', 'list', 'search', 'setAccessMode', 'totp', 'update'])
+    expect(methods).toEqual([
+      'add', 'config', 'delete', 'get', 'health', 'list', 'restore', 'rotation',
+      'search', 'setAccessMode', 'totp', 'trash', 'update',
+    ])
   })
 })
 

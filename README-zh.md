@@ -43,9 +43,17 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_get` | 按 id 读取完整条目（含全部密钥） |
 | `vault_search` | 跨标题/分类/用户名/邮箱/手机/主机/端口/URL/备注/标签/自定义字段（含数字/布尔/嵌套值）检索，返回无密摘要；`limit` 须为 1–100 的整数 |
 | `vault_update` | 按 id 更新字段（未提供的字段保留；空字符串清除该字段；`title` 可改名） |
-| `vault_delete` | 按 id 删除条目（不可恢复） |
+| `vault_delete` | 软删除条目（移入回收站，磁盘上仍加密保留） |
+| `vault_restore` / `vault_purge` | 从回收站恢复 / 从磁盘永久移除 |
+| `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |
 | `vault_totp` | 为存储的 otpSecret（或直接传入的 Base32/otpauth URI）生成当前 6 位动态验证码 |
 | `vault_generate_password` | 生成强随机密码（长度/字符集/去歧义/分组可选；`group` 须为 ≥2 的整数） |
+| `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据（不含密钥） |
+| `vault_health` | 扫描弱密码与跨条目复用凭据（不含密钥） |
+| `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
+| `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
+| `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 |
+| `vault_templates` | 返回某类凭据（ssh/api-key/oauth 等）的推荐字段 |
 
 **典型开发场景**：存一条 SSH 凭据（`kind: ssh` + host/port/username/password 或 privateKey），开发时让模型 `vault_search` 找主机、`vault_get` 取连接信息；存 API 网关的 `api-key`/`oauth` 条目管理 access/refresh token 轮换。
 
@@ -130,6 +138,8 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 | `name` | 保险库名，用于默认路径（如 `name: work` → `$DSH_HOME/vault/work.json`） |
 | `accessMode` | 模型工具的访问策略，三态：`readonly`（只读，工具与设置页的增/改/删全部被拒绝）、`ask`（默认——写入前询问，每次增/改/删都会走 harness 审批通道请你确认）、`auto`（自动读写，无需逐次确认）。设置页提供同样的三选一下拉并持久化到 `<vault 目录>/access.json`。 |
 | `autoCapture` | `false`（默认）。设为 `true` 时，系统提示词会指导模型识别对话中出现的凭据，并**按用户偏好**用 `vault_add` 提供保存。 |
+| `lockTimeoutSeconds` | 自动锁库：空闲超过该秒数后自动重新锁定（清空内存密钥），之后每次读写需 `vault_unlock`。`0`/缺省为禁用。 |
+| `exportPasswordEnv` | 存放 `vault_export`/`vault_import` 导出密码的环境变量名（绝不能作为模型参数传入）。 |
 
 示例：
 

@@ -45,9 +45,17 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_get` | Read a full entry by id (including all secrets) |
 | `vault_search` | Search titles/categories/usernames/emails/phones/hosts/ports/URLs/notes/tags/custom fields (incl. numeric/boolean/nested values); returns secret-free summaries; `limit` must be an integer 1–100 |
 | `vault_update` | Update fields by id (unprovided fields kept; empty string clears a field; `title` is renamable) |
-| `vault_delete` | Delete an entry by id (irreversible) |
+| `vault_delete` | Soft-delete an entry (moves it to the trash, still encrypted on disk) |
+| `vault_restore` / `vault_purge` | Bring a trashed entry back / permanently remove it from disk |
+| `vault_lock` / `vault_unlock` | Explicitly lock the vault (wipe the in-memory key) / re-unlock it |
 | `vault_totp` | Generate the current 6-digit code for a stored otpSecret (or a bare Base32 / otpauth URI) |
 | `vault_generate_password` | Generate a strong random password (length/character classes/ambiguity exclusion/grouping; `group` must be an integer ≥ 2) |
+| `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials (no secrets) |
+| `vault_health` | Scan for weak passwords and credentials reused across entries (no secrets) |
+| `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
+| `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
+| `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
+| `vault_templates` | List recommended fields for a credential kind (ssh / api-key / oauth / …) |
 
 **Typical workflows**: store an SSH credential (`kind: ssh` + host/port/username/password or privateKey) and have the model `vault_search` for the host then `vault_get` the connection details; keep `api-key`/`oauth` entries for API-gateway access/refresh token rotation.
 
@@ -132,6 +140,8 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 | `name` | Vault name for the default path (e.g. `name: work` → `$DSH_HOME/vault/work.json`) |
 | `accessMode` | Access policy for the model tools. Three states: `readonly` (mutations rejected on tools + UI), `ask` (default — reads free, every add/update/delete goes through the harness approval channel so the user confirms each write), or `auto` (automatic read-write, no per-call prompt). The Settings UI offers this exact three-way choice and persists it to `<vault dir>/access.json`. |
 | `autoCapture` | `false` (default). When `true`, the system prompt instructs the model to detect credentials shared in conversation and — per user preference — offer to save them with `vault_add`. |
+| `lockTimeoutSeconds` | Auto-lock: after this many seconds of inactivity the vault re-locks (key wiped) and every read/write requires `vault_unlock`. `0`/absent disables. |
+| `exportPasswordEnv` | Environment variable holding the export/import password for `vault_export`/`vault_import` (never pass it as a model argument). |
 
 Example:
 
