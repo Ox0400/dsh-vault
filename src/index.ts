@@ -370,6 +370,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       accessToken: { type: 'string', description: 'New OAuth access token.' },
       refreshToken: { type: 'string', description: 'New OAuth refresh token.' },
       expiresAt: { type: 'integer', description: 'New expiry epoch millis.' },
+      sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
+      rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
       otpSecret: { type: 'string', description: 'New TOTP secret.' },
       url: { type: 'string', description: 'New URL.' },
       notes: { type: 'string', description: 'New notes.' },
@@ -584,6 +586,44 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const encodedLabel = encodeURIComponent(`${issuer}:${label ?? ''}`)
       const params = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' })
       return { uri: `otpauth://totp/${encodedLabel}?${params.toString()}` }
+    },
+  }))
+
+  // ── vault_clipboard: return a secret for copy with a caution notice ─────────
+  ctx.tools.register(defineTool({
+    name: 'vault_clipboard',
+    description: 'Fetch one entry secret field for direct copy (username/password/apiKey/...). '
+      + 'Returns the value plus a caution note: prefer handing the value to a clipboard/paste action '
+      + 'rather than echoing it into the conversation, and do not repeat it in chat afterwards.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      field: { type: 'string', required: true, description: 'Field to copy: username, password, apiKey, secret, accessToken, refreshToken, otpSecret, privateKey.' },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { value: { type: 'string', required: true }, caution: { type: 'string', required: true } } },
+      render: (_a, v) => [{ type: 'text', text: `copied value (do not echo) — ${v.caution}` }],
+    },
+    async execute(args) {
+      const entry = await readEntry(args.id)
+      if (!entry) throw new Error(`vault_clipboard: entry ${args.id} not found`)
+      const value = entry[args.field as keyof VaultEntry]
+      if (typeof value !== 'string' || value.length === 0) {
+        throw new Error(`vault_clipboard: entry ${args.id} has no ${args.field}`)
+      }
+      return { value, caution: 'value returned for copy; do not repeat it in the conversation' }
+    },
+  }))
+
+  // ── vault_recent: most recently touched entries ─────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_recent',
+    description: 'List the most recently created or updated entries (newest first), as secret-free '
+      + 'summaries. Useful to pick up where you left off or surface what changed.',
+    parameters: { limit: { type: 'number', description: 'Max results (default 10).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.entries) }] },
+    async execute(args) {
+      const s = await guardStore()
+      return { entries: s.recent(validateLimit(args.limit, 'vault_recent')) }
     },
   }))
 

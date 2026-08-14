@@ -68,6 +68,7 @@ test('dsh-vault registers all tools in the registry', async () => {
     const names = ctx.tools.schemas().map(entry => entry.name).sort()
     assert.deepEqual(names, [
       'vault_add',
+      'vault_clipboard',
       'vault_delete',
       'vault_env',
       'vault_export',
@@ -80,6 +81,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_list',
       'vault_lock',
       'vault_purge',
+      'vault_recent',
       'vault_rekey',
       'vault_restore',
       'vault_rotation',
@@ -581,5 +583,41 @@ test('setAutoCapture toggles and persists the capture preference', async () => {
     assert.match(vaultSection.text, /Auto-capture is ON/)
     const off = await gateway.setAutoCapture(false)
     assert.equal(off.autoCapture, false)
+  })
+})
+
+test('vault_clipboard returns a secret with a caution notice', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Copy me', password: 'copy-secret-123' })
+    const r = await call(ctx, 'vault_clipboard', { id: added.id as string, field: 'password' }) as { value: string; caution: string }
+    assert.equal(r.value, 'copy-secret-123')
+    assert.match(r.caution, /do not repeat/i)
+  })
+})
+
+test('vault_recent lists newest entries first', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Old', password: 'p1' })
+    await call(ctx, 'vault_add', { title: 'New', password: 'p2' })
+    const r = await call(ctx, 'vault_recent', { limit: 5 }) as { entries: Array<{ title: string }> }
+    assert.equal(r.entries[0]!.title, 'New')
+    assert.ok(r.entries.some(e => e.title === 'Old'))
+  })
+})
+
+test('vault_update rejects invalid typed fields', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Type check', password: 'pw' })
+    const bad = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-tc-${++callCounter}`),
+      name: 'vault_update', arguments: { id: added.id as string, sensitivity: 'ultra' },
+    })
+    assert.equal(bad.isError, true)
+    assert.match((bad.error?.message ?? ''), /sensitivity/)
+    const badDays = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-tc-${++callCounter}`),
+      name: 'vault_update', arguments: { id: added.id as string, rotationDays: 'soon' },
+    })
+    assert.equal(badDays.isError, true)
   })
 })

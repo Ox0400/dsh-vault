@@ -293,16 +293,19 @@ export class VaultStore {
   }
 
   /** Search entries across text fields; returns summaries without secrets.
-   * Multiple whitespace-separated terms match when ANY term hits (OR). */
+   * Multiple whitespace-separated terms match when ANY term hits (OR).
+   * Results are relevance-ranked: title prefix matches first, then title
+   * contains, then any-field matches. */
   search(query: string, limit = 20): VaultEntrySummary[] {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
     if (terms.length === 0) return []
-    const results: VaultEntrySummary[] = []
+    const ranked: Array<{ entry: VaultEntry; rank: number }> = []
     for (const entry of this.list()) {
-      if (results.length >= limit) break
-      if (terms.some(term => matches(entry, term))) results.push(toSummary(entry))
+      const rank = relevanceRank(entry, terms)
+      if (rank >= 0) ranked.push({ entry, rank })
     }
-    return results
+    ranked.sort((a, b) => a.rank - b.rank)
+    return ranked.slice(0, limit).map(r => toSummary(r.entry))
   }
 
   /** Add a new entry; returns the stored entry with its assigned id. Empty
@@ -338,6 +341,8 @@ export class VaultStore {
     if ('title' in patch && (patch.title ?? '').trim().length === 0) {
       throw new Error('vault: title must not be empty')
     }
+    // Validate typed fields so a bad model argument can never corrupt an entry.
+    validatePatchTypes(patch)
     const updated: VaultEntry = {
       ...current,
       ...pickDefined(patch, { allowTitle: true }),
@@ -428,6 +433,15 @@ export class VaultStore {
       report.push({ ...toSummary(entry), due, daysLeft })
     }
     return report
+  }
+
+  /** Most recently created/updated entries (Bitwarden-style "recent"),
+   * returned as summaries without secrets. */
+  recent(limit = 10): VaultEntrySummary[] {
+    return [...this.list()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, limit)
+      .map(toSummary)
   }
 
   /**
@@ -617,6 +631,17 @@ export class VaultStore {
 /** Placeholder envelope for a not-yet-persisted vault; replaced on first persist. */
 const EMPTY_BLOB: EncryptedBlob = { ivHex: '', tagHex: '', dataHex: '' }
 
+
+/** Relevance rank for search: 0 = title prefix, 1 = title contains,
+ * 2 = any field contains, -1 = no match. Lower is better. */
+function relevanceRank(entry: VaultEntry, terms: string[]): number {
+  const title = entry.title.toLowerCase()
+  const primary = terms[0]!
+  if (title.startsWith(primary)) return 0
+  if (title.includes(primary)) return 1
+  return terms.some(term => matches(entry, term)) ? 2 : -1
+}
+
 /** Case-insensitive substring match across the entry's searchable fields. */
 function matches(entry: VaultEntry, needle: string): boolean {
   const fieldValues: string[] = []
@@ -672,6 +697,49 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
  * `{ allowTitle: true }` for updates, which may rename an entry. With
  * `{ skipEmpty: true }` (adds) empty strings and empty arrays are dropped so
  * blank form fields never land in storage. */
+/** Validate typed patch fields, throwing on an invalid type so a bad model
+ * argument can never corrupt an entry. Empty strings are allowed (they mean
+ * "clear this field"); absent fields are skipped. */
+function validatePatchTypes(patch: Record<string, unknown>): void {
+  const kindSet = new Set(['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'])
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined || value === '') continue
+    switch (key) {
+      case 'kind':
+        if (typeof value !== 'string' || !kindSet.has(value)) {
+          throw new Error(`vault: kind must be one of ${[...kindSet].join(', ')}`)
+        }
+        break
+      case 'sensitivity':
+        if (value !== 'normal' && value !== 'high') {
+          throw new Error('vault: sensitivity must be "normal" or "high"')
+        }
+        break
+      case 'rotationDays':
+      case 'expiresAt':
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error(`vault: ${key} must be a finite number`)
+        }
+        break
+      case 'port':
+        if (typeof value !== 'string' && typeof value !== 'number') {
+          throw new Error('vault: port must be a string or number')
+        }
+        break
+      case 'tags':
+        if (!Array.isArray(value) || value.some(t => typeof t !== 'string')) {
+          throw new Error('vault: tags must be an array of strings')
+        }
+        break
+      case 'fields':
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+          throw new Error('vault: fields must be an object')
+        }
+        break
+    }
+  }
+}
+
 function pickDefined(patch: Record<string, unknown>, options: { allowTitle?: boolean; skipEmpty?: boolean } = {}): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(patch)) {
