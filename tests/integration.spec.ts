@@ -94,6 +94,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_health',
       'vault_history',
       'vault_import',
+      'vault_import_browser',
       'vault_import_csv',
       'vault_last_modified',
       'vault_list',
@@ -1319,5 +1320,41 @@ test('vault_stats includes byTag distribution', async () => {
     const r = await call(ctx, 'vault_stats', {}) as { byTag: Record<string, number> }
     assert.equal(r.byTag.dev, 1)
     assert.equal(r.byTag.prod, 1)
+  })
+})
+
+test('vault_import_browser imports browser CSV', async () => {
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bi-'))
+    const { writeFile } = await import('node:fs/promises')
+    const csvPath = join(dir, 'browser.csv')
+    await writeFile(csvPath, 'name,url,username,password\nGitHub,https://github.com,ada,hunter2\n,\n')
+    const r = await call(ctx, 'vault_import_browser', { path: csvPath }) as { added: number; skipped: number }
+    assert.equal(r.added, 1)
+    const search = await call(ctx, 'vault_search', { query: 'GitHub' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(search.results.length, 1)
+  })
+})
+
+test('vault_export_csv excludes secrets unless asked', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Sec', password: 'super-secret-value', username: 'u' })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-es-'))
+    const cleanPath = join(dir, 'clean.csv')
+    await call(ctx, 'vault_export_csv', { path: cleanPath })
+    const { readFile } = await import('node:fs/promises')
+    assert.ok(!(await readFile(cleanPath, 'utf8')).includes('super-secret-value'))
+    const fullPath = join(dir, 'full.csv')
+    await call(ctx, 'vault_export_csv', { path: fullPath, includeSecrets: true })
+    assert.ok((await readFile(fullPath, 'utf8')).includes('super-secret-value'))
+  })
+})
+
+test('vault_duplicates also groups same-credential entries', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'A1', password: 'shared-pw' })
+    await call(ctx, 'vault_add', { title: 'A2', password: 'shared-pw' })
+    const r = await call(ctx, 'vault_duplicates', {}) as { groups: Array<Array<Record<string, unknown>>> }
+    assert.ok(r.groups.length >= 1, 'content duplicate group found')
   })
 })

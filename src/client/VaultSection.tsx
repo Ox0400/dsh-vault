@@ -66,6 +66,7 @@ export interface VaultSectionInjected {
   rotation: () => Promise<unknown[]>
   history: () => Promise<unknown[]>
   stats: () => Promise<Record<string, unknown>>
+  backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
   health: () => Promise<{ weak: unknown[]; reused: unknown[] }>
   restore: (id: string) => Promise<{ restored: boolean }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
@@ -135,7 +136,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, restore, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, restore, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -158,6 +159,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[] } | null>(null)
   const [recentEvents, setRecentEvents] = useState<Array<Record<string, unknown>>>([])
   const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
+  const [backupInfo, setBackupInfo] = useState<{ daysSinceBackup: number; backups: number } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -610,6 +612,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {t('entryCount')}: {state.entries.length}
           {vaultStats !== null && typeof vaultStats.withTotp === 'number' && ` · TOTP: ${String(vaultStats.withTotp)}`}
           {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && ` · ${t('highSensitivity')}: ${String(vaultStats.highSensitivity)}`}
+          {backupInfo !== null && backupInfo.daysSinceBackup >= 0 && ` · backup: ${backupInfo.daysSinceBackup}d ago`}
           {vaultStats !== null && typeof vaultStats.byTag === 'object' && vaultStats.byTag !== null
             && Object.keys(vaultStats.byTag as Record<string, unknown>).length > 0
             && ` · tags: ${Object.entries(vaultStats.byTag as Record<string, unknown>).map(([k, v]) => `${k}(${String(v)})`).join(' ')}`}

@@ -1000,14 +1000,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute() {
       const s = await guardStore()
       const byKey = new Map<string, VaultEntrySummary[]>()
+      const byContent = new Map<string, VaultEntrySummary[]>()
       for (const e of s.list()) {
         const key = `${e.title.toLowerCase()}::${e.kind ?? 'login'}`
         const list = byKey.get(key) ?? []
         list.push(toSummary(e))
         byKey.set(key, list)
+        // Content-based duplicates: same username+password hash → same credential.
+        const secret = e.password ?? e.apiKey ?? e.secret ?? e.accessToken
+        if (secret !== undefined) {
+          const contentKey = `${(e.username ?? e.email ?? '').toLowerCase()}::${secret}`
+          const cl = byContent.get(contentKey) ?? []
+          cl.push(toSummary(e))
+          byContent.set(contentKey, cl)
+        }
       }
-      const groups = [...byKey.values()].filter(g => g.length > 1)
-      return { groups }
+      const titleGroups = [...byKey.values()].filter(g => g.length > 1)
+      const contentGroups = [...byContent.values()].filter(g => g.length > 1)
+      return { groups: [...titleGroups, ...contentGroups] }
     },
   }))
 
@@ -1209,7 +1219,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.kind !== undefined ? { kind: args.kind } : {}),
         ...(args.tag !== undefined ? { tag: args.tag } : {}),
         ...(args.createdAfter !== undefined ? { createdAfter: args.createdAfter } : {}),
-        ...(args.limit !== undefined ? { limit: validateLimit(args.limit, 'vault_search_advanced') } : {}),
+        limit: validateLimit(args.limit, 'vault_search_advanced'),
       }) as unknown as JsonValue[] }
     },
   }))
@@ -1364,6 +1374,54 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         || (e.username ?? '').toLowerCase().includes(needle)
         || (e.host ?? '').toLowerCase().includes(needle))
       return match === undefined ? { found: false } : { found: true, id: match.id }
+    },
+  }))
+
+  // ── vault_import_browser: import browser-exported CSV ───────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_browser',
+    description: 'Import a browser password-manager CSV (name,url,username,password — Chrome/Firefox/'
+      + 'Edge export format). Rows without a name are skipped; returns added/skipped counts.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute path of the browser CSV.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_browser')
+      const s = await guardStore()
+      const raw = await readFile(args.path, 'utf8')
+      const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      const rows = parseCsv(cleaned)
+      if (rows.length === 0) return { added: 0, skipped: 0 }
+      // Header may be name,url,username,password or url,name,username,password.
+      const header = rows[0]!.map(h => h.trim().toLowerCase())
+      const idx = {
+        name: header.indexOf('name'),
+        url: header.indexOf('url'),
+        username: header.indexOf('username'),
+        password: header.indexOf('password'),
+      }
+      if (idx.name < 0 || idx.password < 0) return { added: 0, skipped: rows.length - 1 }
+      let added = 0
+      let skipped = 0
+      const now = Date.now()
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i]!
+        const name = (idx.name < row.length ? row[idx.name] : '')?.trim()
+        if (!name) { skipped++; continue }
+        const entry: VaultEntry = {
+          id: randomUUID(),
+          title: name,
+          createdAt: now,
+          updatedAt: now,
+          ...(idx.url >= 0 && idx.url < row.length && row[idx.url] ? { url: row[idx.url] } : {}),
+          ...(idx.username >= 0 && idx.username < row.length && row[idx.username] ? { username: row[idx.username] } : {}),
+          ...(idx.password >= 0 && idx.password < row.length && row[idx.password] ? { password: row[idx.password] } : {}),
+        }
+        if (s.list().some(e => e.title === name)) { skipped++; continue }
+        s.insertDirect(entry)
+        added++
+      }
+      await s.persist()
+      return { added, skipped }
     },
   }))
 
@@ -1575,15 +1633,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Export vault entries to a CSV file (the same shape vault_import_csv accepts), '
       + 'optionally filtered by kind. Writes to <vault dir>/vault-export-<ts>.csv and returns the path.',
     parameters: {
+      path: { type: 'string', description: 'Optional absolute output path; defaults to <vault dir>/vault-export-<ts>.csv.' },
       kind: { type: 'string', description: 'Only export entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      includeSecrets: { type: 'boolean', description: 'Include secret columns (password/apiKey/secret/tokens). Default false — the CSV is secret-free for safe handling.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
     async execute(args) {
       const s = await guardStore()
       const kind = args.kind
       const entries = s.list().filter(e => kind === undefined || (e.kind ?? 'login') === kind)
-      const fields = ['title', 'kind', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
-        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'notes', 'tags', 'sensitivity']
+      const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret']
+      const fields = args.includeSecrets === true
+        ? ['title', 'kind', 'username', ...secretFields, 'url', 'email', 'phone', 'host', 'port', 'expiresAt', 'notes', 'tags', 'sensitivity']
+        : ['title', 'kind', 'username', 'url', 'email', 'phone', 'host', 'port', 'expiresAt', 'notes', 'tags', 'sensitivity']
       const esc = (v: unknown): string => {
         const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
         return `"${str.replace(/"/g, '""')}"`
@@ -1592,7 +1654,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       for (const e of entries) {
         lines.push(fields.map(f => esc((e as unknown as Record<string, unknown>)[f])).join(','))
       }
-      const file = join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
+      const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
       await writeFile(file, lines.join('\n') + '\n', { mode: 0o600 })
       return { path: file, count: entries.length }
@@ -1860,6 +1922,23 @@ export class VaultGateway extends TypertRemoteService {
     this.assertWritable('restore')
     const store = await this.ensureStore()
     return { restored: await store.restore(id) }
+  }
+
+  /** Days since last backup + backup count (no secrets). */
+  @Remote('backupStatus')
+  async backupStatus(): Promise<{ daysSinceBackup: number; backups: number }> {
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
+    const backups: number[] = []
+    try {
+      const entries = await readdir(dir)
+      for (const entry of entries) {
+        const m = /^vault-backup-(\d+)\.json$/.exec(entry)
+        if (m) backups.push(Number(m[1]))
+      }
+    } catch { /* no dir yet */ }
+    const last = backups.length > 0 ? Math.max(...backups) : 0
+    const days = last > 0 ? Math.floor((Date.now() - last) / 86_400_000) : -1
+    return { daysSinceBackup: days, backups: backups.length }
   }
 
   /** Vault overview stats (no secrets). */
