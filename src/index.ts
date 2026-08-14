@@ -119,9 +119,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (policy.mode === 'ask' && WRITE_TOOLS.has(exec.name)) {
       return { kind: 'ask', reason: `dsh-vault: ${exec.name} requires your confirmation in "ask" (prompt-before-write) mode` }
     }
-    // High-sensitivity reads: in ask mode, reading a `high` entry's secrets
-    // (vault_get by id) also requires confirmation.
-    if (policy.mode === 'ask' && exec.name === 'vault_get') {
+    // High-sensitivity reads: reading a `high` entry's secrets (vault_get by
+    // id) requires confirmation in BOTH ask and auto modes — sensitive reads
+    // are always gated, unlike ordinary writes.
+    if (policy.mode !== 'readonly' && exec.name === 'vault_get') {
       const id = (exec.arguments as { id?: string } | undefined)?.id
       if (id !== undefined) {
         try {
@@ -634,6 +635,31 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_notes: append/replace an entry's notes ────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_notes',
+    description: 'Append to or replace the free-form notes of an entry (a convenient shortcut for '
+      + 'vault_update). Returns the updated entry summary.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      text: { type: 'string', required: true, description: 'Notes text. Pass an empty string to clear notes.' },
+      append: { type: 'boolean', description: 'Append to existing notes instead of replacing (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { updated: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.updated ? 'notes updated' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_notes')
+      const s = await guardStore()
+      const current = s.get(args.id)
+      if (!current) return { updated: false }
+      const text = args.text
+      const notes = args.append && current.notes !== undefined && text.length > 0
+        ? current.notes + '\n' + text
+        : text
+      const updated = await s.update(args.id, { notes })
+      return { updated: updated !== undefined }
+    },
+  }))
+
   // ── vault_expiry: set/update an entry's expiry ──────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_expiry',
@@ -752,6 +778,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       const header = `dsh-vault inventory (${s.list().length} entries)\n${'-'.repeat(40)}`
       return { report: lines.length > 0 ? header + '\n' + lines.join('\n') : header }
+    },
+  }))
+
+  // ── vault_tags: tag inventory with counts ────────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_tags',
+    description: 'List every tag used across entries with the number of entries per tag. No secrets.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { tags: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.tags) }] },
+    async execute() {
+      const s = await guardStore()
+      const counts = new Map<string, number>()
+      for (const e of s.list()) {
+        for (const tag of e.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+      }
+      const tags = [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      return { tags }
     },
   }))
 
@@ -1035,6 +1078,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           }
         }
         if (record.title === '') { skipped++; continue }
+        const VALID_KINDS = new Set(['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'])
+        if (record.kind !== undefined && (typeof record.kind !== 'string' || !VALID_KINDS.has(record.kind))) {
+          skipped++
+          continue // invalid kind: skip the row
+        }
+        if (record.sensitivity !== undefined && record.sensitivity !== 'normal' && record.sensitivity !== 'high') {
+          delete record.sensitivity
+        }
         if (Object.keys(fields).length > 0) record.fields = fields
         const title = record.title as string
         const recordKind = typeof record.kind === 'string' ? record.kind : 'login'

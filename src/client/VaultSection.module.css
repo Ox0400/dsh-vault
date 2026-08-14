@@ -335,3 +335,11 @@
   font-family: inherit;
   resize: vertical;
 }
+
+.row {
+  transition: background 0.12s ease;
+}
+
+.row:hover {
+  background: var(--color-hover, rgba(128, 128, 128, 0.08));
+}

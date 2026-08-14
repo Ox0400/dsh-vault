@@ -84,6 +84,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_csv',
       'vault_list',
       'vault_lock',
+      'vault_notes',
       'vault_pin',
       'vault_purge',
       'vault_recent',
@@ -95,6 +96,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_stats',
       'vault_strength',
       'vault_switch',
+      'vault_tags',
       'vault_templates',
       'vault_totp',
       'vault_totp_uri',
@@ -518,16 +520,17 @@ test('high-sensitivity entries require approval when read in ask mode', async ()
     assert.equal(result.isError, true)
     assert.match((result.error?.message ?? ''), /high-sensitivity/i)
 
-    // auto mode: reading is allowed.
+    // auto mode: high-sensitivity reads STILL require confirmation (they are
+    // always gated, unlike ordinary writes).
     await gateway.setAccessMode('auto')
-    const ok = await ctx.tools.execute({
+    const stillDenied = await ctx.tools.execute({
       signal,
       callId: CallId(`dsh-vault-hs-${++callCounter}`),
       name: 'vault_get',
       arguments: { id: added.id },
     })
-    assert.equal(ok.isError, false)
-    assert.equal((ok.value as { entry: { password: string } }).entry.password, 'topsecret')
+    assert.equal(stillDenied.isError, true)
+    assert.match((stillDenied.error?.message ?? ''), /high-sensitivity/i)
   }, { accessMode: 'ask' })
 })
 
@@ -774,5 +777,42 @@ test('vault_totp_uri includes a qr hint', async () => {
     const r = await call(ctx, 'vault_totp_uri', { id: added.id as string }) as { uri: string; qr: string }
     assert.ok(r.uri.startsWith('otpauth://'))
     assert.match(r.qr, /authenticator/i)
+  })
+})
+
+test('vault_notes appends and replaces notes', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Note', password: 'pw', notes: 'base' })
+    const id = added.id as string
+    await call(ctx, 'vault_notes', { id, text: ' added', append: true })
+    let full = await call(ctx, 'vault_get', { id }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.notes, 'base\n added')
+    await call(ctx, 'vault_notes', { id, text: '' })
+    full = await call(ctx, 'vault_get', { id }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.notes, undefined)
+  })
+})
+
+test('vault_tags counts tags across entries', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'A', password: 'p', tags: ['dev', 'prod'] })
+    await call(ctx, 'vault_add', { title: 'B', password: 'p', tags: ['dev'] })
+    const r = await call(ctx, 'vault_tags', {}) as { tags: Array<{ name: string; count: number }> }
+    const dev = r.tags.find(t => t.name === 'dev')
+    const prod = r.tags.find(t => t.name === 'prod')
+    assert.equal(dev?.count, 2)
+    assert.equal(prod?.count, 1)
+  })
+})
+
+test('vault_import_csv skips rows with invalid kind', async () => {
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csv3-'))
+    const { writeFile } = await import('node:fs/promises')
+    const csvPath = join(dir, 'c.csv')
+    await writeFile(csvPath, 'title,kind,password\nGood,ssh,pw\nBad,weird-kind,pw2\n')
+    const r = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number; skipped: number }
+    assert.equal(r.added, 1)
+    assert.equal(r.skipped, 1)
   })
 })
