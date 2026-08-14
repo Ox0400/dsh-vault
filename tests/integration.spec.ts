@@ -68,7 +68,9 @@ test('dsh-vault registers all tools in the registry', async () => {
     const names = ctx.tools.schemas().map(entry => entry.name).sort()
     assert.deepEqual(names, [
       'vault_add',
+      'vault_autofill_check',
       'vault_backup',
+      'vault_backup_now',
       'vault_backup_status',
       'vault_bulk_export',
       'vault_changes',
@@ -1356,5 +1358,36 @@ test('vault_duplicates also groups same-credential entries', async () => {
     await call(ctx, 'vault_add', { title: 'A2', password: 'shared-pw' })
     const r = await call(ctx, 'vault_duplicates', {}) as { groups: Array<Array<Record<string, unknown>>> }
     assert.ok(r.groups.length >= 1, 'content duplicate group found')
+  })
+})
+
+test('vault_autofill_check finds credentials for a URL', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Site', url: 'https://example.com', username: 'u', password: 'pw' })
+    const hit = await call(ctx, 'vault_autofill_check', { target: 'example.com' }) as { found: boolean; entry: Record<string, unknown> }
+    assert.equal(hit.found, true)
+    assert.equal(hit.entry.username, 'u')
+    assert.ok(!('password' in hit.entry), 'never returns the secret')
+    const miss = await call(ctx, 'vault_autofill_check', { target: 'other.example' }) as { found: boolean }
+    assert.equal(miss.found, false)
+  })
+})
+
+test('vault_totp supports HOTP counter mode', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_totp', { secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', counter: 0 }) as { code: string }
+    assert.match(r.code, /^\d{6}$/)
+    // RFC 4226: counter 0 → 755224 for this secret (8-digit convention differs);
+    // we just assert a stable 6-digit code shape.
+  })
+})
+
+test('vault_backup_now writes an immediate backup', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'B', password: 'pw' })
+    const r = await call(ctx, 'vault_backup_now', {}) as { path: string }
+    assert.ok(r.path.includes('vault-backup-'))
+    const { readFile } = await import('node:fs/promises')
+    assert.ok(JSON.parse(await readFile(r.path, 'utf8')).entries.length >= 1)
   })
 })

@@ -44,6 +44,8 @@ export interface VaultFullWire {
   url?: string
   notes?: string
   tags?: string[]
+  icon?: string
+  color?: string
   fields?: Record<string, unknown>
 }
 
@@ -91,6 +93,7 @@ export type VaultSectionProps =
 type FormFields = Pick<
   VaultFullWire, 'title' | 'kind' | 'username' | 'email' | 'phone' | 'password' | 'host' | 'port'
   | 'privateKey' | 'apiKey' | 'secret' | 'accessToken' | 'refreshToken' | 'otpSecret' | 'url' | 'notes'
+  | 'icon' | 'color'
 >
 
 const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
@@ -109,6 +112,8 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'otpSecret', label: 'fieldOtpSecret' },
   { key: 'url', label: 'fieldUrl' },
   { key: 'notes', label: 'fieldNotes' },
+  { key: 'icon', label: 'fieldIcon' },
+  { key: 'color', label: 'fieldColor' },
 ]
 
 const KIND_KEYS: Record<string, VaultLocaleKey> = {
@@ -131,7 +136,7 @@ type EditorState =
   | { readonly status: 'editing'; readonly entry: VaultFullWire }
 
 function emptyForm(): FormFields {
-  return { title: '', kind: 'login', username: '', email: '', phone: '', password: '', host: '', port: '' }
+  return { title: '', kind: 'login', username: '', email: '', phone: '', password: '', host: '', port: '', icon: '', color: '' }
 }
 
 /** Render the Vault settings section. */
@@ -233,6 +238,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         otpSecret: entry.otpSecret ?? '',
         url: entry.url ?? '',
         notes: entry.notes ?? '',
+        icon: entry.icon ?? '',
+        color: entry.color ?? '',
       })
       setTagsDraft((entry.tags ?? []).join(', '))
       setFieldsDraft(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => `${k}=${String(v)}`).join('\n') : '')
@@ -279,6 +286,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         ...(form.otpSecret !== undefined ? { otpSecret: form.otpSecret } : {}),
         ...(form.url !== undefined ? { url: form.url } : {}),
         ...(form.notes !== undefined ? { notes: form.notes } : {}),
+        ...(form.icon !== undefined ? { icon: form.icon } : {}),
+        ...(form.color !== undefined ? { color: form.color } : {}),
         // Always send tags: an empty array clears them, and the host store
         // treats empty string values as "clear this field" too.
         tags,

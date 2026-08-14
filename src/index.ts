@@ -502,6 +502,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       secret: { type: 'string', description: 'Bare Base32 secret or otpauth:// URI. Provide exactly one of id or secret.' },
       period: { type: 'integer', description: 'Time step in seconds (default 30). Ignored when the secret is an otpauth URI that declares its own period.' },
       digits: { type: 'integer', description: 'Code length (default 6; 6–10). Ignored when the secret is an otpauth URI that declares its own digits.' },
+      counter: { type: 'integer', description: 'HOTP counter (RFC 4226). When provided, generates a counter-based code instead of time-based TOTP.' },
     },
     output: {
       schema: {
@@ -542,6 +543,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       if (!Number.isInteger(digits) || digits < 6 || digits > 10) {
         throw new Error('vault_totp: digits must be an integer 6–10')
+      }
+      if (args.counter !== undefined) {
+        if (!Number.isInteger(args.counter) || args.counter < 0) {
+          throw new Error('vault_totp: counter must be a non-negative integer')
+        }
+        const parsed = parseTotpSecret(secret)
+        const code = hotp(base32Decode(parsed.secret), args.counter, digits)
+        return { code, ...(label !== undefined ? { label } : {}), secondsRemaining: -1 }
       }
       const code = totpWith(secret, nowMs, period, digits)
       const secondsRemaining = period - Math.floor(nowMs / 1000) % period
@@ -1425,6 +1434,57 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_autofill_check: does a target have usable credentials? ────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_autofill_check',
+    description: 'Check whether the vault has a credential usable for a URL/host: returns the best '
+      + 'matching entry (username/email only, never the secret) or a not-found verdict. Use before '
+      + 'deciding whether to autofill.',
+    parameters: { target: { type: 'string', required: true, description: 'URL or host to match.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, entry: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.found ? `credentials available for ${(v.entry as { title?: string })?.title ?? 'entry'}` : 'no credentials for this target' }] },
+    async execute(args) {
+      const s = await guardStore()
+      const target = args.target.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '')
+      if (target.length === 0) return { found: false }
+      let best: VaultEntry | undefined
+      for (const e of s.list()) {
+        const host = (e.host ?? '').toLowerCase()
+        const url = (e.url ?? '').toLowerCase()
+        const hostBase = host.split(':')[0] ?? ''
+        const matches = (host.length > 0 && host.includes(target))
+          || (url.length > 0 && url.includes(target))
+          || (hostBase.length > 0 && target.includes(hostBase))
+        if (matches) {
+          if (best === undefined || host.length > (best.host ?? '').length) best = e
+        }
+      }
+      if (best === undefined) return { found: false }
+      const summary: Record<string, string> = { id: best.id, title: best.title, kind: best.kind ?? 'login' }
+      const identity = best.username ?? best.email
+      if (identity !== undefined) summary.username = identity
+      return { found: true, entry: summary as unknown as JsonValue }
+    },
+  }))
+
+  // ── vault_backup_now: explicit alias for an immediate backup ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_backup_now',
+    description: 'Create an immediate timestamped backup of the vault file (alias of vault_backup). '
+      + 'Returns the backup path.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path}` }] },
+    async execute() {
+      const s = await guardStore()
+      const source = resolveVaultPath(config)
+      const backup = join(dirname(source), `vault-backup-${Date.now()}.json`)
+      const raw = await readFile(source, 'utf8')
+      await mkdir(dirname(backup), { recursive: true, mode: 0o700 })
+      await writeFile(backup, raw, { mode: 0o600 })
+      void s
+      return { path: backup }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -1735,7 +1795,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         if (typeof record.favorite === 'string') record.favorite = record.favorite.toLowerCase() === 'true'
         for (const numKey of ['expiresAt', 'rotationDays']) {
           if (typeof record[numKey] === 'string' && /^-?\d+$/.test(record[numKey] as string)) {
-            record[numKey] = Number(record[numKey])
+            const parsed = Number(record[numKey])
+            if (!Number.isSafeInteger(parsed)) { skipped++; continue }
+            record[numKey] = parsed
           }
         }
         if (Object.keys(fields).length > 0) record.fields = fields
