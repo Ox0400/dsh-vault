@@ -435,6 +435,24 @@ export class VaultStore {
     return report
   }
 
+  /** Vault overview statistics (1Password-style): counts by kind, TOTP,
+   * high-sensitivity, expired entries. No secrets. */
+  stats(): { total: number; byKind: Record<string, number>; withTotp: number; highSensitivity: number; expired: number } {
+    const byKind: Record<string, number> = {}
+    let withTotp = 0
+    let highSensitivity = 0
+    let expired = 0
+    const now = Date.now()
+    for (const entry of this.list()) {
+      const kind = entry.kind ?? 'login'
+      byKind[kind] = (byKind[kind] ?? 0) + 1
+      if (entry.otpSecret !== undefined) withTotp++
+      if (entry.sensitivity === 'high') highSensitivity++
+      if (entry.expiresAt !== undefined && entry.expiresAt < now) expired++
+    }
+    return { total: this.list().length, byKind, withTotp, highSensitivity, expired }
+  }
+
   /** Most recently created/updated entries (Bitwarden-style "recent"),
    * returned as summaries without secrets. */
   recent(limit = 10): VaultEntrySummary[] {

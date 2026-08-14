@@ -435,14 +435,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
       )}
 
-      <button
-        type="button"
-        className={css.trashButton}
-        onClick={() => {
-          if (!showTrash) void trash().then(setTrashEntries)
-          setShowTrash(!showTrash)
-        }}
-      >{showTrash ? t('hideTrash') : t('showTrash')}{trashEntries.length > 0 ? ` (${trashEntries.length})` : ''}</button>
+      {state.status === 'ready' && (state.entries.length > 0 || trashEntries.length > 0) && (
+        <button
+          type="button"
+          className={css.trashButton}
+          onClick={() => {
+            if (!showTrash) void trash().then(setTrashEntries)
+            setShowTrash(!showTrash)
+          }}
+        >{showTrash ? t('hideTrash') : t('showTrash')}{trashEntries.length > 0 ? ` (${trashEntries.length})` : ''}</button>
+      )}
 
       {showTrash && (
         <ul className={css.list}>

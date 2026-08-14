@@ -68,6 +68,7 @@ test('dsh-vault registers all tools in the registry', async () => {
     const names = ctx.tools.schemas().map(entry => entry.name).sort()
     assert.deepEqual(names, [
       'vault_add',
+      'vault_backup',
       'vault_clipboard',
       'vault_delete',
       'vault_env',
@@ -86,6 +87,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_restore',
       'vault_rotation',
       'vault_search',
+      'vault_stats',
       'vault_strength',
       'vault_switch',
       'vault_templates',
@@ -619,5 +621,48 @@ test('vault_update rejects invalid typed fields', async () => {
       name: 'vault_update', arguments: { id: added.id as string, rotationDays: 'soon' },
     })
     assert.equal(badDays.isError, true)
+  })
+})
+
+test('vault_backup writes a timestamped copy of the encrypted file', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Backup me', password: 'pw' })
+    const r = await call(ctx, 'vault_backup', {}) as { path: string }
+    assert.ok(r.path.includes('vault-backup-'), r.path)
+    const { readFile } = await import('node:fs/promises')
+    const raw = await readFile(r.path, 'utf8')
+    const parsed = JSON.parse(raw)
+    assert.ok(parsed.entries.length >= 1)
+  })
+})
+
+test('vault_stats reports overview counts', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Login A', password: 'pw', kind: 'login' })
+    await call(ctx, 'vault_add', { title: 'SSH A', host: 'h', kind: 'ssh' })
+    await call(ctx, 'vault_add', { title: '2FA', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', sensitivity: 'high' })
+    const r = await call(ctx, 'vault_stats', {}) as { total: number; byKind: Record<string, number>; withTotp: number; highSensitivity: number }
+    assert.equal(r.total, 3)
+    assert.equal(r.byKind.login, 2) // '2FA' defaults to login
+    assert.equal(r.byKind.ssh, 1)
+    assert.equal(r.withTotp, 1)
+    assert.equal(r.highSensitivity, 1)
+  })
+})
+
+test('vault_import_csv dedupes by title+kind, not title alone', async () => {
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csv2-'))
+    const { writeFile } = await import('node:fs/promises')
+    const csvPath = join(dir, 'creds.csv')
+    await writeFile(csvPath, [
+      'title,kind,password',
+      'prod,ssh,pw1',
+      'prod,api-key,pw2',
+      'prod,ssh,pw3',
+    ].join('\n'))
+    const r = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number; skipped: number }
+    assert.equal(r.added, 2, 'ssh + api-key distinct; third duplicates ssh')
+    assert.equal(r.skipped, 1)
   })
 })

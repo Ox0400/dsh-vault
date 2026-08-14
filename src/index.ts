@@ -217,6 +217,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         description: 'Entry category: login (default), ssh, api-key, secret, oauth, or custom.',
         enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'],
       },
+      sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
+      rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
       username: { type: 'string', description: 'Account username/login.' },
       email: { type: 'string', description: 'Account email.' },
       phone: { type: 'string', description: 'Account phone number.' },
@@ -259,6 +261,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const entry = await s.add({
         title: args.title.trim(),
         ...(args.kind !== undefined ? { kind: args.kind } : {}),
+        ...(args.sensitivity !== undefined ? { sensitivity: args.sensitivity } : {}),
+        ...(args.rotationDays !== undefined ? { rotationDays: args.rotationDays } : {}),
         ...(args.username !== undefined ? { username: args.username } : {}),
         ...(args.email !== undefined ? { email: args.email } : {}),
         ...(args.phone !== undefined ? { phone: args.phone } : {}),
@@ -627,6 +631,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_stats: vault overview statistics ───────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_stats',
+    description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
+      + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
+    async execute() {
+      const s = await guardStore()
+      return s.stats()
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -809,6 +826,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_backup: one-shot backup with a timestamped filename ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_backup',
+    description: 'Create a timestamped backup of the vault file (a copy of the on-disk encrypted '
+      + 'document, not a plaintext export). Returns the backup path. Safe to run anytime.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path}` }] },
+    async execute() {
+      const s = await guardStore()
+      const source = resolveVaultPath(config)
+      const backup = join(dirname(source), `vault-backup-${Date.now()}.json`)
+      const raw = await readFile(source, 'utf8')
+      await mkdir(dirname(backup), { recursive: true, mode: 0o700 })
+      await writeFile(backup, raw, { mode: 0o600 })
+      void s
+      return { path: backup }
+    },
+  }))
+
   // ── vault_import_csv: bulk import from a CSV file ───────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_import_csv',
@@ -852,7 +888,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         if (record.title === '') { skipped++; continue }
         if (Object.keys(fields).length > 0) record.fields = fields
         const title = record.title as string
-        if (s.list().some(e => e.title === title) && !args.overwrite) {
+        const recordKind = typeof record.kind === 'string' ? record.kind : 'login'
+        // Dedupe on title + kind: the same title with a different kind is a
+        // distinct entry (e.g. "prod" as ssh vs api-key).
+        const exists = s.list().some(e => e.title === title && (e.kind ?? 'login') === recordKind)
+        if (exists && !args.overwrite) {
           skipped++
           continue
         }
@@ -1441,5 +1481,11 @@ function estimateStrength(password: string): { score: number; verdict: string; f
 
 function stripTimestamps(entry: VaultEntry): JsonValue {
   const { createdAt, updatedAt, ...rest } = entry
-  return rest as unknown as JsonValue
+  // Drop explicitly-empty fields so the model sees a clean structure.
+  const clean: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(rest)) {
+    if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) continue
+    clean[key] = value
+  }
+  return clean as unknown as JsonValue
 }
