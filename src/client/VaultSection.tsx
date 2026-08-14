@@ -610,6 +610,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {t('entryCount')}: {state.entries.length}
           {vaultStats !== null && typeof vaultStats.withTotp === 'number' && ` · TOTP: ${String(vaultStats.withTotp)}`}
           {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && ` · ${t('highSensitivity')}: ${String(vaultStats.highSensitivity)}`}
+          {vaultStats !== null && typeof vaultStats.byTag === 'object' && vaultStats.byTag !== null
+            && Object.keys(vaultStats.byTag as Record<string, unknown>).length > 0
+            && ` · tags: ${Object.entries(vaultStats.byTag as Record<string, unknown>).map(([k, v]) => `${k}(${String(v)})`).join(' ')}`}
         </p>
       )}
 

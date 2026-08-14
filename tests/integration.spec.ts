@@ -83,12 +83,14 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_export_browser',
       'vault_export_csv',
       'vault_export_env',
+      'vault_export_keepass_xml',
       'vault_export_totp',
       'vault_fill',
       'vault_find',
       'vault_generate_password',
       'vault_generate_username',
       'vault_get',
+      'vault_has',
       'vault_health',
       'vault_history',
       'vault_import',
@@ -1283,5 +1285,39 @@ test('vault_search sortBy recent orders by updatedAt', async () => {
     const r = await call(ctx, 'vault_search', { query: 'Zed', sortBy: 'recent' }) as { results: Array<Record<string, unknown>> }
     assert.equal(r.results.length, 1)
     assert.equal(r.results[0]!.title, 'Zed')
+  })
+})
+
+test('vault_export_keepass_xml writes a KeePass XML document', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'KX', kind: 'ssh', host: 'h', username: 'u', password: 'pw' })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-kpx-'))
+    const outPath = join(dir, 'keepass.xml')
+    const r = await call(ctx, 'vault_export_keepass_xml', { path: outPath }) as { count: number }
+    assert.ok(r.count >= 1)
+    const { readFile } = await import('node:fs/promises')
+    const xml = await readFile(outPath, 'utf8')
+    assert.ok(xml.includes('<keepass>'))
+    assert.ok(xml.includes('KX'))
+  })
+})
+
+test('vault_has detects an existing credential', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'My SSH', kind: 'ssh', host: 'srv.internal', username: 'root' })
+    const hit = await call(ctx, 'vault_has', { target: 'srv.internal' }) as { found: boolean; id: string }
+    assert.equal(hit.found, true)
+    assert.ok(hit.id)
+    const miss = await call(ctx, 'vault_has', { target: 'absent-host' }) as { found: boolean }
+    assert.equal(miss.found, false)
+  })
+})
+
+test('vault_stats includes byTag distribution', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'T', password: 'pw', tags: ['dev', 'prod'] })
+    const r = await call(ctx, 'vault_stats', {}) as { byTag: Record<string, number> }
+    assert.equal(r.byTag.dev, 1)
+    assert.equal(r.byTag.prod, 1)
   })
 })

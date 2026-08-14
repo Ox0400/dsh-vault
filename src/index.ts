@@ -655,7 +655,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         label = label ?? 'dsh-vault'
       }
       const issuer = args.issuer ?? 'dsh-vault'
-      const encodedLabel = encodeURIComponent(`${issuer}:${label ?? ''}`)
+      const encodedLabel = encodeURIComponent(`${issuer}:${label ?? ''}`).replace(/%3A/g, ':')
       const params = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' })
       const uri = `otpauth://totp/${encodedLabel}?${params.toString()}`
       // The URI encodes a QR payload; render it as a QR (e.g. via a QR lib)
@@ -866,7 +866,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
       return s.stats()
@@ -1309,6 +1309,61 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const limit = validateLimit(args.limit, 'vault_last_modified')
       const entries = [...s.list()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit).map(e => toSummary(e))
       return { entries: entries as unknown as JsonValue[] }
+    },
+  }))
+
+  // ── vault_export_keepass_xml: KeePassXC-compatible XML export ──────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_keepass_xml',
+    description: 'Export entries as a KeePassXC-compatible XML document (KeePass 2.x schema). '
+      + 'Writes the file and returns its path.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute output .xml path.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const x = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      const groups = new Map<string, Array<VaultEntry>>()
+      for (const e of s.list()) {
+        const g = e.kind ?? 'General'
+        const list = groups.get(g) ?? []
+        list.push(e)
+        groups.set(g, list)
+      }
+      let xml = `<?xml version="1.0" encoding="utf-8"?>\n<keepass>\n<database>\n<root>\n<group>\n<name>dsh-vault</name>\n`
+      for (const [group, entries] of groups) {
+        xml += `<group>\n<name>${x(group)}</name>\n`
+        for (const e of entries) {
+          xml += `<entry>\n<title>${x(e.title)}</title>\n`
+          xml += `<username>${x(e.username ?? e.email)}</username>\n`
+          xml += `<password>${x(e.password)}</password>\n`
+          xml += `<url>${x(e.url)}</url>\n`
+          xml += `<notes>${x(e.notes)}</notes>\n</entry>\n`
+        }
+        xml += `</group>\n`
+      }
+      xml += `</group>\n</root>\n</database>\n</keepass>\n`
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, xml, { mode: 0o600 })
+      return { path: args.path, count: s.list().length }
+    },
+  }))
+
+  // ── vault_has: check whether a credential exists ────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_has',
+    description: 'Quickly check whether the vault contains a credential matching a title/username/host. '
+      + 'Returns found + which entry matched. Useful before deciding whether to add.',
+    parameters: { target: { type: 'string', required: true, description: 'Title, username, or host to look for.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, id: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.found ? 'credential found' : 'no matching credential' }] },
+    async execute(args) {
+      const s = await guardStore()
+      const needle = args.target.trim().toLowerCase()
+      if (needle.length === 0) return { found: false }
+      const match = s.list().find(e =>
+        e.title.toLowerCase().includes(needle)
+        || (e.username ?? '').toLowerCase().includes(needle)
+        || (e.host ?? '').toLowerCase().includes(needle))
+      return match === undefined ? { found: false } : { found: true, id: match.id }
     },
   }))
 
