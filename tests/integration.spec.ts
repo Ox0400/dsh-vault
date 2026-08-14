@@ -88,6 +88,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_switch',
       'vault_templates',
       'vault_totp',
+      'vault_totp_uri',
       'vault_unlock',
       'vault_update',
     ])
@@ -553,4 +554,15 @@ test('vault_switch changes the active vault and vault_list reports it', async ()
     process.env.DSH_HOME = oldHome
     await rm(tmpHome, { recursive: true, force: true })
   }
+})
+
+test('vault_totp_uri builds a valid otpauth provisioning URI', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'GitHub 2FA', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    const r = await call(ctx, 'vault_totp_uri', { id: added.id as string }) as { uri: string }
+    assert.ok(r.uri.startsWith('otpauth://totp/'), r.uri)
+    assert.ok(r.uri.includes('secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'))
+    assert.ok(r.uri.includes('issuer=dsh-vault'))
+    assert.ok(r.uri.includes('period=30') && r.uri.includes('digits=6'))
+  })
 })

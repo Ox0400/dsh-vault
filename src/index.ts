@@ -553,6 +553,40 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_totp_uri: build an otpauth:// provisioning URI ────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_totp_uri',
+    description: 'Build an otpauth://totp/ provisioning URI for a stored otpSecret (or a bare secret), '
+      + 'so the user can scan it into an authenticator app. Returns the URI string.',
+    parameters: {
+      id: { type: 'string', description: 'Vault entry id whose otpSecret to use. Provide exactly one of id or secret.' },
+      secret: { type: 'string', description: 'Bare Base32 secret. Provide exactly one of id or secret.' },
+      label: { type: 'string', description: 'Account label in the URI (default: entry title or "dsh-vault").' },
+      issuer: { type: 'string', description: 'Issuer name (default: "dsh-vault").' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { uri: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.uri }] },
+    async execute(args) {
+      if ((args.id === undefined) === (args.secret === undefined)) {
+        throw new Error('vault_totp_uri: provide exactly one of id or secret')
+      }
+      let secret: string
+      let label = args.label
+      if (args.id !== undefined) {
+        const entry = await readEntry(args.id)
+        if (!entry?.otpSecret) throw new Error(`vault_totp_uri: entry ${args.id} has no otpSecret`)
+        secret = entry.otpSecret
+        label = label ?? entry.title
+      } else {
+        secret = args.secret!
+        label = label ?? 'dsh-vault'
+      }
+      const issuer = args.issuer ?? 'dsh-vault'
+      const encodedLabel = encodeURIComponent(`${issuer}:${label ?? ''}`)
+      const params = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' })
+      return { uri: `otpauth://totp/${encodedLabel}?${params.toString()}` }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
