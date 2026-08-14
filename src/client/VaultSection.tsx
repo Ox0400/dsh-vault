@@ -149,6 +149,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -535,7 +536,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const code = codeMap[entry.id]
             return (
               <li key={entry.id} className={css.row}>
-                <div className={css.rowMain}>
+                <div className={css.rowMain} onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}>
                   <span className={css.title}>
                     <span className={css.kindIcon}>{kindIcon(entry.kind)}</span>
                     {(entry as VaultSummaryWire & { favorite?: boolean }).favorite && (
@@ -549,6 +550,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   <span className={css.identity}>{identityLine(entry)}</span>
                   {code !== undefined && <span className={css.totp}>{code}</span>}
                 </div>
+                {expandedId === entry.id && (
+                  <div className={css.detailBox}>
+                    {Object.entries(entry).filter(([k]) => !['id', 'title'].includes(k) && entry[k as keyof VaultSummaryWire] !== undefined).map(([k, v]) => (
+                      <span key={k} className={css.detailItem}>
+                        <strong>{k}</strong>: {Array.isArray(v) ? v.join(', ') : String(v)}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className={css.rowActions}>
                   {copiedId === entry.id && <span className={css.copied}>{t('copied')}</span>}
                   <button

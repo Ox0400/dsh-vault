@@ -70,6 +70,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_add',
       'vault_backup',
       'vault_backup_status',
+      'vault_bulk_export',
       'vault_changes',
       'vault_clipboard',
       'vault_delete',
@@ -95,6 +96,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_notes',
       'vault_pin',
       'vault_purge',
+      'vault_quick_add',
       'vault_recent',
       'vault_rekey',
       'vault_report',
@@ -1059,5 +1061,37 @@ test('vault_update strips empty values from fields', async () => {
     const fields = full.entry.fields as Record<string, unknown>
     assert.equal(fields.keep, 'v')
     assert.ok(!('drop' in fields), 'empty field value removed')
+  })
+})
+
+test('vault_get fields whitelist returns only requested fields', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'W', username: 'u', password: 'pw', host: 'h' })
+    const r = await call(ctx, 'vault_get', { id: added.id as string, fields: ['password'] }) as { entry: Record<string, unknown> }
+    assert.equal(r.entry.password, 'pw')
+    assert.ok(!('username' in r.entry))
+    assert.ok(!('host' in r.entry))
+  })
+})
+
+test('vault_quick_add captures a minimal credential', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_quick_add', { title: 'Quick', kind: 'api-key', secret: 'sk-fast', username: 'bot' }) as { id: string }
+    const full = await call(ctx, 'vault_get', { id: r.id }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.apiKey, 'sk-fast')
+    assert.equal(full.entry.username, 'bot')
+  })
+})
+
+test('vault_bulk_export writes a plaintext JSON dump', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Dump me', password: 'pw' })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bulk-'))
+    const outPath = join(dir, 'dump.json')
+    const r = await call(ctx, 'vault_bulk_export', { path: outPath }) as { count: number }
+    assert.ok(r.count >= 1)
+    const { readFile } = await import('node:fs/promises')
+    const parsed = JSON.parse(await readFile(outPath, 'utf8'))
+    assert.ok(parsed.entries.length >= 1)
   })
 })

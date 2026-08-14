@@ -299,6 +299,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'Secrets are returned only to this tool call; prefer vault_search for non-secret summaries.',
     parameters: {
       id: { type: 'string', required: true, description: 'The entry id returned by vault_add or vault_search.' },
+      fields: { type: 'array', items: { type: 'string' }, description: 'Only return these fields (e.g. ["password", "username"]); omit for all.' },
     },
     output: {
       schema: {
@@ -315,7 +316,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const entry = await readEntry(args.id)
       if (!entry) return { found: false }
       emitAudit('read', 'vault_get', entry.id, entry.title)
-      return { found: true, entry: stripTimestamps(entry) }
+      const full = stripTimestamps(entry) as Record<string, unknown>
+      if (Array.isArray(args.fields) && args.fields.length > 0) {
+        const picked: Record<string, unknown> = {}
+        for (const f of args.fields) {
+          if (typeof f === 'string' && f in full) picked[f] = full[f]
+        }
+        return { found: true, entry: picked as unknown as JsonValue }
+      }
+      return { found: true, entry: full as unknown as JsonValue }
     },
   }))
 
@@ -1026,6 +1035,55 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_bulk_export: JSON dump of all entries (non-encrypted) ─────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_bulk_export',
+    description: 'Export ALL entries (including secrets) as a JSON file for audit or migration. '
+      + 'WARNING: the output file is PLAINTEXT — protect it like a password. For encrypted transfer '
+      + 'use vault_export instead.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute output path.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path} (PLAINTEXT — handle carefully)` }] },
+    async execute(args) {
+      assertWritable('vault_bulk_export')
+      const s = await guardStore()
+      const payload = { exportedAt: Date.now(), entries: s.list() }
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, JSON.stringify(payload, null, 2), { mode: 0o600 })
+      return { path: args.path, count: s.list().length }
+    },
+  }))
+
+  // ── vault_quick_add: minimal-entry fast add ─────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_quick_add',
+    description: 'Add an entry with minimal arguments (title + one secret field). A convenience for '
+      + 'capturing a credential fast without the full vault_add field list.',
+    parameters: {
+      title: { type: 'string', required: true, description: 'Entry title.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind (default login).' },
+      secret: { type: 'string', description: 'The secret value: stored into apiKey for api-key, password for login, secret otherwise.' },
+      username: { type: 'string', description: 'Optional username.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, title: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `added ${v.title} (id: ${v.id})` }] },
+    async execute(args) {
+      assertWritable('vault_quick_add')
+      if (!args.title.trim()) throw new Error('vault_quick_add: title must not be empty')
+      if (args.secret === undefined || args.secret.length === 0) {
+        throw new Error('vault_quick_add: a secret value is required')
+      }
+      const s = await guardStore()
+      const kind = args.kind ?? 'login'
+      const entry = await s.add({
+        title: args.title.trim(),
+        kind,
+        ...(args.username !== undefined ? { username: args.username } : {}),
+        ...(kind === 'api-key' ? { apiKey: args.secret } : kind === 'login' ? { password: args.secret } : { secret: args.secret }),
+      })
+      emitAudit('write', 'vault_quick_add', entry.id, entry.title)
+      return { id: entry.id, title: entry.title }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -1304,7 +1362,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const now = Date.now()
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i]!
-        if (row.length === 1 && row[0]!.trim() === '') continue // blank line
+        if (row.every(cell => cell.trim() === '')) continue // blank line
         const record: Record<string, unknown> = { title: row[0] ?? '' }
         const fields: Record<string, string> = {}
         for (let c = 1; c < headers.length && c < row.length; c++) {

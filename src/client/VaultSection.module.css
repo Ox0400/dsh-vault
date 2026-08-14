@@ -365,3 +365,22 @@
   font-size: 12px;
   align-self: flex-start;
 }
+
+.rowMain {
+  cursor: pointer;
+}
+
+.detailBox {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-hover, rgba(128, 128, 128, 0.06));
+  font-size: 12px;
+}
+
+.detailItem {
+  opacity: 0.85;
+}
