@@ -66,6 +66,7 @@ export function apply(ctx: ClientContext): void {
     rotation: () => invoke<{ entries: unknown[] }>('rotation').then(r => r.entries),
     history: () => invoke<{ events: unknown[] }>('history').then(r => r.events),
     stats: () => invoke<Record<string, unknown>>('stats'),
+    recent: () => invoke<{ entries: unknown[] }>('recent').then(r => r.entries),
     backupStatus: () => invoke<{ daysSinceBackup: number; backups: number }>('backupStatus'),
     health: () => invoke<{ weak: unknown[]; reused: unknown[] }>('health'),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),

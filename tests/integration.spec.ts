@@ -87,11 +87,13 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_export_env',
       'vault_export_keepass_xml',
       'vault_export_totp',
+      'vault_export_wallet',
       'vault_fill',
       'vault_find',
       'vault_generate_password',
       'vault_generate_username',
       'vault_get',
+      'vault_get_many',
       'vault_has',
       'vault_health',
       'vault_history',
@@ -1424,5 +1426,40 @@ test('vault_stats reports withPrivateKey count', async () => {
     await call(ctx, 'vault_add', { title: 'PK', kind: 'ssh', host: 'h', privateKey: '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----' })
     const r = await call(ctx, 'vault_stats', {}) as { withPrivateKey: number }
     assert.ok(r.withPrivateKey >= 1)
+  })
+})
+
+test('vault_get redact masks secret fields', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'R', password: 'super-secret-value', apiKey: 'sk_abc' })
+    const r = await call(ctx, 'vault_get', { id: added.id as string, redact: true }) as { entry: Record<string, unknown> }
+    assert.ok(!String(r.entry.password).includes('super-secret-value'))
+    assert.ok(String(r.entry.password).includes('***'))
+  })
+})
+
+test('vault_get_many reads multiple entries with a whitelist', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'A', username: 'u1', password: 'p1' })
+    const b = await call(ctx, 'vault_add', { title: 'B', username: 'u2', password: 'p2' })
+    const r = await call(ctx, 'vault_get_many', { ids: [a.id as string, b.id as string], fields: ['username'] }) as { entries: Array<Record<string, unknown>> }
+    assert.equal(r.entries.length, 2)
+    assert.equal(r.entries[0]!.username, 'u1')
+    assert.ok(!('password' in r.entries[0]!))
+  })
+})
+
+test('vault_export_wallet writes pass-compatible files', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'My Site', password: 'pw', username: 'u', url: 'https://example.com' })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-wal-'))
+    const r = await call(ctx, 'vault_export_wallet', { dir }) as { count: number }
+    assert.ok(r.count >= 1)
+    const { readdir, readFile } = await import('node:fs/promises')
+    const files = await readdir(dir)
+    assert.ok(files.some(f => f.endsWith('.gpg')))
+    const content = await readFile(join(dir, 'My_Site.gpg'), 'utf8')
+    assert.ok(content.includes('pw'))
+    assert.ok(content.includes('login: u'))
   })
 })

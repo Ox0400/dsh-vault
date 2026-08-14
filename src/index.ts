@@ -305,6 +305,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       id: { type: 'string', required: true, description: 'The entry id returned by vault_add or vault_search.' },
       fields: { type: 'array', items: { type: 'string' }, description: 'Only return these fields (e.g. ["password", "username"]); omit for all.' },
       includeHistory: { type: 'boolean', description: 'Also return recent mutation history for this entry.' },
+      redact: { type: 'boolean', description: 'Return secret fields masked (e.g. "hunter***") instead of plaintext.' },
     },
     output: {
       schema: {
@@ -321,7 +322,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const entry = await readEntry(args.id)
       if (!entry) return { found: false }
       emitAudit('read', 'vault_get', entry.id, entry.title)
-      const full = stripTimestamps(entry) as Record<string, unknown>
+      let full = stripTimestamps(entry) as Record<string, unknown>
+      if (args.redact === true) {
+        const redacted: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(full)) {
+          if (typeof v === 'string' && v.length > 0 && ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey'].includes(k)) {
+            redacted[k] = v.length > 8 ? v.slice(0, 4) + '***' : '***'
+          } else {
+            redacted[k] = v
+          }
+        }
+        full = redacted
+      }
       if (args.includeHistory === true) {
         const s = await guardStore()
         full.history = s.getHistory().filter(h => h.id === entry.id).slice(0, 10) as unknown as JsonValue
@@ -1528,6 +1540,67 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_export_wallet: pass (standard Unix) compatible export ────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_wallet',
+    description: 'Export entries as a directory tree of files compatible with pass (the standard Unix '
+      + 'password manager): one file per entry containing the password, with metadata in comments. '
+      + 'Returns the output directory.',
+    parameters: { dir: { type: 'string', required: true, description: 'Absolute output directory (created if needed).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { dir: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.dir}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      await mkdir(args.dir, { recursive: true, mode: 0o700 })
+      let count = 0
+      for (const e of s.list()) {
+        const safe = e.title.replace(/[^a-zA-Z0-9._-]+/g, '_')
+        const file = join(args.dir, safe + '.gpg')
+        const lines = [
+          e.password ?? '',
+          ...(e.username !== undefined ? [`login: ${e.username}`] : []),
+          ...(e.email !== undefined ? [`email: ${e.email}`] : []),
+          ...(e.url !== undefined ? [`url: ${e.url}`] : []),
+          ...(e.notes !== undefined ? [e.notes] : []),
+        ]
+        await writeFile(file, lines.join('\n') + '\n', { mode: 0o600 })
+        count++
+      }
+      void s
+      return { dir: args.dir, count }
+    },
+  }))
+
+  // ── vault_get_many: batch read with a fields whitelist ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_get_many',
+    description: 'Read multiple entries by id, returning only the requested fields for each. '
+      + 'More efficient than repeated vault_get when you need several entries.',
+    parameters: {
+      ids: { type: 'array', required: true, items: { type: 'string' }, description: 'Entry ids.' },
+      fields: { type: 'array', items: { type: 'string' }, description: 'Fields to include per entry (e.g. ["username", "password"]).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `returned ${(v.entries as unknown[]).length} entries` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const out: JsonValue[] = []
+      for (const id of args.ids ?? []) {
+        const e = s.get(id)
+        if (!e) continue
+        const full = stripTimestamps(e) as Record<string, unknown>
+        if (Array.isArray(args.fields) && args.fields.length > 0) {
+          const picked: Record<string, unknown> = {}
+          for (const f of args.fields) {
+            if (typeof f === 'string' && f in full) picked[f] = full[f]
+          }
+          out.push(picked as unknown as JsonValue)
+        } else {
+          out.push(full as unknown as JsonValue)
+        }
+      }
+      return { entries: out }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -2051,6 +2124,13 @@ export class VaultGateway extends TypertRemoteService {
   async stats(): Promise<Record<string, unknown>> {
     const store = await this.ensureStore()
     return store.stats() as unknown as Record<string, unknown>
+  }
+
+  /** Most recently created entries (no secrets). */
+  @Remote('recent')
+  async recent(): Promise<{ entries: unknown[] }> {
+    const store = await this.ensureStore()
+    return { entries: store.recent(5) as unknown as unknown[] }
   }
 
   /** Recent mutation history (no secrets). */

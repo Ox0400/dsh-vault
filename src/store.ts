@@ -679,7 +679,20 @@ export class VaultStore {
       const plaintext = decrypt(blobEntry, exportKey)
       const entry = JSON.parse(plaintext.toString('utf8')) as VaultEntry
       const existing = this.entries.get(entry.id)
-      if (existing !== undefined && !overwrite) continue
+      if (existing !== undefined && !overwrite) {
+        // Merge instead of skipping: fill gaps in the existing entry.
+        const merged = { ...existing }
+        const er = merged as unknown as Record<string, unknown>
+        for (const [k, v] of Object.entries(entry)) {
+          const cur = er[k]
+          if ((cur === undefined || cur === '') && v !== undefined && v !== '') er[k] = v
+        }
+        merged.updatedAt = Date.now()
+        delete merged.deletedAt
+        this.entries.set(entry.id, merged)
+        added++
+        continue
+      }
       // Imported entries come back as active (clear any soft-delete marker).
       const { deletedAt, ...active } = entry
       this.entries.set(entry.id, { ...active, updatedAt: Date.now() })

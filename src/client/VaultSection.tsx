@@ -68,6 +68,7 @@ export interface VaultSectionInjected {
   rotation: () => Promise<unknown[]>
   history: () => Promise<unknown[]>
   stats: () => Promise<Record<string, unknown>>
+  recent: () => Promise<unknown[]>
   backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
   health: () => Promise<{ weak: unknown[]; reused: unknown[] }>
   restore: (id: string) => Promise<{ restored: boolean }>
@@ -141,7 +142,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, restore, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, recent, restore, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -165,6 +166,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [recentEvents, setRecentEvents] = useState<Array<Record<string, unknown>>>([])
   const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
   const [backupInfo, setBackupInfo] = useState<{ daysSinceBackup: number; backups: number } | null>(null)
+  const [recentEntries, setRecentEntries] = useState<Array<Record<string, unknown>>>([])
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -477,6 +479,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {!readonly && (
             <button type="button" className={css.addButton} onClick={startCreate}>{t('quickAdd')}</button>
           )}
+        </div>
+      )}
+
+      {recentEntries.length > 0 && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('recentlyAdded')}</p>
+          {recentEntries.map((e, i) => (
+            <p key={i} className={css.reportLine}>{String(e.title ?? '')}</p>
+          ))}
         </div>
       )}
 
