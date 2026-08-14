@@ -21,7 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultStore } from './store.ts'
@@ -797,6 +797,45 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_switch / vault_list: multi-vault navigation ───────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_list',
+    description: 'List available vaults in the vault directory (one .json file per vault, excluding '
+      + 'access/meta/export files). Marks the currently active one.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { vaults: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.vaults) }] },
+    async execute() {
+      const dir = dirname(resolveVaultPath(config))
+      const names: string[] = []
+      try {
+        const entries = await readdir(dir)
+        for (const entry of entries) {
+          const m = /^(.*)\.json$/.exec(entry)
+          if (!m) continue
+          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-')) continue
+          names.push(m[1]!)
+        }
+      } catch { /* dir may not exist yet */ }
+      const active = currentVaultName ?? config.name ?? 'default'
+      return { vaults: names.sort().map(name => ({ name, active: name === active })) }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'vault_switch',
+    description: 'Switch the active vault for this session. Future vault_* calls operate on the named '
+      + 'vault (created on first use). Returns the newly active vault name.',
+    parameters: { name: { type: 'string', required: true, description: 'Vault name (e.g. "work" or "personal").' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { active: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `switched to vault "${v.active}"` }] },
+    async execute(args) {
+      const name = args.name.trim()
+      if (name.length === 0) throw new Error('vault_switch: name must not be empty')
+      if (!/^[a-zA-Z0-9._-]+$/.test(name)) throw new Error('vault_switch: name may contain only letters, digits, . _ -')
+      currentVaultName = name
+      return { active: name }
+    },
+  }))
+
   // ── vault_rekey: upgrade the scrypt KDF parameters in place ────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rekey',
@@ -1084,10 +1123,19 @@ interface AccessPolicy {
 
 const sharedAccessPolicies = new Map<string, AccessPolicy>()
 
+/** Current vault-name override (vault_switch); undefined = use config name. */
+let currentVaultName: string | undefined
+
+/** Reset the session vault-switch override (tests). */
+export function resetVaultSwitch(): void {
+  currentVaultName = undefined
+}
+
+
 /** Resolve the canonical vault file path for a config (path override or name). */
 function resolveVaultPath(config: Config): string {
   if (config.path !== undefined) return config.path
-  return defaultVaultPath(config.name)
+  return defaultVaultPath(currentVaultName ?? config.name)
 }
 
 /** The `<vault dir>/access.json` path holding the persisted access policy. */

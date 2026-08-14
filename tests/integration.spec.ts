@@ -31,7 +31,16 @@ async function withContext<T>(
     await ctx.plugin(ToolRuntime)
     // CRUD tests assume writes succeed; the access-mode tests pass their own
     // accessMode explicitly. Default to 'auto' here (no approval prompts).
-    await ctx.plugin(VaultPlugin, { masterPassword: 'integration-master', path: join(dir, 'vault.json'), accessMode: 'auto', ...pluginConfig })
+    const mountConfig: Record<string, unknown> = {
+      masterPassword: 'integration-master',
+      accessMode: 'auto',
+      ...pluginConfig,
+    }
+    // Name-based mounts (vault_switch tests) must not pin a temp-dir path.
+    if (mountConfig.path === undefined && mountConfig.name === undefined) {
+      mountConfig.path = join(dir, 'vault.json')
+    }
+    await ctx.plugin(VaultPlugin, mountConfig)
     return await run(ctx, dir)
   } finally {
     // Clean up registered plugins; the ephemeral vault dir is removed too.
@@ -68,6 +77,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_health',
       'vault_import',
       'vault_import_csv',
+      'vault_list',
       'vault_lock',
       'vault_purge',
       'vault_rekey',
@@ -75,6 +85,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rotation',
       'vault_search',
       'vault_strength',
+      'vault_switch',
       'vault_templates',
       'vault_totp',
       'vault_unlock',
@@ -519,4 +530,27 @@ test('vault_strength scores weak and strong passwords', async () => {
     assert.ok(strong.score >= 80, `strong score ${strong.score}`)
     assert.ok(['strong', 'very strong'].includes(strong.verdict))
   })
+})
+
+test('vault_switch changes the active vault and vault_list reports it', async () => {
+  (VaultPlugin as unknown as { resetVaultSwitch: () => void }).resetVaultSwitch()
+  const oldHome = process.env.DSH_HOME
+  const tmpHome = await mkdtemp(join(tmpdir(), 'dsh-vault-home-'))
+  process.env.DSH_HOME = tmpHome
+  try {
+  await withContext(async ctx => {
+    // Use a name-based vault (no explicit path) so switch changes the file.
+    const switched = await call(ctx, 'vault_switch', { name: 'work' }) as { active: string }
+    assert.equal(switched.active, 'work')
+
+    const added = await call(ctx, 'vault_add', { title: 'Work cred', password: 'pw' })
+    assert.ok((added as { id: string }).id)
+
+    const list = await call(ctx, 'vault_list', {}) as { vaults: Array<{ name: string; active: boolean }> }
+    assert.ok(list.vaults.some(v => v.name === 'work' && v.active), JSON.stringify(list.vaults))
+  }, { name: 'switchtest' })
+  } finally {
+    process.env.DSH_HOME = oldHome
+    await rm(tmpHome, { recursive: true, force: true })
+  }
 })
