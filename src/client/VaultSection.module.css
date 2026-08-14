@@ -309,3 +309,8 @@
   font-weight: 600;
   vertical-align: middle;
 }
+
+.pinStar {
+  color: #f5a524;
+  margin-right: 4px;
+}

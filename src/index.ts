@@ -320,6 +320,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'keys, tokens, or TOTP secrets. Use vault_get with a result id to read the full entry.',
     parameters: {
       query: { type: 'string', required: true, description: 'Search text; matches case-insensitively.' },
+      kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
     },
     output: {
@@ -346,7 +347,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const limit = validateLimit(args.limit, 'vault_search')
       const results = s.search(args.query, limit)
-      return { results, total: results.length }
+      const kind = args.kind
+      const filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
+      return { results: filtered, total: filtered.length }
     },
   }))
 
@@ -644,6 +647,34 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_pin / vault_unpin: favorites ──────────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_pin',
+    description: 'Pin (favorite) an entry so it ranks first in search and list. Pinned entries show '
+      + 'a star in the Settings UI.',
+    parameters: { id: { type: 'string', required: true, description: 'Entry id to pin.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { pinned: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.pinned ? 'entry pinned' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_pin')
+      const s = await guardStore()
+      const updated = await s.setFavorite(args.id, true)
+      return { pinned: updated !== undefined }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'vault_unpin',
+    description: 'Unpin an entry (remove its favorite flag).',
+    parameters: { id: { type: 'string', required: true, description: 'Entry id to unpin.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { unpinned: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.unpinned ? 'entry unpinned' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_unpin')
+      const s = await guardStore()
+      const updated = await s.setFavorite(args.id, false)
+      return { unpinned: updated !== undefined }
+    },
+  }))
+
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rotation',
@@ -823,6 +854,36 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       const r = estimateStrength(args.password)
       return r
+    },
+  }))
+
+  // ── vault_export_csv: export entries to a CSV file ──────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_csv',
+    description: 'Export vault entries to a CSV file (the same shape vault_import_csv accepts), '
+      + 'optionally filtered by kind. Writes to <vault dir>/vault-export-<ts>.csv and returns the path.',
+    parameters: {
+      kind: { type: 'string', description: 'Only export entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const kind = args.kind
+      const entries = s.list().filter(e => kind === undefined || (e.kind ?? 'login') === kind)
+      const fields = ['title', 'kind', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
+        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'notes', 'tags', 'sensitivity']
+      const esc = (v: unknown): string => {
+        const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
+        return `"${str.replace(/"/g, '""')}"`
+      }
+      const lines = [fields.join(',')]
+      for (const e of entries) {
+        lines.push(fields.map(f => esc((e as unknown as Record<string, unknown>)[f])).join(','))
+      }
+      const file = join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+      await writeFile(file, lines.join('\n') + '\n', { mode: 0o600 })
+      return { path: file, count: entries.length }
     },
   }))
 
@@ -1161,6 +1222,7 @@ export type VaultEntrySummaryWire = {
   id: string
   title: string
   sensitivity?: 'normal' | 'high'
+  favorite?: boolean
   kind?: VaultEntryKind
   username?: string
   email?: string
@@ -1180,6 +1242,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummaryWire {
     id: entry.id,
     title: entry.title,
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
+    ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
     ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.email !== undefined ? { email: entry.email } : {}),

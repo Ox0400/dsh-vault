@@ -73,6 +73,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_delete',
       'vault_env',
       'vault_export',
+      'vault_export_csv',
       'vault_fill',
       'vault_generate_password',
       'vault_get',
@@ -81,6 +82,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_csv',
       'vault_list',
       'vault_lock',
+      'vault_pin',
       'vault_purge',
       'vault_recent',
       'vault_rekey',
@@ -94,6 +96,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_totp',
       'vault_totp_uri',
       'vault_unlock',
+      'vault_unpin',
       'vault_update',
     ])
   })
@@ -664,5 +667,51 @@ test('vault_import_csv dedupes by title+kind, not title alone', async () => {
     const r = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number; skipped: number }
     assert.equal(r.added, 2, 'ssh + api-key distinct; third duplicates ssh')
     assert.equal(r.skipped, 1)
+  })
+})
+
+test('vault_export_csv writes importable CSV', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Exp', kind: 'ssh', host: 'h.example.com', username: 'u' })
+    await call(ctx, 'vault_add', { title: 'Login', password: 'pw' })
+    const r = await call(ctx, 'vault_export_csv', { kind: 'ssh' }) as { path: string; count: number }
+    assert.equal(r.count, 1)
+    const { readFile } = await import('node:fs/promises')
+    const csv = await readFile(r.path, 'utf8')
+    assert.ok(csv.includes('h.example.com'))
+  })
+})
+
+test('vault_search filters by kind', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'S', kind: 'ssh', host: 'x' })
+    await call(ctx, 'vault_add', { title: 'L', password: 'pw' })
+    const ssh = await call(ctx, 'vault_search', { query: 'x', kind: 'ssh' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(ssh.results.length, 1)
+    const login = await call(ctx, 'vault_search', { query: 'x', kind: 'login' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(login.results.length, 0)
+  })
+})
+
+test('vault_pin ranks the entry first and marks it favorite', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'Alpha', password: 'p' })
+    await call(ctx, 'vault_add', { title: 'Beta', password: 'p' })
+    await call(ctx, 'vault_pin', { id: a.id as string })
+    const search = await call(ctx, 'vault_search', { query: 'p' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(search.results[0]!.title, 'Alpha')
+    assert.equal(search.results[0]!.favorite, true)
+    await call(ctx, 'vault_unpin', { id: a.id as string })
+  })
+})
+
+test('vault_totp rejects invalid short secrets with a clear error', async () => {
+  await withContext(async ctx => {
+    const r = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-totp-${++callCounter}`),
+      name: 'vault_totp', arguments: { secret: 'ABC' },
+    })
+    assert.equal(r.isError, true)
+    assert.match((r.error?.message ?? ''), /too short|invalid Base32/i)
   })
 })

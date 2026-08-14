@@ -475,6 +475,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               <li key={entry.id} className={css.row}>
                 <div className={css.rowMain}>
                   <span className={css.title}>
+                    {(entry as VaultSummaryWire & { favorite?: boolean }).favorite && (
+                      <span className={css.pinStar} title={t('pinned')}>★</span>
+                    )}
                     {entry.title}
                     {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
                       <span className={css.highBadge}>{t('highSensitivity')}</span>

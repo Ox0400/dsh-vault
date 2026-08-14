@@ -68,6 +68,9 @@ export interface VaultEntry {
    * means the entry is active. Trashed entries are excluded from search/list
    * until purged or restored. */
   deletedAt?: number
+  /** Pinned/favorite flag (Bitwarden-style): pinned entries rank first in
+   * search and list. */
+  favorite?: boolean
   /** Account username/login. */
   username?: string
   /** Account email. */
@@ -111,7 +114,7 @@ export interface VaultEntry {
 /** An entry as returned by search/list — never carries secrets. */
 export type VaultEntrySummary = Pick<
   VaultEntry,
-  'id' | 'title' | 'kind' | 'sensitivity' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags'
+  'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags'
 >
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
@@ -304,7 +307,7 @@ export class VaultStore {
       const rank = relevanceRank(entry, terms)
       if (rank >= 0) ranked.push({ entry, rank })
     }
-    ranked.sort((a, b) => a.rank - b.rank)
+    ranked.sort((a, b) => a.rank - b.rank || Number(Boolean(b.entry.favorite)) - Number(Boolean(a.entry.favorite)))
     return ranked.slice(0, limit).map(r => toSummary(r.entry))
   }
 
@@ -321,6 +324,17 @@ export class VaultStore {
       updatedAt: now,
     }
     this.entries.set(entry.id, entry)
+    await this.persist()
+    return entry
+  }
+
+  /** Pin or unpin an entry (favorite); returns the updated entry or undefined. */
+  async setFavorite(id: string, favorite: boolean): Promise<VaultEntry | undefined> {
+    const entry = this.entries.get(id)
+    if (!entry || entry.deletedAt !== undefined) return undefined
+    if (favorite) entry.favorite = true
+    else delete entry.favorite
+    entry.updatedAt = Date.now()
     await this.persist()
     return entry
   }
@@ -699,6 +713,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
     id: entry.id,
     title: entry.title,
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
+    ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
     ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.email !== undefined ? { email: entry.email } : {}),

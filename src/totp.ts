@@ -27,6 +27,12 @@ const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
  */
 export function base32Decode(input: string): Buffer {
   const cleaned = input.replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase()
+  if (cleaned.length === 0) {
+    throw new Error('invalid Base32 secret: secret is empty')
+  }
+  if (cleaned.length < 8) {
+    throw new Error('invalid Base32 secret: too short (expected at least 8 characters)')
+  }
   if (!/^[A-Z2-7]+$/.test(cleaned)) {
     throw new Error('invalid Base32 secret: contains characters outside A-Z2-7')
   }
