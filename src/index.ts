@@ -220,6 +220,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       },
       sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
       rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
+      icon: { type: 'string', description: 'Optional emoji/icon shown in the UI (e.g. "🚀").' },
+      color: { type: 'string', description: 'Optional accent color (e.g. "red", "#ff0000").' },
       username: { type: 'string', description: 'Account username/login.' },
       email: { type: 'string', description: 'Account email.' },
       phone: { type: 'string', description: 'Account phone number.' },
@@ -265,6 +267,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.kind !== undefined ? { kind: args.kind } : {}),
         ...(args.sensitivity !== undefined ? { sensitivity: args.sensitivity } : {}),
         ...(args.rotationDays !== undefined ? { rotationDays: args.rotationDays } : {}),
+        ...(args.icon !== undefined ? { icon: args.icon } : {}),
+        ...(args.color !== undefined ? { color: args.color } : {}),
         ...(args.username !== undefined ? { username: args.username } : {}),
         ...(args.email !== undefined ? { email: args.email } : {}),
         ...(args.phone !== undefined ? { phone: args.phone } : {}),
@@ -400,6 +404,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       expiresAt: { type: 'integer', description: 'New expiry epoch millis.' },
       sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
       rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
+      icon: { type: 'string', description: 'Optional emoji/icon shown in the UI (e.g. "🚀").' },
+      color: { type: 'string', description: 'Optional accent color (e.g. "red", "#ff0000").' },
       favorite: { type: 'boolean', description: 'Pin/unpin the entry (favorites rank first in search).' },
       otpSecret: { type: 'string', description: 'New TOTP secret.' },
       url: { type: 'string', description: 'New URL.' },
@@ -1113,6 +1119,55 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const updated = await s.markUsed(args.id)
       return { touched: updated !== undefined }
+    },
+  }))
+
+  // ── vault_export_browser: Chrome/Firefox-compatible CSV export ─────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_browser',
+    description: 'Export login entries in the browser password-manager CSV format '
+      + '(name,url,username,password) for importing into Chrome/Firefox/Edge. Writes the file and '
+      + 'returns its path.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute output .csv path.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} logins to ${v.path}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const rows = [['name', 'url', 'username', 'password']]
+      for (const e of s.list()) {
+        if (e.password === undefined && e.username === undefined && e.url === undefined) continue
+        const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+        rows.push([esc(e.title), esc(e.url), esc(e.username ?? e.email), esc(e.password)])
+      }
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, rows.map(r => r.join(',')).join('\n') + '\n', { mode: 0o600 })
+      return { path: args.path, count: rows.length - 1 }
+    },
+  }))
+
+  // ── vault_note_secret: store a secret quickly with an auto title ───────────
+  ctx.tools.register(defineTool({
+    name: 'vault_note_secret',
+    description: 'Store a single secret under a generated title (e.g. "secret-2026-08-14-1423") when '
+      + 'you just need it saved without choosing a title. Returns the entry id.',
+    parameters: {
+      secret: { type: 'string', required: true, description: 'The secret value to store.' },
+      note: { type: 'string', description: 'Optional context note.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, title: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `saved as "${v.title}" (id: ${v.id})` }] },
+    async execute(args) {
+      assertWritable('vault_note_secret')
+      if (!args.secret || args.secret.length === 0) throw new Error('vault_note_secret: secret is required')
+      const s = await guardStore()
+      const stamp = new Date().toISOString().slice(0, 10)
+      const title = `secret-${stamp}-${Math.floor(Math.random() * 9000 + 1000)}`
+      const entry = await s.add({
+        title,
+        kind: 'secret',
+        secret: args.secret,
+        ...(args.note !== undefined ? { notes: args.note } : {}),
+      })
+      emitAudit('write', 'vault_note_secret', entry.id, entry.title)
+      return { id: entry.id, title: entry.title }
     },
   }))
 

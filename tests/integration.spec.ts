@@ -78,6 +78,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_env',
       'vault_expiry',
       'vault_export',
+      'vault_export_browser',
       'vault_export_csv',
       'vault_export_env',
       'vault_export_totp',
@@ -94,6 +95,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_lock',
       'vault_mask',
       'vault_merge',
+      'vault_note_secret',
       'vault_notes',
       'vault_pin',
       'vault_purge',
@@ -117,7 +119,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_unpin',
       'vault_update',
       'vault_verify',
-    ])
+])
   })
 })
 
@@ -1130,5 +1132,38 @@ test('vault_stats includes recent7d count', async () => {
     await call(ctx, 'vault_add', { title: 'Fresh', password: 'pw' })
     const r = await call(ctx, 'vault_stats', {}) as { recent7d: number }
     assert.ok(r.recent7d >= 1)
+  })
+})
+
+test('vault_export_browser writes browser-import CSV', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Site', url: 'https://example.com', username: 'u', password: 'pw' })
+    const dir = await mkdtemp(join(tmpdir(), 'vault-br-'))
+    const outPath = join(dir, 'browser.csv')
+    const r = await call(ctx, 'vault_export_browser', { path: outPath }) as { count: number }
+    assert.ok(r.count >= 1)
+    const { readFile } = await import('node:fs/promises')
+    const csv = await readFile(outPath, 'utf8')
+    assert.ok(csv.includes('example.com'))
+    assert.ok(csv.startsWith('name,url,username,password'))
+  })
+})
+
+test('vault_note_secret stores a secret under a generated title', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_note_secret', { secret: 's3cret', note: 'context' }) as { id: string; title: string }
+    assert.ok(r.title.startsWith('secret-'))
+    const full = await call(ctx, 'vault_get', { id: r.id }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.secret, 's3cret')
+    assert.equal(full.entry.notes, 'context')
+  })
+})
+
+test('vault_add stores icon and color metadata', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Pretty', password: 'pw', icon: '🚀', color: 'red' })
+    const full = await call(ctx, 'vault_get', { id: added.id as string }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.icon, '🚀')
+    assert.equal(full.entry.color, 'red')
   })
 })

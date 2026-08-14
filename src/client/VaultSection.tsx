@@ -183,12 +183,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   useEffect(() => {
     let current = true
-    void Promise.resolve().then(refresh).then(
-      () => { /* state already set inside refresh */ },
-      () => { if (current) setState({ status: 'error' }) },
-    )
-    return () => { current = false }
-    // refresh is memoized on query; list/search are stable inject faces.
+    const timer = window.setTimeout(() => {
+      void refresh().then(
+        () => { /* state already set inside refresh */ },
+        () => { if (current) setState({ status: 'error' }) },
+      )
+    }, 250)
+    return () => { current = false; window.clearTimeout(timer) }
+    // refresh is memoized on query (debounced); list/search are stable.
   }, [refresh])
 
   /** Open the editor for a new entry. */

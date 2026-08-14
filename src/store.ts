@@ -71,6 +71,10 @@ export interface VaultEntry {
   /** Pinned/favorite flag (Bitwarden-style): pinned entries rank first in
    * search and list. */
   favorite?: boolean
+  /** Optional emoji/icon shown in the UI. */
+  icon?: string
+  /** Optional accent color shown in the UI. */
+  color?: string
   /** Account username/login. */
   username?: string
   /** Account email. */
@@ -872,6 +876,10 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
         if (typeof value !== 'boolean') {
           throw new Error('vault: favorite must be a boolean')
         }
+        break
+      case 'icon':
+      case 'color':
+        if (typeof value !== 'string') throw new Error(`vault: ${key} must be a string`)
         break
       case 'tags':
         if (!Array.isArray(value) || value.some(t => typeof t !== 'string')) {
