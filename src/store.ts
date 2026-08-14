@@ -493,20 +493,54 @@ export class VaultStore {
 
   /** Vault overview statistics (1Password-style): counts by kind, TOTP,
    * high-sensitivity, expired entries. No secrets. */
-  stats(): { total: number; byKind: Record<string, number>; withTotp: number; highSensitivity: number; expired: number } {
+  stats(): { total: number; byKind: Record<string, number>; withTotp: number; highSensitivity: number; expired: number; recent7d: number } {
     const byKind: Record<string, number> = {}
     let withTotp = 0
     let highSensitivity = 0
     let expired = 0
+    let recent7d = 0
     const now = Date.now()
+    const weekAgo = now - 7 * 86_400_000
     for (const entry of this.list()) {
       const kind = entry.kind ?? 'login'
       byKind[kind] = (byKind[kind] ?? 0) + 1
       if (entry.otpSecret !== undefined) withTotp++
       if (entry.sensitivity === 'high') highSensitivity++
       if (entry.expiresAt !== undefined && entry.expiresAt < now) expired++
+      if (entry.createdAt >= weekAgo) recent7d++
     }
-    return { total: this.list().length, byKind, withTotp, highSensitivity, expired }
+    return { total: this.list().length, byKind, withTotp, highSensitivity, expired, recent7d }
+  }
+
+  /** Merge `fromId` into `toId`: non-empty fields of `from` fill gaps in `to`,
+   * then `from` is purged. Returns the merged entry or undefined. */
+  async merge(fromId: string, toId: string): Promise<VaultEntry | undefined> {
+    const from = this.entries.get(fromId)
+    const to = this.entries.get(toId)
+    if (!from || !to || from.deletedAt !== undefined || to.deletedAt !== undefined) return undefined
+    const merged: VaultEntry = { ...to }
+    for (const [key, value] of Object.entries(from)) {
+      const typed = merged as unknown as Record<string, unknown>
+      const existing = typed[key]
+      if ((existing === undefined || existing === '') && value !== undefined && value !== '') {
+        ;(typed[key] as unknown) = value
+      }
+    }
+    merged.updatedAt = Date.now()
+    this.entries.set(toId, merged)
+    this.entries.delete(fromId)
+    this.recordHistory('merge', toId, to.title)
+    await this.persist()
+    return merged
+  }
+
+  /** Touch an entry's updatedAt (mark as recently used); no other change. */
+  async markUsed(id: string): Promise<VaultEntry | undefined> {
+    const entry = this.entries.get(id)
+    if (!entry || entry.deletedAt !== undefined) return undefined
+    entry.updatedAt = Date.now()
+    await this.persist()
+    return entry
   }
 
   /** Activity within the last `windowMs`: entries created, updated, or

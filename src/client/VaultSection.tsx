@@ -65,6 +65,7 @@ export interface VaultSectionInjected {
   trash: () => Promise<VaultSummaryWire[]>
   rotation: () => Promise<unknown[]>
   history: () => Promise<unknown[]>
+  stats: () => Promise<Record<string, unknown>>
   health: () => Promise<{ weak: unknown[]; reused: unknown[] }>
   restore: (id: string) => Promise<{ restored: boolean }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
@@ -134,7 +135,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, restore, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, restore, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -155,6 +156,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[] } | null>(null)
   const [recentEvents, setRecentEvents] = useState<Array<Record<string, unknown>>>([])
+  const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -595,6 +597,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {state.status === 'ready' && (
         <p className={css.footer}>
           {t('entryCount')}: {state.entries.length}
+          {vaultStats !== null && typeof vaultStats.withTotp === 'number' && ` · TOTP: ${String(vaultStats.withTotp)}`}
+          {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && ` · ${t('highSensitivity')}: ${String(vaultStats.highSensitivity)}`}
         </p>
       )}
 

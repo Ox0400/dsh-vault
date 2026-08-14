@@ -93,6 +93,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_list',
       'vault_lock',
       'vault_mask',
+      'vault_merge',
       'vault_notes',
       'vault_pin',
       'vault_purge',
@@ -111,6 +112,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_templates',
       'vault_totp',
       'vault_totp_uri',
+      'vault_touch',
       'vault_unlock',
       'vault_unpin',
       'vault_update',
@@ -1093,5 +1095,40 @@ test('vault_bulk_export writes a plaintext JSON dump', async () => {
     const { readFile } = await import('node:fs/promises')
     const parsed = JSON.parse(await readFile(outPath, 'utf8'))
     assert.ok(parsed.entries.length >= 1)
+  })
+})
+
+test('vault_merge fills gaps and removes the source', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'Same', kind: 'ssh', host: 'a', password: 'pa' })
+    const b = await call(ctx, 'vault_add', { title: 'Same', kind: 'ssh', host: 'b', username: 'u2' })
+    const r = await call(ctx, 'vault_merge', { fromId: b.id as string, toId: a.id as string }) as { merged: boolean; entry: Record<string, unknown> }
+    assert.equal(r.merged, true)
+    // The merged summary carries non-secret fields; secrets verified via get.
+    assert.equal(r.entry.username, 'u2', 'gap filled from source')
+    assert.ok(!('password' in r.entry), 'summary never carries secrets')
+    const full = await call(ctx, 'vault_get', { id: a.id as string }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.password, 'pa', 'existing target field kept')
+    assert.equal(full.entry.username, 'u2')
+    const search = await call(ctx, 'vault_search', { query: 'Same' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(search.results.length, 1, 'source removed')
+  })
+})
+
+test('vault_touch updates recent ordering', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'Older', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'Newer', password: 'pw' })
+    await call(ctx, 'vault_touch', { id: a.id as string })
+    const r = await call(ctx, 'vault_recent', { limit: 5 }) as { entries: Array<{ title: string }> }
+    assert.equal(r.entries[0]!.title, 'Older', 'touched entry jumps to top')
+  })
+})
+
+test('vault_stats includes recent7d count', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Fresh', password: 'pw' })
+    const r = await call(ctx, 'vault_stats', {}) as { recent7d: number }
+    assert.ok(r.recent7d >= 1)
   })
 })

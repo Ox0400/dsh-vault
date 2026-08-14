@@ -844,7 +844,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
       return s.stats()
@@ -1081,6 +1081,38 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       })
       emitAudit('write', 'vault_quick_add', entry.id, entry.title)
       return { id: entry.id, title: entry.title }
+    },
+  }))
+
+  // ── vault_merge: merge duplicate entries ─────────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_merge',
+    description: 'Merge one entry INTO another (Bitwarden-style duplicate cleanup): non-empty fields of '
+      + 'the source fill gaps in the target, then the source is permanently removed. Returns the merged summary.',
+    parameters: {
+      fromId: { type: 'string', required: true, description: 'Source entry id (merged into the target, then deleted).' },
+      toId: { type: 'string', required: true, description: 'Target entry id (kept, gaps filled).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { merged: { type: 'boolean', required: true }, entry: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.merged ? 'entries merged' : 'merge failed (one/both not found or in trash)' }] },
+    async execute(args) {
+      assertWritable('vault_merge')
+      const s = await guardStore()
+      const merged = await s.merge(args.fromId, args.toId)
+      return merged === undefined ? { merged: false } : { merged: true, entry: toSummaryJson(merged) }
+    },
+  }))
+
+  // ── vault_touch: mark an entry as recently used ─────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_touch',
+    description: 'Mark an entry as recently used (update its updatedAt without changing content). '
+      + 'Affects vault_recent ordering and the rotation clock.',
+    parameters: { id: { type: 'string', required: true, description: 'Entry id.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { touched: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.touched ? 'entry marked as recently used' : 'entry not found' }] },
+    async execute(args) {
+      const s = await guardStore()
+      const updated = await s.markUsed(args.id)
+      return { touched: updated !== undefined }
     },
   }))
 
@@ -1576,6 +1608,13 @@ export class VaultGateway extends TypertRemoteService {
     this.assertWritable('restore')
     const store = await this.ensureStore()
     return { restored: await store.restore(id) }
+  }
+
+  /** Vault overview stats (no secrets). */
+  @Remote('stats')
+  async stats(): Promise<Record<string, unknown>> {
+    const store = await this.ensureStore()
+    return store.stats() as unknown as Record<string, unknown>
   }
 
   /** Recent mutation history (no secrets). */

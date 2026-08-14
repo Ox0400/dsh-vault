@@ -65,6 +65,7 @@ export function apply(ctx: ClientContext): void {
     trash: () => invoke<{ entries: VaultSectionTypes['entries'] }>('trash').then(r => r.entries),
     rotation: () => invoke<{ entries: unknown[] }>('rotation').then(r => r.entries),
     history: () => invoke<{ events: unknown[] }>('history').then(r => r.events),
+    stats: () => invoke<Record<string, unknown>>('stats'),
     health: () => invoke<{ weak: unknown[]; reused: unknown[] }>('health'),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),
