@@ -69,6 +69,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import',
       'vault_lock',
       'vault_purge',
+      'vault_rekey',
       'vault_restore',
       'vault_rotation',
       'vault_search',

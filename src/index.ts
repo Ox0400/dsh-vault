@@ -686,6 +686,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_rekey: upgrade the scrypt KDF parameters in place ────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_rekey',
+    description: 'Upgrade the vault encryption to fresh scrypt KDF parameters (higher cost) and '
+      + 're-encrypt every entry in place. Safe to run periodically or after raising the vault '
+      + 'cost expectations; the old document is replaced atomically. Returns the new cost parameter n.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { n: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault re-keyed with scrypt N=${v.n}` }] },
+    async execute() {
+      assertWritable('vault_rekey')
+      const s = await guardStore()
+      return await s.rekey()
+    },
+  }))
+
   // UI-facing Remote gateway: the browser Settings Vault page talks to these
   // methods through the /api RPC channel (loopback-trusted), bypassing the
   // model-tool layer entirely. Secrets are returned because the UI is the

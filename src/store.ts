@@ -514,6 +514,40 @@ export class VaultStore {
    * The derived key is cached after load and reused, so a mutation does not
    * re-run scrypt; only a fresh vault (no cached key yet) derives once.
    */
+  /**
+   * Re-key the vault with fresh scrypt KDF parameters (cost upgrade): derive a
+   * new key from the master password under `newKdfParams()` and re-encrypt
+   * every entry under it, atomically. The old key buffer is wiped. Returns the
+   * new cost parameter `n` for reporting.
+   */
+  async rekey(): Promise<{ n: number }> {
+    if (this.key === undefined) {
+      await this.load()
+    }
+    const newKdf = newKdfParams()
+    const newKey = await deriveKey(this.masterPassword, newKdf)
+    // Encrypt every entry under the new key first (in memory), so a failure
+    // mid-encrypt leaves the on-disk document untouched.
+    const reEncrypted = [...this.entries.values()].map(entry => ({
+      id: entry.id,
+      ...encrypt(Buffer.from(JSON.stringify(entry), 'utf8'), newKey),
+    }))
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+    await withFileLock(this.path, async () => {
+      const file: VaultFile = {
+        version: VAULT_FORMAT_VERSION,
+        kdf: newKdf,
+        verify: encrypt(Buffer.from(VERIFY_PLAINTEXT, 'utf8'), newKey),
+        entries: reEncrypted,
+      }
+      await writeFileAtomic(this.path, JSON.stringify(file), { mode: 0o600, dirMode: 0o700 })
+    })
+    this.kdf = newKdf
+    this.key?.fill(0)
+    this.key = newKey
+    return { n: newKdf.n }
+  }
+
   private persist(): Promise<void> {
     const run = async (): Promise<void> => {
       const kdf = this.kdf ?? newKdfParams()

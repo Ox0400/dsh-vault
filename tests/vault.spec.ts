@@ -447,3 +447,20 @@ test('store: exportEncrypted/importEncrypted round-trip without secrets leaking'
     await assert.rejects(() => vault2.importEncrypted(blob, 'wrong-export-pw'))
   })
 })
+
+test('store: rekey upgrades KDF and keeps all entries readable', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    await vault.add({ title: 'One', password: 'pw-1' })
+    await vault.add({ title: 'Two', apiKey: 'ak-2' })
+    const { n } = await vault.rekey()
+    assert.equal(n, 32768) // default SCRYPT_N
+
+    // Reload with the same password: the new KDF must decrypt everything.
+    const reloaded = await openVault({ masterPassword: 'pw', path })
+    assert.equal(reloaded.list().length, 2)
+    const titles = reloaded.list().map(e => e.title).sort()
+    assert.deepEqual(titles, ['One', 'Two'])
+    assert.equal(reloaded.list().find(e => e.title === 'One')?.password, 'pw-1')
+  })
+})
