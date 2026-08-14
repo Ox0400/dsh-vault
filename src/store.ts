@@ -321,6 +321,11 @@ export class VaultStore {
     return entry
   }
 
+  /** Insert an entry directly (used by bulk import); caller owns timestamps. */
+  insertDirect(entry: VaultEntry): void {
+    this.entries.set(entry.id, entry)
+  }
+
   /** Update an existing entry's fields; returns the updated entry or undefined.
    * Every defined field in `patch` replaces the stored value; an empty string
    * clears (removes) that field. `id`/`createdAt` can never change. */
@@ -548,7 +553,7 @@ export class VaultStore {
     return { n: newKdf.n }
   }
 
-  private persist(): Promise<void> {
+  async persist(): Promise<void> {
     const run = async (): Promise<void> => {
       const kdf = this.kdf ?? newKdfParams()
       this.kdf = kdf

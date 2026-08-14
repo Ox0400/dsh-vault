@@ -67,6 +67,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_get',
       'vault_health',
       'vault_import',
+      'vault_import_csv',
       'vault_lock',
       'vault_purge',
       'vault_rekey',
@@ -432,4 +433,31 @@ test('vault_export/vault_import round-trip an encrypted document', async () => {
     assert.equal((await call(ctx, 'vault_search', { query: 'Portable' })).results.length, 1)
     delete process.env.DSH_VAULT_EXPORT_PW
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW' })
+})
+
+test('vault_import_csv bulk-imports entries and skips duplicates', async () => {
+  await withContext(async ctx => {
+    const csvPath = join(await (async () => { const d = await mkdtemp(join(tmpdir(), 'vault-csv-')); return d })(), 'creds.csv')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(csvPath, [
+      'title,username,password,url,tags,region',
+      'GitHub,ada,"hunter2!","https://github.com",dev,us-east',
+      'AWS,deploy,secret-pw,"https://aws.amazon.com",prod,us-west',
+      'GitLab,dup,"other",https://gitlab.com,dev,eu',
+    ].join('\n'))
+    const imported = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number; skipped: number }
+    assert.equal(imported.added, 3)
+    assert.equal(imported.skipped, 0)
+
+    // Re-import without overwrite → all 3 skipped (same titles).
+    const again = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number; skipped: number }
+    assert.equal(again.added, 0)
+    assert.equal(again.skipped, 3)
+
+    // Custom column 'region' became a custom field, and it is searchable.
+    const search = await call(ctx, 'vault_search', { query: 'us-east' }) as { results: Array<Record<string, unknown>> }
+    assert.ok(search.results.length >= 1)
+    const full = await call(ctx, 'vault_get', { id: search.results[0]!.id as string }) as { entry: Record<string, unknown> }
+    assert.equal((full.entry.fields as Record<string, unknown>).region, 'us-east')
+  })
 })

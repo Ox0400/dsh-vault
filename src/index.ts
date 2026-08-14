@@ -22,6 +22,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultStore } from './store.ts'
 import { totp } from './totp.ts'
@@ -686,6 +687,68 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_csv: bulk import from a CSV file ───────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_csv',
+    description: 'Bulk-import credentials from a CSV file. Expected columns (header row): '
+      + 'title,username,password,url,email,phone,host,port,apiKey,secret,notes,tags,kind. '
+      + 'Unknown columns become custom fields. Returns how many entries were added and skipped.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the CSV file.' },
+      delimiter: { type: 'string', description: 'CSV delimiter (default ",").' },
+      overwrite: { type: 'boolean', description: 'Replace entries with the same title (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_csv')
+      const s = await guardStore()
+      const raw = await readFile(args.path, 'utf8')
+      const rows = parseCsv(raw, args.delimiter ?? ',')
+      if (rows.length === 0) return { added: 0, skipped: 0 }
+      const headers = rows[0]!.map(h => h.trim())
+      const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
+        'apiKey', 'secret', 'notes', 'tags', 'kind', 'sensitivity'])
+      let added = 0
+      let skipped = 0
+      const now = Date.now()
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i]!
+        if (row.length === 1 && row[0]!.trim() === '') continue // blank line
+        const record: Record<string, unknown> = { title: row[0] ?? '' }
+        const fields: Record<string, string> = {}
+        for (let c = 1; c < headers.length && c < row.length; c++) {
+          const header = headers[c]!
+          const value = row[c] ?? ''
+          if (value === '') continue
+          if (known.has(header)) {
+            if (header === 'tags') record[header] = value.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+            else record[header] = value
+          } else {
+            fields[header] = value
+          }
+        }
+        if (record.title === '') { skipped++; continue }
+        if (Object.keys(fields).length > 0) record.fields = fields
+        const title = record.title as string
+        if (s.list().some(e => e.title === title) && !args.overwrite) {
+          skipped++
+          continue
+        }
+        const entry: VaultEntry = {
+          id: randomUUID(),
+          title,
+          createdAt: now,
+          updatedAt: now,
+          ...pickDefinedFromRecord(record),
+        }
+        s.insertDirect(entry)
+        added++
+      }
+      await s.persist()
+      return { added, skipped }
+    },
+  }))
+
   // ── vault_rekey: upgrade the scrypt KDF parameters in place ────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rekey',
@@ -1110,6 +1173,59 @@ function toSummaryJson(entry: VaultEntry): JsonValue {
 
 /** Strip timestamps from an entry for model-visible output (keeps secrets
  * when the caller asked for the full entry via vault_get). */
+
+
+/** Minimal RFC-4180-ish CSV parser: handles quoted fields with embedded
+ * delimiters/newlines and escaped double quotes. Returns rows of fields. */
+function parseCsv(input: string, delimiter = ','): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  let i = 0
+  const pushField = () => { row.push(field); field = '' }
+  const pushRow = () => { pushField(); rows.push(row); row = [] }
+  while (i < input.length) {
+    const ch = input[i]!
+    if (inQuotes) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') { field += '"'; i++ }
+        else inQuotes = false
+      } else {
+        field += ch
+      }
+    } else if (ch === '"') {
+      inQuotes = true
+    } else if (ch === delimiter) {
+      pushField()
+    } else if (ch === '\n') {
+      pushRow()
+    } else if (ch === '\r') {
+      if (input[i + 1] === '\n') i++
+      pushRow()
+    } else {
+      field += ch
+    }
+    i++
+  }
+  if (field.length > 0 || row.length > 0) pushRow()
+  return rows
+}
+
+/** Copy only defined non-empty record fields into a VaultEntry-shaped patch,
+ * skipping the identity fields (title handled separately). */
+function pickDefinedFromRecord(record: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  const identity = new Set(['id', 'createdAt', 'updatedAt', 'deletedAt'])
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'title' || identity.has(key)) continue
+    if (value === undefined || value === '') continue
+    if (Array.isArray(value) && value.length === 0) continue
+    result[key] = value
+  }
+  return result
+}
+
 function stripTimestamps(entry: VaultEntry): JsonValue {
   const { createdAt, updatedAt, ...rest } = entry
   return rest as unknown as JsonValue
