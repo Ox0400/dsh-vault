@@ -1697,3 +1697,52 @@ test('vault_expiry with 0 clears the expiry', async () => {
     assert.ok(!('expiresAt' in full.entry), 'expiry removed')
   })
 })
+
+test('vault_verify all: true audits every entry', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Good', username: 'u', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'BadSSH', kind: 'ssh', username: 'u' })
+    const r = await call(ctx, 'vault_verify', { all: true }) as { ok: boolean; audited: number; withIssues: number; perEntry: Array<{ title: string; ok: boolean; issues: string[] }> }
+    assert.equal(r.audited, 2)
+    assert.equal(r.withIssues, 1)
+    const bad = r.perEntry.find(e => e.title === 'BadSSH')!
+    assert.equal(bad.ok, false)
+    assert.ok(bad.issues.some(i => i.includes('host')), 'ssh missing host flagged')
+    assert.equal(r.perEntry.find(e => e.title === 'Good')!.ok, true)
+  })
+})
+
+test('vault_duplicates mode filters title vs content groups', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Same', username: 'alice', password: 'pw-1' })
+    await call(ctx, 'vault_add', { title: 'Same', username: 'alice', password: 'pw-1' })
+    await call(ctx, 'vault_add', { title: 'Other', username: 'alice', password: 'pw-1' })
+    const title = await call(ctx, 'vault_duplicates', { mode: 'title' }) as { groups: unknown[] }
+    assert.equal(title.groups.length, 1, 'one title group (Same x2)')
+    const content = await call(ctx, 'vault_duplicates', { mode: 'content' }) as { groups: unknown[][] }
+    assert.equal(content.groups.length, 1, 'one content group (alice::pw-1 x3)')
+    assert.equal(content.groups[0]!.length, 3, 'content group holds 3 entries')
+    const both = await call(ctx, 'vault_duplicates', { mode: 'both' }) as { groups: unknown[] }
+    assert.equal(both.groups.length, 2, 'union of title + content groups')
+  })
+})
+
+test('vault_report includes rotation and stats footer', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Rep1', kind: 'api-key', apiKey: 'k', rotationDays: 30 })
+    const r = await call(ctx, 'vault_report', {}) as { report: string }
+    assert.ok(r.report.includes('[api-key] Rep1'), 'kind+title present')
+    assert.ok(r.report.includes('rot 30d'), 'rotation column present')
+    assert.ok(r.report.includes('total 1'), 'stats footer present')
+  })
+})
+
+test('vault_backup honors backupRetention config default', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Cfg', password: 'pw' })
+    // withContext applies default config; config.backupRetention unset → 10
+    const r = await call(ctx, 'vault_backup', {}) as { kept: number; pruned: number }
+    assert.equal(r.kept, 1)
+    assert.equal(r.pruned, 0)
+  })
+})

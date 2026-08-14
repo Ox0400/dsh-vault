@@ -70,6 +70,7 @@ export function apply(ctx: ClientContext): void {
     backupStatus: () => invoke<{ daysSinceBackup: number; backups: number }>('backupStatus'),
     backup: (maxBackups) => invoke<{ path: string; kept: number; pruned: number }>('backup', { maxBackups: maxBackups ?? 10 }),
     health: () => invoke<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>('health'),
+    duplicates: () => invoke<{ groups: number }>('duplicates'),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),
     undeleteAll: () => invoke<{ restored: number }>('undeleteAll'),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),

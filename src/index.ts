@@ -66,6 +66,9 @@ export interface Config {
    * vault_export / vault_import. When absent, those tools require the master
    * password value to be passed explicitly (not recommended). */
   exportPasswordEnv?: string
+  /** Number of encrypted backups to keep; vault_backup prunes older copies.
+   * Default 10. */
+  backupRetention?: number
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -81,6 +84,7 @@ export const Config: Schema<Config> = Schema.object({
   autoCapture: Schema.boolean(),
   lockTimeoutSeconds: Schema.number(),
   exportPasswordEnv: Schema.string(),
+  backupRetention: Schema.number().description('How many encrypted backups to keep (default 10; vault_backup prunes older copies).'),
 })
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -830,12 +834,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_verify: integrity/completeness check of one entry ─────────────────
   ctx.tools.register(defineTool({
     name: 'vault_verify',
-    description: 'Verify one entry for completeness and plausibility: required fields per kind, '
-      + 'valid port/expiry, and that required secrets are present. No secrets in the report.',
-    parameters: { id: { type: 'string', required: true, description: 'Entry id.' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}` }] },
+    description: 'Verify one entry (or every entry with all: true) for completeness and plausibility: '
+      + 'required fields per kind, valid port/expiry, and that required secrets are present. No secrets in the report.',
+    parameters: {
+      id: { type: 'string', description: 'Entry id to verify (omit when all is true).' },
+      all: { type: 'boolean', description: 'Verify every active entry and return a per-entry audit.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } }, audited: { type: 'integer' }, withIssues: { type: 'integer' }, perEntry: { type: 'array', items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: v.audited !== undefined ? `audited ${v.audited} entries, ${v.withIssues} with issues` : (v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}`) }] },
     async execute(args) {
       const s = await guardStore()
+      if (args.all === true) {
+        const perEntry: Array<{ id: string; title: string; ok: boolean; issues: string[] }> = []
+        for (const e of s.list()) {
+          const issues: string[] = []
+          if (e.port !== undefined && !/^\d{1,5}$/.test(String(e.port))) issues.push('port is not numeric')
+          if (e.expiresAt !== undefined && e.expiresAt < Date.now()) issues.push('expired')
+          switch (e.kind ?? 'login') {
+            case 'ssh':
+              if (!e.host) issues.push('ssh: missing host')
+              if (!e.password && !e.privateKey) issues.push('ssh: missing password/privateKey')
+              break
+            case 'api-key':
+              if (!e.apiKey && !e.secret) issues.push('api-key: missing apiKey/secret')
+              break
+            case 'oauth':
+              if (!e.accessToken) issues.push('oauth: missing accessToken')
+              break
+          }
+          perEntry.push({ id: e.id, title: e.title, ok: issues.length === 0, issues })
+        }
+        const withIssues = perEntry.filter(p => !p.ok).length
+        return { ok: withIssues === 0, issues: [], audited: perEntry.length, withIssues, perEntry }
+      }
+      if (args.id === undefined) throw new Error('vault_verify: provide id or set all: true')
       const entry = s.get(args.id)
       if (!entry) return { ok: false, issues: ['entry not found'] }
       const issues: string[] = []
@@ -957,20 +988,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
     async execute() {
       const s = await guardStore()
+      const now = Date.now()
       const lines: string[] = []
+      const byKind: Record<string, number> = {}
+      let withTotp = 0
+      let withPrivateKey = 0
+      let highSensitivity = 0
+      let expired = 0
+      let rotationDue = 0
       for (const e of s.list()) {
+        const kind = e.kind ?? 'login'
+        byKind[kind] = (byKind[kind] ?? 0) + 1
+        if (e.otpSecret !== undefined) withTotp++
+        if (e.privateKey !== undefined) withPrivateKey++
+        if (e.sensitivity === 'high') highSensitivity++
+        if (e.expiresAt !== undefined && e.expiresAt < now) expired++
+        if (e.rotationDays !== undefined && e.rotationDays > 0 && (e.updatedAt ?? e.createdAt) + e.rotationDays * 86_400_000 < now) rotationDue++
         const parts = [
           e.favorite ? '★' : '·',
-          `[${e.kind ?? 'login'}]`,
+          `[${kind}]`,
           e.title,
           e.username ?? e.email ?? '',
           e.host !== undefined ? `@${e.host}${e.port !== undefined ? `:${e.port}` : ''}` : '',
           e.expiresAt !== undefined ? `exp ${new Date(e.expiresAt).toISOString().slice(0, 10)}` : '',
+          e.rotationDays !== undefined && e.rotationDays > 0 ? `rot ${e.rotationDays}d` : '',
+          e.otpSecret !== undefined ? 'totp' : '',
+          e.sensitivity === 'high' ? 'high' : '',
         ].filter(Boolean)
         lines.push(parts.join(' '))
       }
-      const header = `dsh-vault inventory (${s.list().length} entries)\n${'-'.repeat(40)}`
-      return { report: lines.length > 0 ? header + '\n' + lines.join('\n') : header }
+      const statsLine = `total ${s.list().length} | byKind ${JSON.stringify(byKind)} | totp ${withTotp} | privateKey ${withPrivateKey} | high ${highSensitivity} | expired ${expired} | rotationDue ${rotationDue}`
+      const header = `dsh-vault inventory\n${'-'.repeat(40)}`
+      const footer = `${'-'.repeat(40)}\n${statsLine}`
+      return { report: header + '\n' + lines.join('\n') + '\n' + footer }
     },
   }))
 
@@ -1092,11 +1142,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_duplicates: exact-title+kind duplicates ───────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_duplicates',
-    description: 'Find entries that are exact duplicates (same title + kind). Returns groups of '
-      + 'summaries (no secrets) so the caller can merge or delete them.',
-    parameters: {},
+    description: 'Find duplicate entries: same title+kind (mode: title), same username+secret (mode: '
+      + 'content), or both. Returns groups of summaries (no secrets) so the caller can merge or delete them.',
+    parameters: { mode: { type: 'string', enum: ['title', 'content', 'both'], description: 'both (default): union of title and content groups; title: same title+kind only; content: same username+secret only.' } },
     output: { schema: { type: 'object', additionalProperties: false, properties: { groups: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `found ${(v.groups as unknown[]).length} duplicate groups` }] },
-    async execute() {
+    async execute(args) {
       const s = await guardStore()
       const byKey = new Map<string, VaultEntrySummary[]>()
       const byContent = new Map<string, VaultEntrySummary[]>()
@@ -1114,8 +1164,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           byContent.set(contentKey, cl)
         }
       }
+      const mode = args.mode ?? 'both'
       const titleGroups = [...byKey.values()].filter(g => g.length > 1)
       const contentGroups = [...byContent.values()].filter(g => g.length > 1)
+      if (mode === 'title') return { groups: titleGroups }
+      if (mode === 'content') return { groups: contentGroups }
       return { groups: [...titleGroups, ...contentGroups] }
     },
   }))
@@ -2045,7 +2098,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const source = resolveVaultPath(config)
       const dir = dirname(source)
-      const maxBackups = args.maxBackups === undefined ? 10 : args.maxBackups
+      const maxBackups = args.maxBackups === undefined ? (config.backupRetention ?? 10) : args.maxBackups
       if (!Number.isInteger(maxBackups) || maxBackups < 1 || maxBackups > 100) {
         throw new Error('vault_backup: maxBackups must be an integer 1–100')
       }
@@ -2249,6 +2302,7 @@ export class VaultGateway extends TypertRemoteService {
   private readonly vaultPath: string | undefined
   private readonly vaultName: string | undefined
   private readonly accessPolicy: AccessPolicy
+  private readonly backupRetention: number
 
   constructor(ctx: Context, config: Config & { accessPolicy?: AccessPolicy }) {
     super(ctx, 'vault')
@@ -2256,6 +2310,7 @@ export class VaultGateway extends TypertRemoteService {
     this.vaultPath = config.path
     this.vaultName = config.name
     this.accessPolicy = config.accessPolicy ?? { mode: config.accessMode ?? 'ask', autoCapture: config.autoCapture ?? false }
+    this.backupRetention = config.backupRetention ?? 10
   }
 
   private async ensureStore(): Promise<VaultStore> {
@@ -2344,7 +2399,8 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Days since last backup + backup count (no secrets). */
   @Remote('backup')
-  async backup(maxBackups = 10): Promise<{ path: string; kept: number; pruned: number }> {
+  async backup(maxBackups?: number): Promise<{ path: string; kept: number; pruned: number }> {
+    const max = maxBackups ?? this.backupRetention
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
     const source = this.vaultPath ?? defaultVaultPath(this.vaultName)
     const backup = join(dir, `vault-backup-${Date.now()}.json`)
@@ -2357,11 +2413,11 @@ export class VaultGateway extends TypertRemoteService {
       const names = (await readdir(dir)).filter(n => /^vault-backup-\d+\.json$/.test(n))
         .map(n => join(dir, n)).sort((a, b) => b.localeCompare(a))
       total = names.length
-      for (const stale of names.filter(n => n !== backup).slice(maxBackups - 1)) {
+      for (const stale of names.filter(n => n !== backup).slice(max - 1)) {
         try { await unlink(stale); pruned++ } catch { /* best-effort */ }
       }
     } catch { /* no dir yet */ }
-    return { path: backup, kept: Math.max(1, Math.min(total, maxBackups)), pruned }
+    return { path: backup, kept: Math.max(1, Math.min(total, max)), pruned }
   }
 
   @Remote('backupStatus')
@@ -2414,6 +2470,20 @@ export class VaultGateway extends TypertRemoteService {
   async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }> {
     const store = await this.ensureStore()
     return store.health()
+  }
+
+  /** Duplicate groups count for the UI health badge (title+kind matches). */
+  @Remote('duplicates')
+  async duplicates(): Promise<{ groups: number }> {
+    const store = await this.ensureStore()
+    const byKey = new Map<string, unknown[]>()
+    for (const e of store.list()) {
+      const key = `${e.title.toLowerCase()}::${e.kind ?? 'login'}`
+      const list = byKey.get(key) ?? []
+      list.push(e)
+      byKey.set(key, list)
+    }
+    return { groups: [...byKey.values()].filter(g => g.length > 1).length }
   }
 
   /** Read one full entry (including secrets) by id. */

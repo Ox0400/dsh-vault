@@ -75,6 +75,7 @@ export interface VaultSectionInjected {
   backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
   backup: (maxBackups?: number) => Promise<{ path: string; kept: number; pruned: number }>
   health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>
+  duplicates: () => Promise<{ groups: number }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
@@ -170,7 +171,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -196,6 +197,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
   const [backupInfo, setBackupInfo] = useState<{ daysSinceBackup: number; backups: number } | null>(null)
   const [recentEntries, setRecentEntries] = useState<Array<Record<string, unknown>>>([])
+  const [dupGroups, setDupGroups] = useState<number>(0)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -259,7 +261,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         rotation().catch(() => []),
         health().catch(() => null),
         recent().catch(() => []),
-      ]).then(([st, bk, rot, hl, rc]) => {
+        duplicates().catch(() => null),
+      ]).then(([st, bk, rot, hl, rc, dp]) => {
+        if (dp !== null && typeof dp === 'object' && (dp as { groups?: number }).groups !== undefined) {
+          setDupGroups((dp as { groups: number }).groups)
+        }
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
@@ -276,7 +282,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     const onFocus = (): void => { load() }
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
-  }, [stats, backupStatus, rotation, health, recent])
+  }, [stats, backupStatus, rotation, health, recent, duplicates])
 
   /** Open the editor for a new entry. */
   function startCreate(): void {
@@ -764,6 +770,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report !== null && report.reused.length > 0 && (
             <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>
+          )}
+          {dupGroups > 0 && (
+            <span className={`${css.badge} ${css.badgeWarn}`}>{t('dupGroups')}: {dupGroups}</span>
           )}
           {report !== null && report.rotation.length === 0 && report.weak.length === 0 && report.reused.length === 0 && (
             <span className={`${css.badge} ${css.badgeOk}`}>{t('healthOk')}</span>

@@ -63,6 +63,9 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_quick_add` | 快速录入（标题 + 一个密钥），支持 tags/notes |
 | `vault_expiry` | 设置/清除过期（`expiresAt: 0` 移除） |
 | `vault_stats` | 概览计数，含 `trashCount`（不含密钥） |
+| `vault_verify` | 校验单个条目或审计全部条目（`all: true`）：按 kind 检查完整性、端口/过期合理性（不含密钥） |
+| `vault_duplicates` | 查找重复分组：`mode` = `both`（默认）/ `title` / `content`（不含密钥） |
+| `vault_report` | 可打印清单，含到期/轮换列与统计页脚（不含密钥） |
 | `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
 | `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
 | `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 |
@@ -153,6 +156,7 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 | `autoCapture` | `false`（默认）。设为 `true` 时，系统提示词会指导模型识别对话中出现的凭据，并**按用户偏好**用 `vault_add` 提供保存。 |
 | `lockTimeoutSeconds` | 自动锁库：空闲超过该秒数后自动重新锁定（清空内存密钥），之后每次读写需 `vault_unlock`。`0`/缺省为禁用。 |
 | `exportPasswordEnv` | 存放 `vault_export`/`vault_import` 导出密码的环境变量名（绝不能作为模型参数传入）。 |
+| `backupRetention` | 保留多少个加密备份（默认 10）；`vault_backup` 自动清理更旧的副本。 |
 
 示例：
 

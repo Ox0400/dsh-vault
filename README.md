@@ -65,6 +65,9 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_quick_add` | Fast capture (title + one secret) with optional tags/notes |
 | `vault_expiry` | Set/clear expiry (`expiresAt: 0` removes it) |
 | `vault_stats` | Overview counts incl. `trashCount` (no secrets) |
+| `vault_verify` | Verify one entry or audit every entry (`all: true`) for per-kind completeness, port/expiry sanity (no secrets) |
+| `vault_duplicates` | Find duplicate groups: `mode` = `both` (default) / `title` / `content` (no secrets) |
+| `vault_report` | Printable inventory with expiry/rotation columns and a stats footer (no secrets) |
 | `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
@@ -155,6 +158,7 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 | `autoCapture` | `false` (default). When `true`, the system prompt instructs the model to detect credentials shared in conversation and — per user preference — offer to save them with `vault_add`. |
 | `lockTimeoutSeconds` | Auto-lock: after this many seconds of inactivity the vault re-locks (key wiped) and every read/write requires `vault_unlock`. `0`/absent disables. |
 | `exportPasswordEnv` | Environment variable holding the export/import password for `vault_export`/`vault_import` (never pass it as a model argument). |
+| `backupRetention` | How many encrypted backups to keep (default 10); `vault_backup` prunes older copies. |
 
 Example:
 
