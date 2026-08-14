@@ -1,0 +1,18 @@
+# dsh-vault install overlay: inserts the plugin into a DeepSeek Harness
+# composition. Use with `pnpm dsh web --patch /abs/path/to/this/file.yml` or
+# merge the insert into your profile's cordis.patch.yml.
+#
+# The plugin entry path comes from the DSH_VAULT_ENTRY environment variable
+# (a `!!js` expression evaluated at entry activation, so this file carries no
+# machine-specific path). Set it to the absolute path of src/index.ts before
+# launching, e.g.:
+#   export DSH_VAULT_ENTRY=/path/to/dsh-vault/src/index.ts
+#   export DSH_VAULT_PASSWORD='your master password'
+# On first tool use the vault is created at $DSH_HOME/vault/default.json (or
+# the configured path).
+
+- insert:
+    - id: vault
+      name: !!js process.env.DSH_VAULT_ENTRY
+      config:
+        masterPasswordEnv: DSH_VAULT_PASSWORD

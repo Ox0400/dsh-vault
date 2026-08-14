@@ -1,0 +1,53 @@
+{
+  "name": "dsh-vault",
+  "version": "0.1.0",
+  "description": "Encrypted credential vault for DeepSeek Harness: store and retrieve usernames, emails, phone numbers, passwords, TOTP secrets, SSH/API-key/OAuth developer credentials through model tools and a Settings UI page.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ox0400",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ox0400/dsh-vault.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Ox0400/dsh-vault/issues"
+  },
+  "homepage": "https://github.com/Ox0400/dsh-vault#readme",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "src",
+    "lib"
+  ],
+  "dependencies": {
+    "@deepseek-ai/dsh-atomic-write": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^",
+    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsdown"
+  }
+}

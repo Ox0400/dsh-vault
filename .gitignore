@@ -1,0 +1,29 @@
+# ── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ── Build output ─────────────────────────────────────────────────────────────
+lib/
+coverage/
+dist/
+*.tsbuildinfo
+.vite/
+.vite-temp/
+
+# ── Environment & secrets ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
