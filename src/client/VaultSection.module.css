@@ -289,3 +289,23 @@
   cursor: pointer;
   font-size: 12px;
 }
+
+.kindFilter {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #444);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.highBadge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(229, 72, 77, 0.15);
+  color: #e5484d;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+}

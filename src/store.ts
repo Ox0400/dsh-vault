@@ -111,7 +111,7 @@ export interface VaultEntry {
 /** An entry as returned by search/list — never carries secrets. */
 export type VaultEntrySummary = Pick<
   VaultEntry,
-  'id' | 'title' | 'kind' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags'
+  'id' | 'title' | 'kind' | 'sensitivity' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags'
 >
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
@@ -654,6 +654,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
   return {
     id: entry.id,
     title: entry.title,
+    ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.email !== undefined ? { email: entry.email } : {}),

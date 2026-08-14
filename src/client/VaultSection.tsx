@@ -13,6 +13,7 @@ import css from './VaultSection.module.css'
 export interface VaultSummaryWire {
   id: string
   title: string
+  sensitivity?: string
   kind?: string
   username?: string
   email?: string
@@ -143,6 +144,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [codeMap, setCodeMap] = useState<Record<string, string>>({})
   const [tagsDraft, setTagsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const [kindFilter, setKindFilter] = useState('')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -345,6 +347,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             onChange={event => setQuery(event.target.value)}
           />
         </label>
+        <select className={css.kindFilter} value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label={t('fieldKind')}>
+          <option value="">{t('allKinds')}</option>
+          {Object.entries(KIND_KEYS).map(([value, key]) => (
+            <option key={value} value={value}>{t(key)}</option>
+          ))}
+        </select>
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly}>
           + {t('add')}
         </button>
@@ -441,12 +449,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>
-          {state.entries.map(entry => {
+          {state.entries.filter(entry => kindFilter === '' || entry.kind === kindFilter).map(entry => {
             const code = codeMap[entry.id]
             return (
               <li key={entry.id} className={css.row}>
                 <div className={css.rowMain}>
-                  <span className={css.title}>{entry.title}</span>
+                  <span className={css.title}>
+                    {entry.title}
+                    {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
+                      <span className={css.highBadge}>{t('highSensitivity')}</span>
+                    )}
+                  </span>
                   <span className={css.identity}>{identityLine(entry)}</span>
                   {code !== undefined && <span className={css.totp}>{code}</span>}
                 </div>

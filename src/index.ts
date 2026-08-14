@@ -1071,6 +1071,7 @@ export class VaultGateway extends TypertRemoteService {
 export type VaultEntrySummaryWire = {
   id: string
   title: string
+  sensitivity?: 'normal' | 'high'
   kind?: VaultEntryKind
   username?: string
   email?: string
@@ -1089,6 +1090,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummaryWire {
   return {
     id: entry.id,
     title: entry.title,
+    ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.email !== undefined ? { email: entry.email } : {}),
