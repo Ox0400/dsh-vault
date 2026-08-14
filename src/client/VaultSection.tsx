@@ -536,6 +536,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     onClick={() => void copyValue(entry.id, entry.username ?? entry.title)}
                     disabled={busy}
                   >{t('copy')}</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBusy(true)
+                      void get(entry.id).then(r => {
+                        if (r.found && r.entry?.password) void copyValue(entry.id, r.entry.password)
+                        setBusy(false)
+                      }, () => setBusy(false))
+                    }}
+                    disabled={busy || readonly}
+                  >{t('copyPassword')}</button>
                   <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
                   <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly}>{t('edit')}</button>
                   <button

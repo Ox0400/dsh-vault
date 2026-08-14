@@ -69,6 +69,7 @@ test('dsh-vault registers all tools in the registry', async () => {
     assert.deepEqual(names, [
       'vault_add',
       'vault_backup',
+      'vault_backup_status',
       'vault_changes',
       'vault_clipboard',
       'vault_delete',
@@ -77,6 +78,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_expiry',
       'vault_export',
       'vault_export_csv',
+      'vault_export_totp',
       'vault_fill',
       'vault_find',
       'vault_generate_password',
@@ -957,5 +959,36 @@ test('vault_health reports password strength distribution', async () => {
     assert.equal(r.strength.weak, 1)
     assert.equal(r.strength.fair, 1)
     assert.equal(r.strength.strong, 1)
+  })
+})
+
+test('vault_export_totp lists TOTP entries without secrets', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'A 2FA', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    await call(ctx, 'vault_add', { title: 'No totp', password: 'pw' })
+    const r = await call(ctx, 'vault_export_totp', {}) as { entries: Array<Record<string, unknown>> }
+    assert.equal(r.entries.length, 1)
+    assert.ok(!('otpSecret' in r.entries[0]!), 'never leaks the secret')
+  })
+})
+
+test('vault_backup_status reports days since last backup', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_backup', {})
+    const r = await call(ctx, 'vault_backup_status', {}) as { daysSinceBackup: number; backups: number }
+    assert.equal(r.backups, 1)
+    assert.equal(r.daysSinceBackup, 0)
+  })
+})
+
+test('vault_search favoriteOnly filters to pinned entries', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'Pin me', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'Plain', password: 'pw' })
+    await call(ctx, 'vault_pin', { id: a.id as string })
+    const r = await call(ctx, 'vault_search', { query: 'Pin', favoriteOnly: true }) as { results: Array<Record<string, unknown>> }
+    assert.equal(r.results.length, 1)
+    assert.equal(r.results[0]!.title, 'Pin me')
+    assert.equal(r.results[0]!.favorite, true)
   })
 })

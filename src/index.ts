@@ -325,6 +325,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       query: { type: 'string', description: 'Search text; matches case-insensitively. Omit to list all (optionally filtered by kind).' },
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
     },
     output: {
@@ -352,7 +353,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const limit = validateLimit(args.limit, 'vault_search')
       const results = s.search(args.query ?? '', limit)
       const kind = args.kind
-      const filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
+      let filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
+      if (args.favoriteOnly === true) filtered = filtered.filter(r => (r as VaultEntrySummary & { favorite?: boolean }).favorite)
       return { results: filtered, total: filtered.length }
     },
   }))
@@ -954,6 +956,52 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       const groups = [...byKey.values()].filter(g => g.length > 1)
       return { groups }
+    },
+  }))
+
+  // ── vault_export_totp: list all TOTP entries with their labels ─────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_totp',
+    description: 'List every entry that has a TOTP secret, with its title and issuer label. '
+      + 'Intended for migrating authenticator apps; never returns the otpSecret itself.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.entries) }] },
+    async execute() {
+      const s = await guardStore()
+      const entries: JsonValue[] = s.list()
+        .filter(e => e.otpSecret !== undefined)
+        .map(e => {
+          const row: Record<string, string> = { id: e.id, title: e.title }
+          const identity = e.username ?? e.email
+          if (identity !== undefined) row.username = identity
+          return row as unknown as JsonValue
+        })
+      return { entries }
+    },
+  }))
+
+  // ── vault_backup_status: days since last backup ─────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_backup_status',
+    description: 'Report how many days have passed since the last vault-backup-* file was written '
+      + '(1Password-style backup reminder). Returns daysSinceBackup and a suggestion.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { daysSinceBackup: { type: 'integer', required: true }, backups: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `last backup ${v.daysSinceBackup} days ago (${v.backups} backup file(s))` }] },
+    async execute() {
+      const s = await guardStore()
+      const dir = dirname(resolveVaultPath(config))
+      const backups: number[] = []
+      try {
+        const entries = await readdir(dir)
+        for (const entry of entries) {
+          const m = /^vault-backup-(\d+)\.json$/.exec(entry)
+          if (m) backups.push(Number(m[1]))
+        }
+      } catch { /* no dir yet */ }
+      const last = backups.length > 0 ? Math.max(...backups) : 0
+      const days = last > 0 ? Math.floor((Date.now() - last) / 86_400_000) : -1
+      void s
+      return { daysSinceBackup: days, backups: backups.length }
     },
   }))
 
