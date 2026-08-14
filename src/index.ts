@@ -91,6 +91,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   /** Shared access policy; resolved once, mutated by the UI via setAccessMode. */
   const policy = await sharedAccessPolicy(config)
 
+  /** Audit events: other plugins / session logging can subscribe. Payload is
+   * non-secret (tool name + entry id/title only). */
+  const emitAudit = (kind: 'read' | 'write', tool: string, entryId?: string, title?: string): void => {
+    try {
+      ;(ctx as unknown as { emit: (name: string, payload: unknown) => void }).emit(`vault/${kind}`, { tool, entryId, title, at: Date.now() })
+    } catch {
+      // A throwing listener must never break the vault operation.
+    }
+  }
+
   /** Reject mutations when the vault is in readonly mode. */
   function assertWritable(action: string): void {
     if (policy.mode === 'readonly') {
@@ -250,6 +260,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.tags !== undefined ? { tags: args.tags } : {}),
         ...(args.fields !== undefined ? { fields: args.fields } : {}),
       })
+      emitAudit('write', 'vault_add', entry.id, entry.title)
       return { id: entry.id, title: entry.title, message: 'added credential entry' }
     },
   }))
@@ -275,6 +286,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       const entry = await readEntry(args.id)
       if (!entry) return { found: false }
+      emitAudit('read', 'vault_get', entry.id, entry.title)
       return { found: true, entry: stripTimestamps(entry) }
     },
   }))
@@ -378,6 +390,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       const updated = await s.update(args.id, patch)
       if (!updated) return { found: false }
+      emitAudit('write', 'vault_update', updated.id, updated.title)
       return { found: true, entry: toSummaryJson(updated) }
     },
   }))
@@ -403,6 +416,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       assertWritable('vault_delete')
       const s = await guardStore()
       const deleted = await s.delete(args.id)
+      if (deleted) emitAudit('write', 'vault_delete', args.id)
       return { deleted, message: deleted ? 'entry deleted' : 'entry not found' }
     },
   }))

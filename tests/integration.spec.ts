@@ -461,3 +461,20 @@ test('vault_import_csv bulk-imports entries and skips duplicates', async () => {
     assert.equal((full.entry.fields as Record<string, unknown>).region, 'us-east')
   })
 })
+
+test('vault emits read/write audit events that listeners can observe', async () => {
+  await withContext(async ctx => {
+    const events: Array<{ kind: string; tool: string }> = []
+    const unsub = (ctx as unknown as { on: (n: string, f: (p: { tool: string }) => void) => () => void }).on('vault/read', (p) => events.push({ kind: 'read', tool: p.tool }))
+    const unsub2 = (ctx as unknown as { on: (n: string, f: (p: { tool: string }) => void) => () => void }).on('vault/write', (p) => events.push({ kind: 'write', tool: p.tool }))
+
+    const added = await call(ctx, 'vault_add', { title: 'Audited', password: 'pw' })
+    await call(ctx, 'vault_get', { id: added.id as string })
+    await call(ctx, 'vault_delete', { id: added.id as string })
+
+    assert.ok(events.some(e => e.kind === 'write' && e.tool === 'vault_add'), 'vault_add audited')
+    assert.ok(events.some(e => e.kind === 'read' && e.tool === 'vault_get'), 'vault_get audited')
+    assert.ok(events.some(e => e.kind === 'write' && e.tool === 'vault_delete'), 'vault_delete audited')
+    unsub(); unsub2()
+  })
+})
