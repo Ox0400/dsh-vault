@@ -304,6 +304,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       id: { type: 'string', required: true, description: 'The entry id returned by vault_add or vault_search.' },
       fields: { type: 'array', items: { type: 'string' }, description: 'Only return these fields (e.g. ["password", "username"]); omit for all.' },
+      includeHistory: { type: 'boolean', description: 'Also return recent mutation history for this entry.' },
     },
     output: {
       schema: {
@@ -321,6 +322,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (!entry) return { found: false }
       emitAudit('read', 'vault_get', entry.id, entry.title)
       const full = stripTimestamps(entry) as Record<string, unknown>
+      if (args.includeHistory === true) {
+        const s = await guardStore()
+        full.history = s.getHistory().filter(h => h.id === entry.id).slice(0, 10) as unknown as JsonValue
+      }
       if (Array.isArray(args.fields) && args.fields.length > 0) {
         const picked: Record<string, unknown> = {}
         for (const f of args.fields) {
@@ -1213,6 +1218,53 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const kind = args.kind
       const count = kind === undefined ? s.list().length : s.list().filter(e => (e.kind ?? 'login') === kind).length
       return { count }
+    },
+  }))
+
+  // ── vault_set_icon: set icon/color on an entry ──────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_set_icon',
+    description: 'Set the UI icon (emoji) and/or accent color on an entry. Quick visual customization.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      icon: { type: 'string', description: 'Emoji icon, e.g. "🚀".' },
+      color: { type: 'string', description: 'Accent color, e.g. "red" or "#ff0000".' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { updated: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.updated ? 'icon updated' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_set_icon')
+      const s = await guardStore()
+      const patch: VaultEntryPatch = {}
+      if (args.icon !== undefined) patch.icon = args.icon
+      if (args.color !== undefined) patch.color = args.color
+      if (Object.keys(patch).length === 0) throw new Error('vault_set_icon: provide icon and/or color')
+      const updated = await s.update(args.id, patch)
+      return { updated: updated !== undefined }
+    },
+  }))
+
+  // ── vault_describe: human-friendly summary of an entry ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_describe',
+    description: 'Describe an entry in plain language (kind, identity, host/url, tags, expiry) '
+      + 'without revealing secrets. Useful for a quick "what is this entry?" answer.',
+    parameters: { id: { type: 'string', required: true, description: 'Entry id.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { description: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.description }] },
+    async execute(args) {
+      const s = await guardStore()
+      const e = s.get(args.id)
+      if (!e) return { description: 'entry not found' }
+      const bits = [
+        `${e.kind ?? 'login'} credential "${e.title}"`,
+        e.username !== undefined ? `for ${e.username}` : undefined,
+        e.host !== undefined ? `at ${e.host}${e.port !== undefined ? `:${e.port}` : ''}` : undefined,
+        e.url !== undefined ? `(${e.url})` : undefined,
+        e.tags !== undefined && e.tags.length > 0 ? `tags: ${e.tags.join(', ')}` : undefined,
+        e.expiresAt !== undefined ? `expires ${new Date(e.expiresAt).toISOString().slice(0, 10)}` : undefined,
+        e.favorite ? 'pinned' : undefined,
+        e.sensitivity === 'high' ? 'high-sensitivity' : undefined,
+      ].filter(Boolean)
+      return { description: bits.join(' ') }
     },
   }))
 

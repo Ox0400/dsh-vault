@@ -75,6 +75,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_clipboard',
       'vault_count',
       'vault_delete',
+      'vault_describe',
       'vault_duplicates',
       'vault_env',
       'vault_expiry',
@@ -109,6 +110,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rotation',
       'vault_search',
       'vault_search_advanced',
+      'vault_set_icon',
       'vault_stats',
       'vault_strength',
       'vault_switch',
@@ -1199,5 +1201,38 @@ test('vault_update resetRotation refreshes the rotation clock', async () => {
     await call(ctx, 'vault_update', { id: added.id as string, resetRotation: true })
     const r = await call(ctx, 'vault_rotation', {}) as { entries: Array<Record<string, unknown>> }
     assert.ok(!r.entries.some(e => e.title === 'Rot'), 'rotation clock reset → not due')
+  })
+})
+
+test('vault_set_icon updates icon and color', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Icon', password: 'pw' })
+    const r = await call(ctx, 'vault_set_icon', { id: added.id as string, icon: '🐳', color: 'blue' }) as { updated: boolean }
+    assert.equal(r.updated, true)
+    const full = await call(ctx, 'vault_get', { id: added.id as string }) as { entry: Record<string, unknown> }
+    assert.equal(full.entry.icon, '🐳')
+    assert.equal(full.entry.color, 'blue')
+  })
+})
+
+test('vault_get includeHistory returns per-entry history', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Hist', password: 'pw' })
+    await call(ctx, 'vault_update', { id: added.id as string, notes: 'x' })
+    const r = await call(ctx, 'vault_get', { id: added.id as string, includeHistory: true }) as { entry: Record<string, unknown> }
+    const hist = r.entry.history as Array<Record<string, unknown>>
+    assert.ok(Array.isArray(hist) && hist.length >= 2)
+    assert.ok(hist.some(h => h.action === 'add'))
+    assert.ok(hist.some(h => h.action === 'update'))
+  })
+})
+
+test('vault_describe summarizes an entry without secrets', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'db', kind: 'ssh', host: 'h.internal', username: 'u', password: 'top-secret' })
+    const r = await call(ctx, 'vault_describe', { id: (await call(ctx, 'vault_search', { query: 'db' })).results[0]!.id as string }) as { description: string }
+    assert.ok(r.description.includes('ssh'))
+    assert.ok(r.description.includes('h.internal'))
+    assert.ok(!r.description.includes('top-secret'))
   })
 })

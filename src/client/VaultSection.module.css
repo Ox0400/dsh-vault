@@ -384,3 +384,13 @@
 .detailItem {
   opacity: 0.85;
 }
+
+.sortButton {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #444);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}

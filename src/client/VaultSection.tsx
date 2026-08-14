@@ -151,6 +151,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [sortBy, setSortBy] = useState<'alpha' | 'recent'>('alpha')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -394,6 +395,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <option key={tag} value={tag}>{tag}</option>
           ))}
         </select>
+        <button
+          type="button"
+          className={css.sortButton}
+          onClick={() => setSortBy(sortBy === 'alpha' ? 'recent' : 'alpha')}
+        >{sortBy === 'alpha' ? t('sortAlpha') : t('sortRecent')}</button>
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly}>
           + {t('add')}
         </button>
@@ -536,7 +542,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : 0).map(entry => {
             const code = codeMap[entry.id]
             return (
               <li key={entry.id} className={css.row}>
