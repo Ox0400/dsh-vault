@@ -74,6 +74,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_restore',
       'vault_rotation',
       'vault_search',
+      'vault_strength',
       'vault_templates',
       'vault_totp',
       'vault_unlock',
@@ -506,4 +507,16 @@ test('high-sensitivity entries require approval when read in ask mode', async ()
     assert.equal(ok.isError, false)
     assert.equal((ok.value as { entry: { password: string } }).entry.password, 'topsecret')
   }, { accessMode: 'ask' })
+})
+
+test('vault_strength scores weak and strong passwords', async () => {
+  await withContext(async ctx => {
+    const weak = await call(ctx, 'vault_strength', { password: '123456' }) as { score: number; verdict: string }
+    assert.ok(weak.score < 40, `weak score ${weak.score}`)
+    assert.equal(weak.verdict, 'weak')
+
+    const strong = await call(ctx, 'vault_strength', { password: 'Tr0ub4dor&3-Passphrase-X9!' }) as { score: number; verdict: string }
+    assert.ok(strong.score >= 80, `strong score ${strong.score}`)
+    assert.ok(['strong', 'very strong'].includes(strong.verdict))
+  })
 })

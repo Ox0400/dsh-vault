@@ -718,6 +718,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_strength: zero-dependency password strength estimation ────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_strength',
+    description: 'Estimate the strength of a password with a zero-dependency heuristic '
+      + '(length, character-class diversity, common-pattern penalties). Returns a score 0–100 '
+      + 'and a verdict: weak / fair / strong / very strong. Use before choosing or storing a password.',
+    parameters: { password: { type: 'string', required: true, description: 'The password to evaluate.' } },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { score: { type: 'integer', required: true }, verdict: { type: 'string', required: true }, feedback: { type: 'string', required: true } } },
+      render: (_a, v) => [{ type: 'text', text: `${v.verdict} (${v.score}/100) — ${v.feedback}` }],
+    },
+    async execute(args) {
+      const r = estimateStrength(args.password)
+      return r
+    },
+  }))
+
   // ── vault_import_csv: bulk import from a CSV file ───────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_import_csv',
@@ -1255,6 +1272,38 @@ function pickDefinedFromRecord(record: Record<string, unknown>): Record<string, 
     result[key] = value
   }
   return result
+}
+
+
+
+/** Zero-dependency password strength estimator: score 0–100 from length,
+ * character-class coverage, and penalties for common weak patterns. */
+function estimateStrength(password: string): { score: number; verdict: string; feedback: string } {
+  let score = 0
+  const length = password.length
+  // Length is the dominant factor.
+  score += Math.min(45, length * 3)
+  const classes = [
+    /[a-z]/.test(password),
+    /[A-Z]/.test(password),
+    /[0-9]/.test(password),
+    /[^A-Za-z0-9]/.test(password),
+  ].filter(Boolean).length
+  score += classes * 8
+  // Diversity bonus for longer unique characters.
+  const unique = new Set(password).size
+  score += Math.min(15, unique)
+  // Penalties for common weak patterns.
+  let feedback: string[] = []
+  if (length < 8) feedback.push('too short (aim ≥ 12)')
+  if (/^(password|123456|qwerty|letmein|admin|welcome|abc123)$/i.test(password)) { score -= 40; feedback.push('common password') }
+  if (/(.)\1{2,}/.test(password)) { score -= 8; feedback.push('repeated characters') }
+  if (/^\d+$/.test(password)) { score -= 15; feedback.push('digits only') }
+  if (/^[a-z]+$/i.test(password)) { score -= 10; feedback.push('letters only') }
+  if (password.length > 0 && new Set(password).size <= Math.max(3, Math.floor(length / 2))) feedback.push('low diversity')
+  score = Math.max(0, Math.min(100, Math.round(score)))
+  const verdict = score >= 80 ? 'very strong' : score >= 60 ? 'strong' : score >= 40 ? 'fair' : 'weak'
+  return { score, verdict, feedback: feedback.length > 0 ? feedback.join('; ') : 'no obvious weaknesses' }
 }
 
 function stripTimestamps(entry: VaultEntry): JsonValue {
