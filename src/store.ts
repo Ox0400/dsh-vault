@@ -467,6 +467,23 @@ export class VaultStore {
     return { total: this.list().length, byKind, withTotp, highSensitivity, expired }
   }
 
+  /** Activity within the last `windowMs`: entries created, updated, or
+   * soft-deleted in that window, with their action. No secrets. */
+  changes(windowMs = 24 * 60 * 60 * 1000, now = Date.now()): Array<VaultEntrySummary & { action: 'created' | 'updated' | 'deleted'; at: number }> {
+    const since = now - windowMs
+    const out: Array<VaultEntrySummary & { action: 'created' | 'updated' | 'deleted'; at: number }> = []
+    for (const entry of this.entries.values()) {
+      if (entry.deletedAt !== undefined) {
+        if (entry.deletedAt >= since) out.push({ ...toSummary(entry), action: 'deleted', at: entry.deletedAt })
+      } else if (entry.createdAt >= since && entry.updatedAt - entry.createdAt < 60_000) {
+        out.push({ ...toSummary(entry), action: 'created', at: entry.createdAt })
+      } else if (entry.updatedAt >= since) {
+        out.push({ ...toSummary(entry), action: 'updated', at: entry.updatedAt })
+      }
+    }
+    return out.sort((a, b) => b.at - a.at)
+  }
+
   /** Most recently created/updated entries (Bitwarden-style "recent"),
    * returned as summaries without secrets. */
   recent(limit = 10): VaultEntrySummary[] {

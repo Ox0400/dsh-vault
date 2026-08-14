@@ -282,7 +282,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.fields !== undefined ? { fields: args.fields } : {}),
       })
       emitAudit('write', 'vault_add', entry.id, entry.title)
-      return { id: entry.id, title: entry.title, message: 'added credential entry' }
+      const warning = args.password !== undefined && estimateStrength(args.password).score < 40
+        ? ' (warning: password looks weak — run vault_strength to check)'
+        : ''
+      return { id: entry.id, title: entry.title, message: 'added credential entry' + warning }
     },
   }))
 
@@ -558,7 +561,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute() {
       const s = await ensureStore()
       if (!s.isLocked) return { unlocked: false }
-      await s.unlock()
+      try {
+        await s.unlock()
+      } catch {
+        // unlock() re-derives with the configured master password; a failure
+        // here means the deployment's password changed out from under us.
+        throw new Error('vault_unlock: could not re-derive the vault key — the configured master password may have changed; check masterPassword/masterPasswordEnv')
+      }
       return { unlocked: true }
     },
   }))
@@ -574,7 +583,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       label: { type: 'string', description: 'Account label in the URI (default: entry title or "dsh-vault").' },
       issuer: { type: 'string', description: 'Issuer name (default: "dsh-vault").' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { uri: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.uri }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { uri: { type: 'string', required: true }, qr: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.uri }] },
     async execute(args) {
       if ((args.id === undefined) === (args.secret === undefined)) {
         throw new Error('vault_totp_uri: provide exactly one of id or secret')
@@ -593,7 +602,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const issuer = args.issuer ?? 'dsh-vault'
       const encodedLabel = encodeURIComponent(`${issuer}:${label ?? ''}`)
       const params = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' })
-      return { uri: `otpauth://totp/${encodedLabel}?${params.toString()}` }
+      const uri = `otpauth://totp/${encodedLabel}?${params.toString()}`
+      // The URI encodes a QR payload; render it as a QR (e.g. via a QR lib)
+      // or paste it into an authenticator manually.
+      return { uri, qr: `scan or enter this otpauth URI in your authenticator app:\n${uri}` }
     },
   }))
 
@@ -638,6 +650,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const patch: VaultEntryPatch = args.expiresAt === 0 ? { expiresAt: '' as unknown as number } : { expiresAt: args.expiresAt }
       const updated = await s.update(args.id, patch)
       return { updated: updated !== undefined }
+    },
+  }))
+
+  // ── vault_changes: recent activity (created/updated/deleted) ────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_changes',
+    description: 'List vault activity within a time window (default 24h): entries created, updated, or '
+      + 'soft-deleted, newest first. No secrets — a lightweight audit view.',
+    parameters: {
+      hours: { type: 'number', description: 'Look-back window in hours (default 24).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { changes: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.changes) }] },
+    async execute(args) {
+      const s = await guardStore()
+      const hours = args.hours === undefined ? 24 : args.hours
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) {
+        throw new Error('vault_changes: hours must be a positive number ≤ 8760')
+      }
+      return { changes: s.changes(hours * 60 * 60 * 1000) }
     },
   }))
 

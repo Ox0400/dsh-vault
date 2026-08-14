@@ -144,6 +144,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [codeMap, setCodeMap] = useState<Record<string, string>>({})
   const [tagsDraft, setTagsDraft] = useState('')
+  const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [kindFilter, setKindFilter] = useState('')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
@@ -188,6 +189,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   function startCreate(): void {
     setForm(emptyForm())
     setTagsDraft('')
+    setFieldsDraft('')
     setMessage(null)
     setEditor({ status: 'creating' })
   }
@@ -222,6 +224,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         notes: entry.notes ?? '',
       })
       setTagsDraft((entry.tags ?? []).join(', '))
+      setFieldsDraft(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => `${k}=${String(v)}`).join('\n') : '')
       setEditor({ status: 'editing', entry })
     } catch {
       setMessage(t('error'))
@@ -240,6 +243,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setMessage(null)
     try {
       const tags = tagsDraft.split(',').map(x => x.trim()).filter(x => x.length > 0)
+      const fields: Record<string, string> = {}
+      for (const line of fieldsDraft.split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed.length === 0) continue
+        const eq = trimmed.indexOf('=')
+        if (eq <= 0) continue
+        fields[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+      }
       const patch: VaultPatch = {
         title: form.title.trim(),
         ...(form.kind !== undefined ? { kind: form.kind } : {}),
@@ -260,6 +271,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         // Always send tags: an empty array clears them, and the host store
         // treats empty string values as "clear this field" too.
         tags,
+        fields,
       }
       if (editor.status === 'creating') {
         await add(patch as VaultPatch & { title: string })
@@ -561,6 +573,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 value={tagsDraft}
                 onChange={event => setTagsDraft(event.target.value)}
                 placeholder="dev, prod"
+              />
+            </label>
+            <label className={css.field}>
+              <span>{t('fieldCustom')}</span>
+              <textarea
+                value={fieldsDraft}
+                onChange={event => setFieldsDraft(event.target.value)}
+                rows={3}
+                placeholder="region=us-east-1&#10;team=infra"
               />
             </label>
           </div>

@@ -69,6 +69,7 @@ test('dsh-vault registers all tools in the registry', async () => {
     assert.deepEqual(names, [
       'vault_add',
       'vault_backup',
+      'vault_changes',
       'vault_clipboard',
       'vault_delete',
       'vault_env',
@@ -747,5 +748,31 @@ test('vault_report produces a secret-free inventory', async () => {
     assert.ok(r.report.includes('Reported'))
     assert.ok(r.report.includes('h.example.com'))
     assert.ok(!r.report.includes('top-secret-xyz'), 'report must not include secrets')
+  })
+})
+
+test('vault_changes lists recent created entries', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Just added', password: 'pw' })
+    const r = await call(ctx, 'vault_changes', { hours: 24 }) as { changes: Array<{ title: string; action: string }> }
+    assert.ok(r.changes.some(c => c.title === 'Just added' && c.action === 'created'))
+  })
+})
+
+test('vault_add warns on weak passwords', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_add', { title: 'Weak one', password: '123456' }) as { message: string }
+    assert.match(r.message, /weak/i)
+    const ok = await call(ctx, 'vault_add', { title: 'Strong one', password: 'Correct-Horse-Battery-Staple-9!' }) as { message: string }
+    assert.ok(!/weak/i.test(ok.message))
+  })
+})
+
+test('vault_totp_uri includes a qr hint', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'QR', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    const r = await call(ctx, 'vault_totp_uri', { id: added.id as string }) as { uri: string; qr: string }
+    assert.ok(r.uri.startsWith('otpauth://'))
+    assert.match(r.qr, /authenticator/i)
   })
 })
