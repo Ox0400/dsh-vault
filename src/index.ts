@@ -522,6 +522,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       symbols: { type: 'boolean', description: 'Include symbols (default true).' },
       excludeAmbiguous: { type: 'boolean', description: 'Exclude 0/O/1/l/I (default false).' },
       group: { type: 'integer', description: 'Insert "-" every N characters (e.g. 3 → vK7-mQ2-zt9).' },
+      prefix: { type: 'string', description: 'Fixed prefix prepended to the random core (site requirements).' },
+      suffix: { type: 'string', description: 'Fixed suffix appended to the random core (site requirements).' },
     },
     output: {
       schema: {
@@ -543,6 +545,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.symbols !== undefined ? { symbols: args.symbols } : {}),
         ...(args.excludeAmbiguous !== undefined ? { excludeAmbiguous: args.excludeAmbiguous } : {}),
         ...(args.group !== undefined ? { group: args.group } : {}),
+        ...(args.prefix !== undefined ? { prefix: args.prefix } : {}),
+        ...(args.suffix !== undefined ? { suffix: args.suffix } : {}),
       })
       return { password, length: password.length }
     },
@@ -594,7 +598,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       label: { type: 'string', description: 'Account label in the URI (default: entry title or "dsh-vault").' },
       issuer: { type: 'string', description: 'Issuer name (default: "dsh-vault").' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { uri: { type: 'string', required: true }, qr: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.uri }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { uri: { type: 'string', required: true }, qr: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.uri }] },
     async execute(args) {
       if ((args.id === undefined) === (args.secret === undefined)) {
         throw new Error('vault_totp_uri: provide exactly one of id or secret')
@@ -767,6 +771,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           break
       }
       return { ok: issues.length === 0, issues }
+    },
+  }))
+
+  // ── vault_mask: redact likely secrets in free text ──────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_mask',
+    description: 'Redact likely credentials in arbitrary text (API keys, tokens, passwords, private keys) '
+      + 'so it can be logged or quoted safely. Returns the masked text and a count of redactions.',
+    parameters: { text: { type: 'string', required: true, description: 'Text to mask.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { masked: { type: 'string', required: true }, redacted: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.masked }] },
+    async execute(args) {
+      let count = 0
+      const masked = args.text
+        .replace(/(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}/g, () => { count++; return '[REDACTED:TOKEN]' })
+        .replace(/(npm|npms)_[A-Za-z0-9]{20,}/g, () => { count++; return '[REDACTED:NPM]' })
+        .replace(/(sk|pk|rk|ak)_[A-Za-z0-9]{20,}/g, () => { count++; return '[REDACTED:KEY]' })
+        .replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g, () => { count++; return '[REDACTED:PRIVATE-KEY]' })
+        .replace(/(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, (m, p1: string) => { count++; return p1 + '[REDACTED:BEARER]' })
+      return { masked, redacted: count }
     },
   }))
 
@@ -957,7 +980,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'across entries. Returns non-secret findings (entry summaries grouped by the reused value).',
     parameters: {},
     output: {
-      schema: { type: 'object', additionalProperties: false, properties: { weak: { type: 'array', required: true, items: { type: 'json' } }, reused: { type: 'array', required: true, items: { type: 'json' } } } },
+      schema: { type: 'object', additionalProperties: false, properties: { weak: { type: 'array', required: true, items: { type: 'json' } }, reused: { type: 'array', required: true, items: { type: 'json' } }, strength: { type: 'json', required: true } } },
       render: (_a, v) => [{ type: 'text', text: `weak: ${v.weak.length}, reused groups: ${v.reused.length}` }],
     },
     async execute() {

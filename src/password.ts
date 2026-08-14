@@ -32,9 +32,13 @@ export interface PasswordOptions {
   /** Group the output with `-` separators every `group` characters (e.g. 3
    * for `vK7-mQ2-zt9`). Default ungrouped. */
   group?: number
+  /** Fixed prefix prepended to the generated random core. */
+  prefix?: string
+  /** Fixed suffix appended to the generated random core. */
+  suffix?: string
 }
 
-function filterPool(options: Required<Omit<PasswordOptions, 'length' | 'group'>>): { merged: string; classes: string[] } {
+function filterPool(options: Required<Omit<PasswordOptions, 'length' | 'group' | 'prefix' | 'suffix'>>): { merged: string; classes: string[] } {
   const pools: string[] = []
   if (options.lowercase) pools.push(LOWERCASE)
   if (options.uppercase) pools.push(UPPERCASE)
@@ -93,6 +97,14 @@ export function generatePassword(options: PasswordOptions = {}): string {
   }
 
   let password = chars.join('')
+  const coreLength = length
+  void coreLength
+  if (options.prefix !== undefined && options.prefix.length > 0) {
+    password = options.prefix + password
+  }
+  if (options.suffix !== undefined && options.suffix.length > 0) {
+    password = password + options.suffix
+  }
   if (options.group !== undefined && options.group > 1 && password.length > options.group) {
     password = password.match(new RegExp(`.{1,${options.group}}`, 'g'))!.join('-')
   }

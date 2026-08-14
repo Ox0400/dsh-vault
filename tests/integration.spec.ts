@@ -87,6 +87,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_csv',
       'vault_list',
       'vault_lock',
+      'vault_mask',
       'vault_notes',
       'vault_pin',
       'vault_purge',
@@ -925,5 +926,36 @@ test('vault_import_csv restores numeric fields', async () => {
     const full = await call(ctx, 'vault_get', { id: search.results[0]!.id }) as { entry: Record<string, unknown> }
     assert.equal(full.entry.expiresAt, 1780000000000)
     assert.equal(full.entry.rotationDays, 90)
+  })
+})
+
+test('vault_mask redacts tokens and keys', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_mask', { text: 'token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij and npm_123456789012345678901234567890' }) as { masked: string; redacted: number }
+    assert.equal(r.redacted, 2)
+    assert.ok(!r.masked.includes('ghp_'))
+    assert.ok(!r.masked.includes('npm_'))
+    assert.ok(r.masked.includes('[REDACTED'))
+  })
+})
+
+test('vault_generate_password supports prefix and suffix', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_generate_password', { length: 12, prefix: 'Ab!', suffix: '#' }) as { password: string }
+    assert.ok(r.password.startsWith('Ab!'))
+    assert.ok(r.password.endsWith('#'))
+    assert.equal(r.length, r.password.length)
+  })
+})
+
+test('vault_health reports password strength distribution', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'W', password: 'short' })
+    await call(ctx, 'vault_add', { title: 'F', password: 'medium-length-pw' })
+    await call(ctx, 'vault_add', { title: 'S', password: 'this-is-a-very-long-strong-password-123' })
+    const r = await call(ctx, 'vault_health', {}) as { strength: { weak: number; fair: number; strong: number } }
+    assert.equal(r.strength.weak, 1)
+    assert.equal(r.strength.fair, 1)
+    assert.equal(r.strength.strong, 1)
   })
 })

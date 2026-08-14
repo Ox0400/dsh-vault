@@ -497,14 +497,18 @@ export class VaultStore {
    * Health scan: weak passwords (too short), and passwords/API keys reused
    * across entries. Returns non-secret findings keyed by entry id.
    */
-  health(): { weak: Array<VaultEntrySummary>; reused: Array<{ value: string; entries: VaultEntrySummary[] }> } {
+  health(): { weak: Array<VaultEntrySummary>; reused: Array<{ value: string; entries: VaultEntrySummary[] }>; strength: { weak: number; fair: number; strong: number } } {
     const weak: VaultEntrySummary[] = []
+    const strength = { weak: 0, fair: 0, strong: 0 }
     const passwordCounts = new Map<string, VaultEntrySummary[]>()
     const keyCounts = new Map<string, VaultEntrySummary[]>()
     for (const entry of this.list()) {
       const summary = toSummary(entry)
       if (entry.password !== undefined) {
-        if (entry.password.length < VaultStore.MIN_PASSWORD_LENGTH) weak.push(summary)
+        const len = entry.password.length
+        if (len < VaultStore.MIN_PASSWORD_LENGTH) { weak.push(summary); strength.weak++ }
+        else if (len < 20) strength.fair++
+        else strength.strong++
         const list = passwordCounts.get(entry.password) ?? []
         list.push(summary)
         passwordCounts.set(entry.password, list)
@@ -520,7 +524,7 @@ export class VaultStore {
       ...[...passwordCounts.entries()].filter(([, v]) => v.length > 1),
       ...[...keyCounts.entries()].filter(([, v]) => v.length > 1),
     ].map(([value, entries]) => ({ value, entries }))
-    return { weak, reused }
+    return { weak, reused, strength }
   }
 
   /**
