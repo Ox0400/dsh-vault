@@ -47,51 +47,55 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 
 ## 安装
 
-### 方式一：作为本地插件直接加载（开发/快速试用）
+dsh-vault 是一个 **bundle**(声明 `dsh.bundle` 的包):安装到 profile 后,它的 `cordis.patch.yml` 会自动插入 `vault` 插件行(按包名 `dsh-vault` 引用,主密码经 `DSH_VAULT_PASSWORD` 环境变量注入)。包内含自包含构建脚本,git 安装时会自动编译 `lib/`。
 
-在 harness 仓库根目录运行（路径按你的实际 checkout 调整）：
+### 方式一：从 GitHub 安装(推荐)
 
 ```sh
-pnpm dsh web --patch /绝对/路径/to/dsh-vault/cordis.patch.yml
+dsh plugin --profile demo add github:Ox0400/dsh-vault
 ```
 
-`cordis.patch.yml` 中的插件入口路径通过 **`DSH_VAULT_ENTRY` 环境变量**注入（`!!js` 表达式，仓库内不含任何机器相关路径），主密码通过 `masterPasswordEnv` 从环境变量读取：
+git 安装拉取的是**源码**,`prepare` 脚本会在安装时构建 `lib/`。pnpm ≥10 默认阻止 git 依赖执行构建脚本,首次 `add` 会失败并打印一个 `allowBuilds` 键——把**精确的键**(含仓库 URL 的那行)加入 profile 的 `pnpm-workspace.yaml`,再重新 `add`:
 
 ```yaml
-- insert:
-    - id: vault
-      name: !!js process.env.DSH_VAULT_ENTRY
-      config:
-        masterPasswordEnv: DSH_VAULT_PASSWORD
+# $DSH_HOME/profiles/<name>/pnpm-workspace.yaml
+allowBuilds:
+  dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
 ```
 
-启动前设置两个环境变量：
+建议**锁定 commit** 再安装,避免上游推送改变安装时执行的代码:
 
 ```sh
-export DSH_VAULT_ENTRY='/绝对/路径/to/dsh-vault/src/index.ts'
-export DSH_VAULT_PASSWORD='你的强主密码'
+dsh plugin --profile demo add github:Ox0400/dsh-vault#<sha>
 ```
 
-### 方式二：从 GitHub 克隆安装
+允许构建 = 允许该包的代码在你的机器上于安装时执行;只对你信任的源码授予。
+
+### 方式二：本地 clone 开发
 
 ```sh
 git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
-pnpm install    # 拉取 workspace 依赖（需在 harness 仓库内解析 workspace:^）
+pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
+pnpm test       # 运行 41 项 vitest 测试
 ```
 
-然后按方式一的 `--patch` 方式加载，或按方式三安装到 profile。
+> 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
 
-### 方式三：作为组合包安装到 profile
-
-将本目录复制/链接进仓库，然后：
+### 方式三：本地路径安装到 profile
 
 ```sh
-pnpm dsh plugin --profile web add /绝对/路径/to/dsh-vault
+dsh plugin --profile demo add /绝对/路径/to/dsh-vault
 ```
 
-并在 profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<name>/cordis.patch.yml`）中插入插件行（同上），再启动 `pnpm dsh web --profile <name>`。
+启动前设置主密码:
+
+```sh
+export DSH_VAULT_PASSWORD='你的强主密码'
+```
+
+`dsh plugin --profile demo remove dsh-vault` 卸载(同时移除依赖与 layer)。
 
 ## 配置
 
@@ -107,17 +111,36 @@ pnpm dsh plugin --profile web add /绝对/路径/to/dsh-vault
 ## 开发
 
 ```sh
-# 单元 + 集成测试（vitest）
+# 单元 + 集成测试（vitest，41 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
-npx tsc --noEmit
+pnpm typecheck       # tsc -p tsconfig.json --noEmit
 
 # 构建（host 侧 lib/*.js 与浏览器 bundle lib/client.js）
-pnpm build
+pnpm build           # = build:host (tsc) + build:client (tsdown)
+
+# 打包发布（可选：npm pack 产物可直接 `dsh plugin add ./dsh-vault-0.1.0.tgz`）
+npm pack
 ```
 
-仓库内所有测试通过：单元与网关 32 项 + 集成 8 项 = 40/40。
+仓库内所有测试通过：41/41（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+
+## 打包与发布
+
+本包是标准 npm bundle:
+
+- `dsh.bundle.patch` → `cordis.patch.yml`(安装到 profile 后自动应用的 layer)
+- `dsh.client` → 浏览器端声明(`exports["./client"]` 指向 `lib/client.js`)
+- `prepare` 脚本 → git 安装时自包含构建(`tsc` host + `tsdown` client)
+- 运行时依赖全部走 `peerDependencies`(由宿主 harness 提供,避免重复实例)
+
+可选发布途径:
+
+```sh
+npm pack                  # 产出 tarball → dsh plugin add ./dsh-vault-0.1.0.tgz
+npm publish --access public   # 发布 npm → dsh plugin add dsh-vault
+```
 
 ## 安全边界与已知限制
 
