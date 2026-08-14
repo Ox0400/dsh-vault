@@ -332,6 +332,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Field-set summary line for one entry (non-secret). */
+  function kindIcon(kind?: string): string {
+    switch (kind ?? 'login') {
+      case 'ssh': return '🖥️'
+      case 'api-key': return '🔑'
+      case 'oauth': return '🔐'
+      case 'secret': return '🤫'
+      case 'custom': return '🧩'
+      default: return '👤'
+    }
+  }
+
   function identityLine(entry: VaultSummaryWire): string {
     const parts = [
       entry.kind !== undefined ? t(KIND_KEYS[entry.kind] ?? 'kindCustom') : t('kindLogin'),
@@ -490,6 +501,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               <li key={entry.id} className={css.row}>
                 <div className={css.rowMain}>
                   <span className={css.title}>
+                    <span className={css.kindIcon}>{kindIcon(entry.kind)}</span>
                     {(entry as VaultSummaryWire & { favorite?: boolean }).favorite && (
                       <span className={css.pinStar} title={t('pinned')}>★</span>
                     )}

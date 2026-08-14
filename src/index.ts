@@ -25,7 +25,7 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
-import { totp } from './totp.ts'
+import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword } from './password.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
@@ -460,6 +460,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       id: { type: 'string', description: 'Vault entry id whose otpSecret to use. Provide exactly one of id or secret.' },
       secret: { type: 'string', description: 'Bare Base32 secret or otpauth:// URI. Provide exactly one of id or secret.' },
+      period: { type: 'integer', description: 'Time step in seconds (default 30). Ignored when the secret is an otpauth URI that declares its own period.' },
+      digits: { type: 'integer', description: 'Code length (default 6; 6–10). Ignored when the secret is an otpauth URI that declares its own digits.' },
     },
     output: {
       schema: {
@@ -493,8 +495,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         secret = args.secret!
       }
       const nowMs = Date.now()
-      const code = totp(secret, nowMs)
-      const secondsRemaining = 30 - Math.floor(nowMs / 1000) % 30
+      const period = args.period ?? 30
+      const digits = args.digits ?? 6
+      if (!Number.isInteger(period) || period < 5 || period > 3600) {
+        throw new Error('vault_totp: period must be an integer 5–3600')
+      }
+      if (!Number.isInteger(digits) || digits < 6 || digits > 10) {
+        throw new Error('vault_totp: digits must be an integer 6–10')
+      }
+      const code = totpWith(secret, nowMs, period, digits)
+      const secondsRemaining = period - Math.floor(nowMs / 1000) % period
       return { code, ...(label !== undefined ? { label } : {}), secondsRemaining }
     },
   }))
@@ -729,6 +739,37 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_verify: integrity/completeness check of one entry ─────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_verify',
+    description: 'Verify one entry for completeness and plausibility: required fields per kind, '
+      + 'valid port/expiry, and that required secrets are present. No secrets in the report.',
+    parameters: { id: { type: 'string', required: true, description: 'Entry id.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) return { ok: false, issues: ['entry not found'] }
+      const issues: string[] = []
+      if (!entry.title) issues.push('missing title')
+      if (entry.port !== undefined && !/^\d{1,5}$/.test(String(entry.port))) issues.push('port is not numeric')
+      if (entry.expiresAt !== undefined && entry.expiresAt < Date.now()) issues.push('expired')
+      switch (entry.kind ?? 'login') {
+        case 'ssh':
+          if (!entry.host) issues.push('ssh: missing host')
+          if (!entry.password && !entry.privateKey) issues.push('ssh: missing password/privateKey')
+          break
+        case 'api-key':
+          if (!entry.apiKey && !entry.secret) issues.push('api-key: missing apiKey/secret')
+          break
+        case 'oauth':
+          if (!entry.accessToken) issues.push('oauth: missing accessToken')
+          break
+      }
+      return { ok: issues.length === 0, issues }
+    },
+  }))
+
   // ── vault_recent: most recently touched entries ─────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_recent',
@@ -899,11 +940,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_purge',
     description: 'Permanently delete an entry (active or trashed). Cannot be undone — prefer vault_delete '
       + '(soft delete) unless the entry must be removed from disk.',
-    parameters: { id: { type: 'string', required: true, description: 'The entry id to purge.' } },
+    parameters: {
+      id: { type: 'string', required: true, description: 'The entry id to purge.' },
+      confirm: { type: 'boolean', description: 'Must be true when purging an ACTIVE (non-trashed) entry, to prevent accidental permanent deletion. Trashed entries can be purged without it.' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { purged: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.purged ? 'entry purged' : 'entry not found' }] },
     async execute(args) {
       assertWritable('vault_purge')
       const s = await guardStore()
+      const target = s.getIncludingTrash(args.id)
+      if (target !== undefined && target.deletedAt === undefined && args.confirm !== true) {
+        throw new Error('vault_purge: refusing to purge an ACTIVE entry — move it to trash first (vault_delete) or pass confirm: true')
+      }
       return { purged: await s.purge(args.id) }
     },
   }))
@@ -1751,6 +1799,19 @@ function generateUsername(parts: number): string {
   }
   const digits = Math.floor(Math.random() * 9000) + 1000
   return chosen.join('_') + '_' + digits
+}
+
+
+/** TOTP with explicit period/digits. otpauth-URI-declared period/digits take
+ * precedence (the URI is the authoritative provisioning contract); bare
+ * secrets use the caller's explicit values. */
+function totpWith(input: string, nowMs: number, period: number, digits: number): string {
+  const parsed = parseTotpSecret(input)
+  const effPeriod = parsed.periodSeconds === 30 && parsed.secret === input.trim() ? period : parsed.periodSeconds
+  const effDigits = parsed.digits === 6 && parsed.secret === input.trim() ? digits : parsed.digits
+  const key = base32Decode(parsed.secret)
+  const counter = Math.floor(nowMs / 1000 / effPeriod)
+  return hotp(key, counter, effDigits)
 }
 
 function stripTimestamps(entry: VaultEntry): JsonValue {

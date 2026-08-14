@@ -105,6 +105,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_unlock',
       'vault_unpin',
       'vault_update',
+      'vault_verify',
     ])
   })
 })
@@ -454,7 +455,7 @@ test('vault_export/vault_import round-trip an encrypted document', async () => {
 
     // Purge the entry, then import restores it from the export document.
     const entry = (await call(ctx, 'vault_search', { query: 'Portable' })).results[0] as { id: string }
-    await call(ctx, 'vault_purge', { id: entry.id })
+    await call(ctx, 'vault_purge', { id: entry.id, confirm: true })
     const imported = await call(ctx, 'vault_import', { path: file }) as { imported: number }
     assert.ok(imported.imported >= 1)
     assert.equal((await call(ctx, 'vault_search', { query: 'Portable' })).results.length, 1)
@@ -853,5 +854,38 @@ test('vault_env shell-quotes values', async () => {
     const line = r.lines.find(l => l.startsWith('TRICKY_APIKEY='))
     assert.ok(line !== undefined, JSON.stringify(r.lines))
     assert.ok(line!.includes("'"), 'value is quoted')
+  })
+})
+
+test('vault_verify reports missing required fields', async () => {
+  await withContext(async ctx => {
+    const bad = await call(ctx, 'vault_add', { title: 'Incomplete SSH', kind: 'ssh' })
+    const r = await call(ctx, 'vault_verify', { id: bad.id as string }) as { ok: boolean; issues: string[] }
+    assert.equal(r.ok, false)
+    assert.ok(r.issues.some(i => i.includes('host')))
+    const good = await call(ctx, 'vault_add', { title: 'Full SSH', kind: 'ssh', host: 'h', password: 'p' })
+    const ok = await call(ctx, 'vault_verify', { id: good.id as string }) as { ok: boolean }
+    assert.equal(ok.ok, true)
+  })
+})
+
+test('vault_purge refuses to purge an active entry without confirm', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Active', password: 'pw' })
+    const denied = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-pg-${++callCounter}`),
+      name: 'vault_purge', arguments: { id: added.id as string },
+    })
+    assert.equal(denied.isError, true)
+    assert.match((denied.error?.message ?? ''), /ACTIVE/i)
+    const ok = await call(ctx, 'vault_purge', { id: added.id as string, confirm: true }) as { purged: boolean }
+    assert.equal(ok.purged, true)
+  })
+})
+
+test('vault_totp honors explicit period and digits for bare secrets', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_totp', { secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', period: 60, digits: 8 }) as { code: string }
+    assert.match(r.code, /^\d{8}$/)
   })
 })
