@@ -115,8 +115,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    * call `next()` (waterfall event).
    */
   ctx.on('tools/pre-execute', async (exec, next) => {
-    if (policy.mode === 'ask' && exec?.name !== undefined && WRITE_TOOLS.has(exec.name)) {
+    if (exec?.name === undefined) return next()
+    if (policy.mode === 'ask' && WRITE_TOOLS.has(exec.name)) {
       return { kind: 'ask', reason: `dsh-vault: ${exec.name} requires your confirmation in "ask" (prompt-before-write) mode` }
+    }
+    // High-sensitivity reads: in ask mode, reading a `high` entry's secrets
+    // (vault_get by id) also requires confirmation.
+    if (policy.mode === 'ask' && exec.name === 'vault_get') {
+      const id = (exec.arguments as { id?: string } | undefined)?.id
+      if (id !== undefined) {
+        try {
+          const store = await ensureStore()
+          const entry = store.get(id)
+          if (entry?.sensitivity === 'high') {
+            return { kind: 'ask', reason: `dsh-vault: reading high-sensitivity entry "${entry.title}" requires your confirmation` }
+          }
+        } catch {
+          // If the vault is locked etc., let the tool itself report it.
+        }
+      }
     }
     return next()
   })

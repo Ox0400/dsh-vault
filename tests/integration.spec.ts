@@ -478,3 +478,32 @@ test('vault emits read/write audit events that listeners can observe', async () 
     unsub(); unsub2()
   })
 })
+
+test('high-sensitivity entries require approval when read in ask mode', async () => {
+  await withContext(async ctx => {
+    // Seed a high-sensitivity entry via the gateway (bypasses pre-execute).
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const added = await gateway.add({ title: 'Bank vault', password: 'topsecret', sensitivity: 'high' })
+
+    // ask mode: reading it must be denied (no approval service composed).
+    const result = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-hs-${++callCounter}`),
+      name: 'vault_get',
+      arguments: { id: added.id },
+    })
+    assert.equal(result.isError, true)
+    assert.match((result.error?.message ?? ''), /high-sensitivity/i)
+
+    // auto mode: reading is allowed.
+    await gateway.setAccessMode('auto')
+    const ok = await ctx.tools.execute({
+      signal,
+      callId: CallId(`dsh-vault-hs-${++callCounter}`),
+      name: 'vault_get',
+      arguments: { id: added.id },
+    })
+    assert.equal(ok.isError, false)
+    assert.equal((ok.value as { entry: { password: string } }).entry.password, 'topsecret')
+  }, { accessMode: 'ask' })
+})
