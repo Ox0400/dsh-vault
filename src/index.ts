@@ -235,7 +235,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       otpSecret: { type: 'string', description: 'TOTP secret: bare Base32 or an otpauth:// URI.' },
       url: { type: 'string', description: 'Associated URL (login page or service home).' },
       notes: { type: 'string', description: 'Free-form notes.' },
-      tags: { type: 'array', description: 'Searchable tags.', items: { type: 'string' } },
+      tags: { type: 'array', description: 'Searchable tags (array).', items: { type: 'string' } },
+      tagsCsv: { type: 'string', description: 'Tags as a comma/semicolon-separated string (alternative to tags).' },
       fields: {
         type: 'object',
         additionalProperties: true,
@@ -279,7 +280,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.otpSecret !== undefined ? { otpSecret: args.otpSecret } : {}),
         ...(args.url !== undefined ? { url: args.url } : {}),
         ...(args.notes !== undefined ? { notes: args.notes } : {}),
-        ...(args.tags !== undefined ? { tags: args.tags } : {}),
+        ...(args.tags !== undefined || args.tagsCsv !== undefined
+          ? { tags: normalizeTags(args.tagsCsv ?? args.tags) }
+          : {}),
         ...(args.fields !== undefined ? { fields: args.fields } : {}),
       })
       emitAudit('write', 'vault_add', entry.id, entry.title)
@@ -792,6 +795,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         .replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g, () => { count++; return '[REDACTED:PRIVATE-KEY]' })
         .replace(/(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, (m, p1: string) => { count++; return p1 + '[REDACTED:BEARER]' })
       return { masked, redacted: count }
+    },
+  }))
+
+  // ── vault_history: in-process mutation audit trail ──────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_history',
+    description: 'Show recent mutations to the vault (add/update/delete/restore/purge) within this '
+      + 'process, newest first. No secrets — an audit trail for "what changed recently".',
+    parameters: { limit: { type: 'number', description: 'Max entries (default 20).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { events: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.events) }] },
+    async execute(args) {
+      const s = await guardStore()
+      const limit = validateLimit(args.limit, 'vault_history')
+      return { events: s.getHistory().slice(0, limit) as unknown as JsonValue[] }
     },
   }))
 
@@ -1494,6 +1511,13 @@ export class VaultGateway extends TypertRemoteService {
     return { restored: await store.restore(id) }
   }
 
+  /** Recent mutation history (no secrets). */
+  @Remote('history')
+  async history(): Promise<{ events: unknown[] }> {
+    const store = await this.ensureStore()
+    return { events: store.getHistory().slice(0, 20) }
+  }
+
   /** Rotation/expiry report (no secrets). */
   @Remote('rotation')
   async rotation(): Promise<{ entries: unknown[] }> {
@@ -1934,6 +1958,14 @@ function totpWith(input: string, nowMs: number, period: number, digits: number):
   const key = base32Decode(parsed.secret)
   const counter = Math.floor(nowMs / 1000 / effPeriod)
   return hotp(key, counter, effDigits)
+}
+
+
+/** Accept tags as an array or a comma/semicolon-separated string. */
+function normalizeTags(tags: unknown): string[] {
+  if (Array.isArray(tags)) return tags.filter((t): t is string => typeof t === 'string')
+  if (typeof tags === 'string') return tags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+  return []
 }
 
 function stripTimestamps(entry: VaultEntry): JsonValue {

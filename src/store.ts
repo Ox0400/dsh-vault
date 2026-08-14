@@ -186,6 +186,9 @@ export class VaultStore {
   private locked = false
   /** Weak-password heuristic: too short or in a tiny common list. */
   private static readonly MIN_PASSWORD_LENGTH = 12
+  /** In-process mutation history (audit trail): newest last, capped. */
+  private readonly history: Array<{ action: string; id?: string; title?: string; at: number }> = []
+  private static readonly HISTORY_CAP = 100
 
   constructor(path: string, masterPassword: string) {
     this.path = path
@@ -324,6 +327,7 @@ export class VaultStore {
       updatedAt: now,
     }
     this.entries.set(entry.id, entry)
+    this.recordHistory('add', entry.id, entry.title)
     await this.persist()
     return entry
   }
@@ -337,6 +341,22 @@ export class VaultStore {
     entry.updatedAt = Date.now()
     await this.persist()
     return entry
+  }
+
+  /** Record one mutation in the in-process audit trail. */
+  private recordHistory(action: string, id?: string, title?: string): void {
+    this.history.push({
+      action,
+      ...(id !== undefined ? { id } : {}),
+      ...(title !== undefined ? { title } : {}),
+      at: Date.now(),
+    })
+    if (this.history.length > VaultStore.HISTORY_CAP) this.history.shift()
+  }
+
+  /** Recent mutation history (audit trail), newest first. No secrets. */
+  getHistory(): Array<{ action: string; id?: string; title?: string; at: number }> {
+    return [...this.history].reverse()
   }
 
   /** Insert an entry directly (used by bulk import); caller owns timestamps. */
@@ -371,6 +391,7 @@ export class VaultStore {
       }
     }
     this.entries.set(id, updated)
+    this.recordHistory('update', id, updated.title)
     await this.persist()
     return updated
   }
@@ -381,6 +402,7 @@ export class VaultStore {
     const entry = this.entries.get(id)
     if (!entry || entry.deletedAt !== undefined) return false
     entry.deletedAt = Date.now()
+    this.recordHistory('delete', id, entry.title)
     await this.persist()
     return true
   }
@@ -390,6 +412,7 @@ export class VaultStore {
     const entry = this.entries.get(id)
     if (!entry || entry.deletedAt === undefined) return false
     delete entry.deletedAt
+    this.recordHistory('restore', id, entry.title)
     await this.persist()
     return true
   }
@@ -397,7 +420,10 @@ export class VaultStore {
   /** Permanently remove a trashed (or active) entry; returns true when it existed. */
   async purge(id: string): Promise<boolean> {
     const existed = this.entries.delete(id)
-    if (existed) await this.persist()
+    if (existed) {
+      this.recordHistory('purge', id)
+      await this.persist()
+    }
     return existed
   }
 

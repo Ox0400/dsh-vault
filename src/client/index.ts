@@ -64,6 +64,7 @@ export function apply(ctx: ClientContext): void {
     remove: (id) => invoke<{ deleted: boolean }>('delete', { id }),
     trash: () => invoke<{ entries: VaultSectionTypes['entries'] }>('trash').then(r => r.entries),
     rotation: () => invoke<{ entries: unknown[] }>('rotation').then(r => r.entries),
+    history: () => invoke<{ events: unknown[] }>('history').then(r => r.events),
     health: () => invoke<{ weak: unknown[]; reused: unknown[] }>('health'),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),

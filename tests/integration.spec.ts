@@ -85,6 +85,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_generate_username',
       'vault_get',
       'vault_health',
+      'vault_history',
       'vault_import',
       'vault_import_csv',
       'vault_list',
@@ -990,5 +991,27 @@ test('vault_search favoriteOnly filters to pinned entries', async () => {
     assert.equal(r.results.length, 1)
     assert.equal(r.results[0]!.title, 'Pin me')
     assert.equal(r.results[0]!.favorite, true)
+  })
+})
+
+test('vault_history records mutations newest-first', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'H1', password: 'pw' })
+    await call(ctx, 'vault_update', { id: a.id as string, notes: 'n' })
+    const r = await call(ctx, 'vault_history', {}) as { events: Array<Record<string, unknown>> }
+    assert.equal(r.events[0]!.action, 'update')
+    assert.equal(r.events[1]!.action, 'add')
+    assert.ok(!('password' in r.events[0]!), 'history never carries secrets')
+  })
+})
+
+test('vault_add accepts comma-separated tags string', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Tagged', password: 'pw', tagsCsv: 'dev, prod;ops' })
+    const search = await call(ctx, 'vault_search', { query: 'ops' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(search.results.length, 1)
+    const tags = search.results[0]!.tags as string[]
+    assert.deepEqual(tags, ['dev', 'prod', 'ops'])
+    void added
   })
 })
