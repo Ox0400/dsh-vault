@@ -43,8 +43,10 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 |---|---|
 | `vault_add` | Add an entry (any combination of fields; empty strings/arrays are ignored) |
 | `vault_get` | Read a full entry by id (including all secrets) |
-| `vault_search` | Search titles/categories/usernames/emails/phones/hosts/ports/URLs/notes/tags/custom fields (incl. numeric/boolean/nested values; whitespace-separated terms OR-match); returns secret-free summaries; `limit` must be an integer 1–100 |
-| `vault_update` | Update fields by id (unprovided fields kept; empty string clears a field; `title` is renamable) |
+| `vault_search` | Search titles/categories/usernames/emails/phones/hosts/ports/URLs/notes/tags/custom fields (incl. numeric/boolean/nested values; whitespace-separated terms OR-match); optional `createdAfter`/`createdBefore` epoch-millis filters; returns secret-free summaries; `limit` must be an integer 1–100 |
+| `vault_update` | Update fields by id (unprovided fields kept; empty string clears a field; `title` is renamable; `rotationDays: 0` clears rotation = never rotate) |
+| `vault_compare` | Compare two entries field by field (`onlyA`/`onlyB`/`differ`/`equal`) — field names only, never secret values |
+| `vault_rename` | Rename an entry in one call (shortcut for `vault_update`) |
 | `vault_delete` | Soft-delete an entry (moves it to the trash, still encrypted on disk) |
 | `vault_restore` / `vault_purge` | Bring a trashed entry back / permanently remove it from disk |
 | `vault_lock` / `vault_unlock` | Explicitly lock the vault (wipe the in-memory key) / re-unlock it |

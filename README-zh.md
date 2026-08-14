@@ -41,8 +41,10 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 |---|---|
 | `vault_add` | 新增条目（上述字段任意组合；空字符串/空数组字段会被忽略） |
 | `vault_get` | 按 id 读取完整条目（含全部密钥） |
-| `vault_search` | 跨标题/分类/用户名/邮箱/手机/主机/端口/URL/备注/标签/自定义字段（含数字/布尔/嵌套值；空格分隔多词 OR 命中）检索，返回无密摘要；`limit` 须为 1–100 的整数 |
-| `vault_update` | 按 id 更新字段（未提供的字段保留；空字符串清除该字段；`title` 可改名） |
+| `vault_search` | 跨标题/分类/用户名/邮箱/手机/主机/端口/URL/备注/标签/自定义字段（含数字/布尔/嵌套值；空格分隔多词 OR 命中）检索；可选 `createdAfter`/`createdBefore` 毫秒时间戳过滤；返回无密摘要；`limit` 须为 1–100 的整数 |
+| `vault_update` | 按 id 更新字段（未提供的字段保留；空字符串清除该字段；`title` 可改名；`rotationDays: 0` 清除轮换 = 永不轮换） |
+| `vault_compare` | 逐字段比较两个条目（`onlyA`/`onlyB`/`differ`/`equal`）——只返回字段名，绝不返回密钥值 |
+| `vault_rename` | 一次调用即可重命名条目（`vault_update` 的快捷方式） |
 | `vault_delete` | 软删除条目（移入回收站，磁盘上仍加密保留） |
 | `vault_restore` / `vault_purge` | 从回收站恢复 / 从磁盘永久移除 |
 | `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |

@@ -361,6 +361,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
       regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
       sortBy: { type: 'string', enum: ['alpha', 'recent'], description: 'Sort results alphabetically (default) or by updatedAt desc.' },
+      createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
+      createdBefore: { type: 'integer', description: 'Only entries created before this epoch millis.' },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
     },
     output: {
@@ -392,6 +394,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const kind = args.kind
       let filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
       if (args.favoriteOnly === true) filtered = filtered.filter(r => (r as VaultEntrySummary & { favorite?: boolean }).favorite)
+      if (args.createdAfter !== undefined) {
+        const store2 = await guardStore()
+        const ids = new Set(store2.list().filter(e => e.createdAt > args.createdAfter!).map(e => e.id))
+        filtered = filtered.filter(r => ids.has(r.id))
+      }
+      if (args.createdBefore !== undefined) {
+        const store2 = await guardStore()
+        const ids = new Set(store2.list().filter(e => e.createdAt < args.createdBefore!).map(e => e.id))
+        filtered = filtered.filter(r => ids.has(r.id))
+      }
       if (args.sortBy === 'recent') {
         filtered = [...filtered].sort((a, b) => {
           const au = (a as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
@@ -1642,6 +1654,58 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       await s.persist()
       return { added, skipped }
+    },
+  }))
+
+  // ── vault_compare: field-by-field diff of two entries ───────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_compare',
+    description: 'Compare two entries field by field and report which fields differ, are only in one, '
+      + 'or are equal. Secret VALUES are not shown — only the field names and a difference summary.',
+    parameters: { idA: { type: 'string', required: true, description: 'First entry id.' }, idB: { type: 'string', required: true, description: 'Second entry id.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { onlyA: { type: 'array', required: true, items: { type: 'string' } }, onlyB: { type: 'array', required: true, items: { type: 'string' } }, differ: { type: 'array', required: true, items: { type: 'string' } }, equal: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: `only in A: ${v.onlyA.join(',') || '-'} | only in B: ${v.onlyB.join(',') || '-'} | differ: ${v.differ.join(',') || '-'}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const a = s.get(args.idA)
+      const b = s.get(args.idB)
+      if (!a || !b) throw new Error('vault_compare: both entries must exist and be active')
+      const norm = (e: VaultEntry) => {
+        const { createdAt, updatedAt, ...rest } = e
+        return rest as Record<string, unknown>
+      }
+      const na = norm(a)
+      const nb = norm(b)
+      const keys = new Set([...Object.keys(na), ...Object.keys(nb)])
+      const onlyA: string[] = []
+      const onlyB: string[] = []
+      const differ: string[] = []
+      const equal: string[] = []
+      for (const k of keys) {
+        const va = na[k]
+        const vb = nb[k]
+        const sa = JSON.stringify(va)
+        const sb = JSON.stringify(vb)
+        if (va === undefined) onlyB.push(k)
+        else if (vb === undefined) onlyA.push(k)
+        else if (sa !== sb) differ.push(k)
+        else equal.push(k)
+      }
+      return { onlyA, onlyB, differ, equal }
+    },
+  }))
+
+  // ── vault_rename: rename an entry quickly ───────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_rename',
+    description: 'Rename an entry (set a new title). Convenience shortcut for vault_update.',
+    parameters: { id: { type: 'string', required: true, description: 'Entry id.' }, title: { type: 'string', required: true, description: 'New title.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { renamed: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.renamed ? 'entry renamed' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_rename')
+      if (!args.title.trim()) throw new Error('vault_rename: title must not be empty')
+      const s = await guardStore()
+      const updated = await s.update(args.id, { title: args.title.trim() })
+      return { renamed: updated !== undefined }
     },
   }))
 

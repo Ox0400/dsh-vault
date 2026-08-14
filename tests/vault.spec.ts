@@ -478,3 +478,17 @@ test('store: search matches multiple whitespace-separated terms (OR)', async () 
     assert.equal(vault.search('nothing here').length, 0)
   })
 })
+
+test('store: rotationDays 0 clears rotation (never rotate)', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const added = await vault.add({ title: 'Rot', password: 'pw', rotationDays: 30 })
+    assert.equal(added.rotationDays, 30)
+    // A zero interval must clear the field, not report due forever.
+    await vault.update(added.id, { rotationDays: 0 })
+    const updated = vault.get(added.id)!
+    assert.ok(!('rotationDays' in updated), 'rotationDays cleared by 0')
+    const report = vault.rotationReport(Date.now() + 10_000_000_000)
+    assert.ok(!report.some(r => r.title === 'Rot'), 'no rotation due for cleared entry')
+  })
+})

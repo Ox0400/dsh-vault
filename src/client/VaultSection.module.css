@@ -344,6 +344,33 @@
   background: var(--color-hover, rgba(128, 128, 128, 0.08));
 }
 
+.healthBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.badge {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 999px;
+  background: var(--dsh-color-surface-2, #f7f7f8);
+  color: var(--dsh-color-text-2, #555);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 10px;
+}
+.badgeOk {
+  border-color: #2e9e5b;
+  color: #2e9e5b;
+}
+.badgeWarn {
+  border-color: #c98a1b;
+  color: #b57f1a;
+}
+.badgeDanger {
+  border-color: #cf3d3d;
+  color: #c03a3a;
+}
 .footer {
   font-size: 12px;
   opacity: 0.6;

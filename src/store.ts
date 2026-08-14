@@ -346,6 +346,9 @@ export class VaultStore {
       createdAt: now,
       updatedAt: now,
     }
+    if ((patch as Record<string, unknown>).rotationDays === 0) {
+      delete (entry as unknown as Record<string, unknown>).rotationDays
+    }
     this.entries.set(entry.id, entry)
     this.recordHistory('add', entry.id, entry.title)
     await this.persist()
@@ -411,6 +414,12 @@ export class VaultStore {
       }
     }
     this.entries.set(id, updated)
+    // rotationDays: 0 means "never rotate" — clear the field entirely instead
+    // of keeping a zero interval that would report due forever.
+    if ('rotationDays' in patch && (patch.rotationDays ?? 0) === 0) {
+      delete (updated as unknown as Record<string, unknown>).rotationDays
+      this.entries.set(id, updated)
+    }
     this.recordHistory('update', id, updated.title)
     await this.persist()
     return updated
@@ -466,7 +475,8 @@ export class VaultStore {
     const report: Array<VaultEntrySummary & { due: 'expired' | 'due' | 'soon'; daysLeft: number }> = []
     for (const entry of this.list()) {
       const base = entry.updatedAt ?? entry.createdAt
-      const rotationAt = entry.rotationDays !== undefined ? base + entry.rotationDays * 86_400_000 : undefined
+      const rotationDays = entry.rotationDays !== undefined && entry.rotationDays > 0 ? entry.rotationDays : undefined
+      const rotationAt = rotationDays !== undefined ? base + rotationDays * 86_400_000 : undefined
       const expiresAt = entry.expiresAt
       let due: 'expired' | 'due' | 'soon' | undefined
       let daysLeft: number

@@ -204,6 +204,31 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     // refresh is memoized on query (debounced); list/search are stable.
   }, [refresh])
 
+  // Vault health & meta: load once on mount (stats, backup age, rotation,
+  // weak/reused scan, recent activity) and refresh on window focus.
+  useEffect(() => {
+    let current = true
+    const load = (): void => {
+      void Promise.all([
+        stats().catch(() => null),
+        backupStatus().catch(() => null),
+        rotation().catch(() => []),
+        health().catch(() => null),
+        recent().catch(() => []),
+      ]).then(([st, bk, rot, hl, rc]) => {
+        if (!current) return
+        if (st !== null) setVaultStats(st as Record<string, unknown>)
+        if (bk !== null) setBackupInfo(bk)
+        setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]) })
+        setRecentEntries((rc ?? []) as Array<Record<string, unknown>>)
+      })
+    }
+    load()
+    const onFocus = (): void => { load() }
+    window.addEventListener('focus', onFocus)
+    return () => { current = false; window.removeEventListener('focus', onFocus) }
+  }, [stats, backupStatus, rotation, health, recent])
+
   /** Open the editor for a new entry. */
   function startCreate(): void {
     setForm(emptyForm())
@@ -646,6 +671,36 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </ul>
       )}
 
+      {state.status === 'ready' && (
+        <div className={css.healthBar}>
+          {vaultStats !== null && typeof vaultStats.total === 'number' && (
+            <span className={css.badge}>{t('entryCount')}: {String(vaultStats.total)}</span>
+          )}
+          {vaultStats !== null && typeof vaultStats.withTotp === 'number' && (
+            <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
+          )}
+          {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && (
+            <span className={css.badge}>{t('highSensitivity')}: {String(vaultStats.highSensitivity)}</span>
+          )}
+          {report !== null && report.rotation.length > 0 && (
+            <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>
+          )}
+          {report !== null && report.weak.length > 0 && (
+            <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>
+          )}
+          {report !== null && report.reused.length > 0 && (
+            <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>
+          )}
+          {report !== null && report.rotation.length === 0 && report.weak.length === 0 && report.reused.length === 0 && (
+            <span className={`${css.badge} ${css.badgeOk}`}>{t('healthOk')}</span>
+          )}
+          {backupInfo !== null && backupInfo.daysSinceBackup >= 0 && (
+            <span className={`${css.badge} ${backupInfo.daysSinceBackup > 14 ? css.badgeDanger : backupInfo.daysSinceBackup > 7 ? css.badgeWarn : ''}`}>
+              {t('healthBackup')}: {backupInfo.daysSinceBackup}d
+            </span>
+          )}
+        </div>
+      )}
       {state.status === 'ready' && (
         <p className={css.footer}>
           {t('entryCount')}: {state.entries.length}

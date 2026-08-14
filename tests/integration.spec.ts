@@ -75,6 +75,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_bulk_export',
       'vault_changes',
       'vault_clipboard',
+      'vault_compare',
       'vault_count',
       'vault_delete',
       'vault_describe',
@@ -114,6 +115,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_quick_add',
       'vault_recent',
       'vault_rekey',
+      'vault_rename',
       'vault_report',
       'vault_restore',
       'vault_rotate_password',
@@ -1499,5 +1501,45 @@ test('vault_get on a trashed entry returns not found', async () => {
     await call(ctx, 'vault_delete', { id: added.id as string })
     const r = await call(ctx, 'vault_get', { id: added.id as string }) as { found: boolean }
     assert.equal(r.found, false)
+  })
+})
+
+test('vault_compare reports only/differ/equal fields without leaking secrets', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'CompA', username: 'u1', password: 'secret-a', host: 'a.example' }) as { id: string }
+    const b = await call(ctx, 'vault_add', { title: 'CompB', username: 'u1', password: 'secret-b', email: 'b@example' }) as { id: string }
+    const r = await call(ctx, 'vault_compare', { idA: a.id, idB: b.id }) as { onlyA: string[]; onlyB: string[]; differ: string[]; equal: string[] }
+    assert.ok(r.onlyA.includes('host'), 'host only in A')
+    assert.ok(r.onlyB.includes('email'), 'email only in B')
+    assert.ok(r.differ.includes('password'), 'password differs')
+    assert.ok(r.differ.includes('title'), 'title differs')
+    assert.ok(r.equal.includes('username'), 'username equal')
+    const serialized = JSON.stringify(r)
+    assert.ok(!serialized.includes('secret-a') && !serialized.includes('secret-b'), 'values never leak')
+  })
+})
+
+test('vault_rename changes the title', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'OldName', password: 'pw' }) as { id: string }
+    const r = await call(ctx, 'vault_rename', { id: added.id, title: 'NewName' }) as { renamed: boolean }
+    assert.equal(r.renamed, true)
+    const found = await call(ctx, 'vault_get', { id: added.id }) as { entry: { title: string } }
+    assert.equal(found.entry.title, 'NewName')
+  })
+})
+
+test('vault_search honors createdAfter / createdBefore time range', async () => {
+  await withContext(async ctx => {
+    const old = await call(ctx, 'vault_add', { title: 'OldEntry', username: 'x' }) as { id: string }
+    // Fast-forward the store clock: rewrite the entry createdAt by touching the file? Instead,
+    // use a wide-open range for both, then a range that excludes nothing (createdAfter=1).
+    const now = Date.now()
+    const r1 = await call(ctx, 'vault_search', { query: 'OldEntry', createdAfter: 1 }) as { results: Array<{ id: string }> }
+    assert.ok(r1.results.some(e => e.id === old.id), 'old entry found with createdAfter=1')
+    const r2 = await call(ctx, 'vault_search', { query: 'OldEntry', createdAfter: now + 86_400_000 }) as { results: Array<{ id: string }> }
+    assert.ok(!r2.results.some(e => e.id === old.id), 'old entry excluded by future createdAfter')
+    const r3 = await call(ctx, 'vault_search', { query: 'OldEntry', createdBefore: now - 86_400_000 }) as { results: Array<{ id: string }> }
+    assert.ok(!r3.results.some(e => e.id === old.id), 'old entry excluded by past createdBefore')
   })
 })
