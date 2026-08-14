@@ -347,6 +347,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             value={query}
             onChange={event => setQuery(event.target.value)}
           />
+          {query.length > 0 && (
+            <button type="button" className={css.clearButton} onClick={() => setQuery('')} aria-label={t('clearSearch')}>×</button>
+          )}
         </label>
         <select className={css.kindFilter} value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label={t('fieldKind')}>
           <option value="">{t('allKinds')}</option>

@@ -379,6 +379,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       expiresAt: { type: 'integer', description: 'New expiry epoch millis.' },
       sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
       rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
+      favorite: { type: 'boolean', description: 'Pin/unpin the entry (favorites rank first in search).' },
       otpSecret: { type: 'string', description: 'New TOTP secret.' },
       url: { type: 'string', description: 'New URL.' },
       notes: { type: 'string', description: 'New notes.' },
@@ -406,7 +407,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const patch: VaultEntryPatch = {}
       for (const key of [
-        'title', 'kind', 'username', 'email', 'phone', 'password', 'host', 'port', 'privateKey',
+        'title', 'kind', 'sensitivity', 'favorite', 'rotationDays', 'username', 'email', 'phone', 'password', 'host', 'port', 'privateKey',
         'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'url', 'notes', 'tags', 'fields',
       ] as const) {
         const value = args[key]
@@ -621,6 +622,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_expiry: set/update an entry's expiry ──────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_expiry',
+    description: 'Set or update the expiry (epoch millis) of an entry; pass expiresAt as 0 to clear it. '
+      + 'vault_rotation reports entries whose expiry is near or past.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      expiresAt: { type: 'integer', required: true, description: 'Expiry epoch millis, or 0 to clear.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { updated: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.updated ? 'expiry updated' : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_expiry')
+      const s = await guardStore()
+      const patch: VaultEntryPatch = args.expiresAt === 0 ? { expiresAt: '' as unknown as number } : { expiresAt: args.expiresAt }
+      const updated = await s.update(args.id, patch)
+      return { updated: updated !== undefined }
+    },
+  }))
+
   // ── vault_recent: most recently touched entries ─────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_recent',
@@ -672,6 +692,35 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const updated = await s.setFavorite(args.id, false)
       return { unpinned: updated !== undefined }
+    },
+  }))
+
+  // ── vault_report: human-readable inventory (no secrets) ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_report',
+    description: 'Generate a human-readable inventory of the vault: title, kind, username/email, host, '
+      + 'expiry and pin status per entry — NEVER the secret values. Useful for a printable overview.',
+    parameters: {},
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { report: { type: 'string', required: true } } },
+      render: (_a, v) => [{ type: 'text', text: v.report }],
+    },
+    async execute() {
+      const s = await guardStore()
+      const lines: string[] = []
+      for (const e of s.list()) {
+        const parts = [
+          e.favorite ? '★' : '·',
+          `[${e.kind ?? 'login'}]`,
+          e.title,
+          e.username ?? e.email ?? '',
+          e.host !== undefined ? `@${e.host}${e.port !== undefined ? `:${e.port}` : ''}` : '',
+          e.expiresAt !== undefined ? `exp ${new Date(e.expiresAt).toISOString().slice(0, 10)}` : '',
+        ].filter(Boolean)
+        lines.push(parts.join(' '))
+      }
+      const header = `dsh-vault inventory (${s.list().length} entries)\n${'-'.repeat(40)}`
+      return { report: lines.length > 0 ? header + '\n' + lines.join('\n') : header }
     },
   }))
 
@@ -800,19 +849,27 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Render entries flagged for environment export (tags contain "env") as KEY=VALUE lines '
       + 'suitable for .env or export statements. Keys derive from the title + field name; values are the '
       + 'secrets. Returns the lines so the caller can write them to a file (user-authorized).',
-    parameters: {},
+    parameters: {
+      kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { lines: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.lines.join('\n') }] },
-    async execute() {
+    async execute(args) {
       const s = await guardStore()
       const lines: string[] = []
+      const seen = new Set<string>()
       const keyOf = (title: string, field: string): string => title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
+      const kind = args.kind
       for (const entry of s.list()) {
+        if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
         if (!(entry.tags ?? []).includes('env')) continue
         for (const [field, value] of Object.entries(entry)) {
           if (typeof value !== 'string' || value.length === 0) continue
-          if (['id', 'title', 'kind', 'sensitivity', 'host', 'url', 'notes', 'createdAt', 'updatedAt', 'deletedAt'].includes(field)) continue
+          if (['id', 'title', 'kind', 'sensitivity', 'favorite', 'host', 'url', 'notes', 'createdAt', 'updatedAt', 'deletedAt'].includes(field)) continue
           if (['username', 'email', 'phone', 'port', 'tags'].includes(field)) continue
-          lines.push(`${keyOf(entry.title, field)}=${value}`)
+          const key = keyOf(entry.title, field)
+          if (seen.has(key)) continue // first entry wins; avoid duplicate exports
+          seen.add(key)
+          lines.push(`${key}=${value}`)
         }
       }
       return { lines }

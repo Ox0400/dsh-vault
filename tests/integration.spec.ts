@@ -72,6 +72,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_clipboard',
       'vault_delete',
       'vault_env',
+      'vault_expiry',
       'vault_export',
       'vault_export_csv',
       'vault_fill',
@@ -86,6 +87,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_purge',
       'vault_recent',
       'vault_rekey',
+      'vault_report',
       'vault_restore',
       'vault_rotation',
       'vault_search',
@@ -713,5 +715,37 @@ test('vault_totp rejects invalid short secrets with a clear error', async () => 
     })
     assert.equal(r.isError, true)
     assert.match((r.error?.message ?? ''), /too short|invalid Base32/i)
+  })
+})
+
+test('vault_expiry sets and clears an expiry', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Exp', password: 'pw' })
+    await call(ctx, 'vault_expiry', { id: added.id as string, expiresAt: Date.now() - 1000 })
+    const report = await call(ctx, 'vault_rotation', {}) as { entries: Array<{ title: string; due: string }> }
+    assert.ok(report.entries.some(e => e.title === 'Exp' && e.due === 'expired'))
+    // Clear expiry → no longer reported.
+    await call(ctx, 'vault_expiry', { id: added.id as string, expiresAt: 0 })
+    const report2 = await call(ctx, 'vault_rotation', {}) as { entries: Array<{ title: string }> }
+    assert.ok(!report2.entries.some(e => e.title === 'Exp'))
+  })
+})
+
+test('vault_update accepts favorite via the update path', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'Fav', password: 'pw' })
+    await call(ctx, 'vault_update', { id: added.id as string, favorite: true })
+    const search = await call(ctx, 'vault_search', { query: 'Fav' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(search.results[0]!.favorite, true)
+  })
+})
+
+test('vault_report produces a secret-free inventory', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Reported', kind: 'ssh', host: 'h.example.com', password: 'top-secret-xyz' })
+    const r = await call(ctx, 'vault_report', {}) as { report: string }
+    assert.ok(r.report.includes('Reported'))
+    assert.ok(r.report.includes('h.example.com'))
+    assert.ok(!r.report.includes('top-secret-xyz'), 'report must not include secrets')
   })
 })

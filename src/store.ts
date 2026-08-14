@@ -759,6 +759,11 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
           throw new Error('vault: port must be a string or number')
         }
         break
+      case 'favorite':
+        if (typeof value !== 'boolean') {
+          throw new Error('vault: favorite must be a boolean')
+        }
+        break
       case 'tags':
         if (!Array.isArray(value) || value.some(t => typeof t !== 'string')) {
           throw new Error('vault: tags must be an array of strings')
