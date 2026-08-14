@@ -875,7 +875,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
       return s.stats()
@@ -1482,6 +1482,49 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await writeFile(backup, raw, { mode: 0o600 })
       void s
       return { path: backup }
+    },
+  }))
+
+  // ── vault_search_history: search including deleted entries ─────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_search_history',
+    description: 'Search including soft-deleted (trashed) entries, marked with their deleted state. '
+      + 'Returns summaries plus a deleted flag — useful to find something you deleted.',
+    parameters: { query: { type: 'string', required: true, description: 'Search text.' }, limit: { type: 'number', description: 'Max results (default 20).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { results: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.results) }] },
+    async execute(args) {
+      const s = await guardStore()
+      const needle = args.query.trim().toLowerCase()
+      const limit = validateLimit(args.limit, 'vault_search_history')
+      if (needle.length === 0) return { results: [] }
+      const results: JsonValue[] = []
+      for (const e of s.listTrash()) {
+        if (results.length >= limit) break
+        const hay = [e.title, e.username, e.email, e.host, e.url, ...(e.tags ?? [])].filter(Boolean).join(' ').toLowerCase()
+        if (hay.includes(needle)) {
+          results.push({ ...toSummary(e), deleted: true } as unknown as JsonValue)
+        }
+      }
+      return { results }
+    },
+  }))
+
+  // ── vault_undelete_all: restore every trashed entry ─────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_undelete_all',
+    description: 'Restore ALL soft-deleted (trashed) entries back to the active set. Returns how many '
+      + 'were restored.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { restored: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `restored ${v.restored} entries` }] },
+    async execute() {
+      assertWritable('vault_undelete_all')
+      const s = await guardStore()
+      const trashed = s.listTrash()
+      let restored = 0
+      for (const e of trashed) {
+        if (await s.restore(e.id)) restored++
+      }
+      return { restored }
     },
   }))
 

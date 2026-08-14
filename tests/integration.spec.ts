@@ -117,6 +117,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rotation',
       'vault_search',
       'vault_search_advanced',
+      'vault_search_history',
       'vault_set_icon',
       'vault_stats',
       'vault_strength',
@@ -126,6 +127,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_totp',
       'vault_totp_uri',
       'vault_touch',
+      'vault_undelete_all',
       'vault_unlock',
       'vault_unpin',
       'vault_update',
@@ -1389,5 +1391,38 @@ test('vault_backup_now writes an immediate backup', async () => {
     assert.ok(r.path.includes('vault-backup-'))
     const { readFile } = await import('node:fs/promises')
     assert.ok(JSON.parse(await readFile(r.path, 'utf8')).entries.length >= 1)
+  })
+})
+
+test('vault_search_history finds deleted entries', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'GoneSoon', password: 'pw' })
+    await call(ctx, 'vault_delete', { id: added.id as string })
+    const r = await call(ctx, 'vault_search_history', { query: 'GoneSoon' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(r.results.length, 1)
+    assert.equal(r.results[0]!.deleted, true)
+    // Regular search must NOT find it.
+    const normal = await call(ctx, 'vault_search', { query: 'GoneSoon' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(normal.results.length, 0)
+  })
+})
+
+test('vault_undelete_all restores every trashed entry', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'T1', password: 'pw' })
+    const b = await call(ctx, 'vault_add', { title: 'T2', password: 'pw' })
+    await call(ctx, 'vault_delete', { id: a.id as string })
+    await call(ctx, 'vault_delete', { id: b.id as string })
+    const r = await call(ctx, 'vault_undelete_all', {}) as { restored: number }
+    assert.equal(r.restored, 2)
+    assert.equal((await call(ctx, 'vault_search', { query: 'T' })).results.length, 2)
+  })
+})
+
+test('vault_stats reports withPrivateKey count', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'PK', kind: 'ssh', host: 'h', privateKey: '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----' })
+    const r = await call(ctx, 'vault_stats', {}) as { withPrivateKey: number }
+    assert.ok(r.withPrivateKey >= 1)
   })
 })

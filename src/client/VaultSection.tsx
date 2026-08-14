@@ -602,6 +602,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     disabled={busy || readonly}
                   >{t('copyPassword')}</button>
                   <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
+                  {code !== undefined && (
+                    <button type="button" onClick={() => void copyValue(entry.id, code.split(' ')[0]!)} disabled={busy}>{t('copyCode')}</button>
+                  )}
                   <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly}>{t('edit')}</button>
                   <button
                     type="button"

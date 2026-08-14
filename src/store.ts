@@ -522,10 +522,11 @@ export class VaultStore {
 
   /** Vault overview statistics (1Password-style): counts by kind, TOTP,
    * high-sensitivity, expired entries. No secrets. */
-  stats(): { total: number; byKind: Record<string, number>; byTag: Record<string, number>; withTotp: number; highSensitivity: number; expired: number; recent7d: number } {
+  stats(): { total: number; byKind: Record<string, number>; byTag: Record<string, number>; withTotp: number; withPrivateKey: number; highSensitivity: number; expired: number; recent7d: number } {
     const byKind: Record<string, number> = {}
     const byTag: Record<string, number> = {}
     let withTotp = 0
+    let withPrivateKey = 0
     let highSensitivity = 0
     let expired = 0
     let recent7d = 0
@@ -536,11 +537,12 @@ export class VaultStore {
       byKind[kind] = (byKind[kind] ?? 0) + 1
       for (const tag of entry.tags ?? []) byTag[tag] = (byTag[tag] ?? 0) + 1
       if (entry.otpSecret !== undefined) withTotp++
+      if (entry.privateKey !== undefined) withPrivateKey++
       if (entry.sensitivity === 'high') highSensitivity++
       if (entry.expiresAt !== undefined && entry.expiresAt < now) expired++
       if (entry.createdAt >= weekAgo) recent7d++
     }
-    return { total: this.list().length, byKind, byTag, withTotp, highSensitivity, expired, recent7d }
+    return { total: this.list().length, byKind, byTag, withTotp, withPrivateKey, highSensitivity, expired, recent7d }
   }
 
   /** Merge `fromId` into `toId`: non-empty fields of `from` fill gaps in `to`,
