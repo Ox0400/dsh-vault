@@ -77,7 +77,9 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_export',
       'vault_export_csv',
       'vault_fill',
+      'vault_find',
       'vault_generate_password',
+      'vault_generate_username',
       'vault_get',
       'vault_health',
       'vault_import',
@@ -814,5 +816,42 @@ test('vault_import_csv skips rows with invalid kind', async () => {
     const r = await call(ctx, 'vault_import_csv', { path: csvPath }) as { added: number; skipped: number }
     assert.equal(r.added, 1)
     assert.equal(r.skipped, 1)
+  })
+})
+
+test('vault_find matches normalized text', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Prod DB', kind: 'ssh', host: 'db.internal.example.com' })
+    const r = await call(ctx, 'vault_find', { text: 'DBINTERNAL' }) as { results: Array<Record<string, unknown>> }
+    assert.ok(r.results.some(x => x.title === 'Prod DB'))
+    const spaced = await call(ctx, 'vault_find', { text: 'db internal' }) as { results: Array<Record<string, unknown>> }
+    assert.ok(spaced.results.length >= 1)
+  })
+})
+
+test('vault_search lists all when query omitted, filtered by kind', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'S', kind: 'ssh', host: 'x' })
+    await call(ctx, 'vault_add', { title: 'L', password: 'pw' })
+    const all = await call(ctx, 'vault_search', { kind: 'ssh' }) as { results: Array<Record<string, unknown>> }
+    assert.equal(all.results.length, 1)
+    assert.equal(all.results[0]!.title, 'S')
+  })
+})
+
+test('vault_generate_username returns a plausible value', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_generate_username', { style: 'email' }) as { value: string }
+    assert.match(r.value, /^[a-z]+_[a-z]+_\d{4}@example\.com$/)
+  })
+})
+
+test('vault_env shell-quotes values', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'tricky', apiKey: "a'b c", tags: ['env'] })
+    const r = await call(ctx, 'vault_env', {}) as { lines: string[] }
+    const line = r.lines.find(l => l.startsWith('TRICKY_APIKEY='))
+    assert.ok(line !== undefined, JSON.stringify(r.lines))
+    assert.ok(line!.includes("'"), 'value is quoted')
   })
 })

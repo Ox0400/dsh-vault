@@ -523,6 +523,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </ul>
       )}
 
+      {state.status === 'ready' && (
+        <p className={css.footer}>
+          {t('entryCount')}: {state.entries.length}
+        </p>
+      )}
+
       {editor.status !== 'closed' && (
         <div className={css.editor} role="dialog" aria-label={editor.status === 'creating' ? t('add') : t('edit')}>
           <div className={css.editorBody}>

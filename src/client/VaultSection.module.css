@@ -343,3 +343,9 @@
 .row:hover {
   background: var(--color-hover, rgba(128, 128, 128, 0.08));
 }
+
+.footer {
+  font-size: 12px;
+  opacity: 0.6;
+  margin: 0;
+}

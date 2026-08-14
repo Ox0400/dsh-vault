@@ -301,10 +301,10 @@ export class VaultStore {
    * contains, then any-field matches. */
   search(query: string, limit = 20): VaultEntrySummary[] {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    if (terms.length === 0) return []
     const ranked: Array<{ entry: VaultEntry; rank: number }> = []
     for (const entry of this.list()) {
-      const rank = relevanceRank(entry, terms)
+      // Empty terms (query omitted) match everything: rank them all equally.
+      const rank = terms.length === 0 ? 0 : relevanceRank(entry, terms)
       if (rank >= 0) ranked.push({ entry, rank })
     }
     ranked.sort((a, b) => a.rank - b.rank || Number(Boolean(b.entry.favorite)) - Number(Boolean(a.entry.favorite)))

@@ -24,7 +24,7 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultStore } from './store.ts'
+import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
 import { totp } from './totp.ts'
 import { generatePassword } from './password.ts'
 
@@ -323,7 +323,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'Returns non-secret summaries (id, title, kind, username, email, phone, host, port, url, tags) — never passwords, '
       + 'keys, tokens, or TOTP secrets. Use vault_get with a result id to read the full entry.',
     parameters: {
-      query: { type: 'string', required: true, description: 'Search text; matches case-insensitively.' },
+      query: { type: 'string', description: 'Search text; matches case-insensitively. Omit to list all (optionally filtered by kind).' },
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
     },
@@ -350,7 +350,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       const s = await guardStore()
       const limit = validateLimit(args.limit, 'vault_search')
-      const results = s.search(args.query, limit)
+      const results = s.search(args.query ?? '', limit)
       const kind = args.kind
       const filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
       return { results: filtered, total: filtered.length }
@@ -698,6 +698,37 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_find: fuzzy, normalization-agnostic lookup ─────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_find',
+    description: 'Fuzzy-find entries: matches are case-insensitive and ignore punctuation/whitespace '
+      + '(e.g. "db.internal", "dbinternal", "DB Internal" all match host "db.internal"). Returns '
+      + 'secret-free summaries, best matches first.',
+    parameters: {
+      text: { type: 'string', required: true, description: 'Free text to match across title/username/email/host/url/tags.' },
+      limit: { type: 'number', description: 'Max results (default 10).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { results: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.results) }] },
+    async execute(args) {
+      const s = await guardStore()
+      const needle = args.text.toLowerCase().replace(/[^a-z0-9]+/g, '')
+      if (needle.length === 0) return { results: [] }
+      const scored: Array<{ entry: VaultEntrySummary; score: number }> = []
+      for (const entry of s.list()) {
+        const hay = [entry.title, entry.username, entry.email, entry.host, entry.url, ...(entry.tags ?? [])]
+          .filter(Boolean).join(' ').toLowerCase().replace(/[^a-z0-9]+/g, '')
+        if (hay.includes(needle)) {
+          // Score: exact title match > title contains > field contains.
+          const titleNorm = (entry.title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+          const score = titleNorm === needle ? 0 : titleNorm.includes(needle) ? 1 : 2
+          scored.push({ entry, score })
+        }
+      }
+      scored.sort((a, b) => a.score - b.score)
+      return { results: scored.slice(0, validateLimit(args.limit, 'vault_find')).map(x => x.entry) }
+    },
+  }))
+
   // ── vault_recent: most recently touched entries ─────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_recent',
@@ -795,6 +826,27 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       const tags = [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
       return { tags }
+    },
+  }))
+
+  // ── vault_generate_username: random username/email suggestion ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_generate_username',
+    description: 'Generate a random username or anonymous email suggestion (e.g. "orca_4921" or '
+      + '"plover7391@example.com") for accounts that let you pick a name. Uses crypto randomness.',
+    parameters: {
+      style: { type: 'string', enum: ['username', 'email'], description: 'username (default) or email.' },
+      words: { type: 'number', description: 'Number of name parts (default 2).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { value: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.value }] },
+    async execute(args) {
+      const words = args.words === undefined ? 2 : args.words
+      if (!Number.isInteger(words) || words < 1 || words > 4) {
+        throw new Error('vault_generate_username: words must be an integer 1–4')
+      }
+      const style = args.style ?? 'username'
+      const value = generateUsername(words)
+      return { value: style === 'email' ? `${value}@example.com` : value }
     },
   }))
 
@@ -943,7 +995,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           const key = keyOf(entry.title, field)
           if (seen.has(key)) continue // first entry wins; avoid duplicate exports
           seen.add(key)
-          lines.push(`${key}=${value}`)
+          lines.push(`${key}=${shellQuote(value)}`)
         }
       }
       return { lines }
@@ -1679,6 +1731,26 @@ function estimateStrength(password: string): { score: number; verdict: string; f
   score = Math.max(0, Math.min(100, Math.round(score)))
   const verdict = score >= 80 ? 'very strong' : score >= 60 ? 'strong' : score >= 40 ? 'fair' : 'weak'
   return { score, verdict, feedback: feedback.length > 0 ? feedback.join('; ') : 'no obvious weaknesses' }
+}
+
+
+/** Quote a value for safe use in .env / shell export (single-quote, escaping
+ * embedded single quotes the POSIX way). */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+
+/** Generate a random username from adjective/noun syllables + digits. */
+function generateUsername(parts: number): string {
+  const syllables = ['orca', 'plover', 'ferret', 'manta', 'koala', 'panda', 'otter', 'lynx',
+    'wren', 'quokka', 'tarsier', 'okapi', 'gecko', 'moose', 'heron', 'bison']
+  const chosen: string[] = []
+  for (let i = 0; i < parts; i++) {
+    chosen.push(syllables[Math.floor(Math.random() * syllables.length)]!)
+  }
+  const digits = Math.floor(Math.random() * 9000) + 1000
+  return chosen.join('_') + '_' + digits
 }
 
 function stripTimestamps(entry: VaultEntry): JsonValue {
