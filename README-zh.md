@@ -53,6 +53,15 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 
 dsh-vault 是一个 **bundle**(声明 `dsh.bundle` 的包):安装到 profile 后,它的 `cordis.patch.yml` 会自动插入 `vault` 插件行(按包名 `dsh-vault` 引用,主密码经 `DSH_VAULT_PASSWORD` 环境变量注入)。包内含自包含构建脚本,git 安装时会自动编译 `lib/`。
 
+以下四种安装方式均已**端到端实测通过**(安装 → bundle 层被识别 → 插件激活且 7 个 `vault_*` 工具全部注册 → `vault_add`/`vault_get` 真实往返成功 → 卸载移除 layer):
+
+| 方式 | 命令 | 需构建 | 需 allowBuilds |
+|---|---|---|---|
+| npm | `add dsh-vault` | 否(预构建 lib) | 否 |
+| GitHub | `add github:Ox0400/dsh-vault#v0.1.1` | 是(prepare) | 是(首次) |
+| 本地路径 | `add /绝对/路径/to/dsh-vault` | 否(链接已构建源码) | 否 |
+| tarball | `add ./dsh-vault-0.1.1.tgz` | 否(预构建 lib) | 否 |
+
 ### 方式一：从 npm 安装(最省事)
 
 ```sh
@@ -68,16 +77,28 @@ export DSH_VAULT_PASSWORD='你的强主密码'
 ### 方式二：从 GitHub 安装(锁 tag 或 commit)
 
 ```sh
-dsh plugin --profile demo add github:Ox0400/dsh-vault#v0.1.0
+dsh plugin --profile demo add github:Ox0400/dsh-vault#v0.1.1
 ```
 
-git 安装拉取的是**源码**,`prepare` 脚本会在安装时构建 `lib/`。pnpm ≥10 默认阻止 git 依赖执行构建脚本,首次 `add` 会失败并打印一个 `allowBuilds` 键——把**精确的键**(含仓库 URL 的那行)加入 profile 的 `pnpm-workspace.yaml`,再重新 `add`:
+git 安装拉取的是**源码**,`prepare` 脚本会在安装时构建 `lib/`。pnpm ≥10 默认阻止 git 依赖执行构建脚本。实测流程:
 
-```yaml
-# $DSH_HOME/profiles/<name>/pnpm-workspace.yaml
-allowBuilds:
-  dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
-```
+1. 执行 `add` 命令——会因 `allowBuilds` 失败,并打印需要放行的**精确键**(含仓库 URL 与解析后的 commit hash 的那行):
+
+   ```text
+   allowBuilds:
+     dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
+   ```
+
+2. 把该精确键追加到 profile 的 `pnpm-workspace.yaml`(`$DSH_HOME/profiles/<name>/pnpm-workspace.yaml`):
+
+   ```yaml
+   packages:
+     - .
+   allowBuilds:
+     dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
+   ```
+
+3. 重新执行 `add`——pnpm 现在会运行 `prepare` 脚本,构建 `lib/` 并完成安装。
 
 建议**锁定 tag/commit** 再安装,避免上游推送改变安装时执行的代码。允许构建 = 允许该包的代码在你的机器上于安装时执行;只对你信任的源码授予。
 
@@ -87,11 +108,15 @@ allowBuilds:
 dsh plugin --profile demo add /绝对/路径/to/dsh-vault
 ```
 
+pnpm 将 checkout 链接进 profile;只要 `lib/` 存在(必要时先在 checkout 里执行 `pnpm build`)即被识别为 bundle。
+
 ### 方式四：本地 tarball 安装
 
 ```sh
-npm pack && dsh plugin --profile demo add ./dsh-vault-0.1.0.tgz
+npm pack && dsh plugin --profile demo add ./dsh-vault-0.1.1.tgz
 ```
+
+tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 
 `dsh plugin --profile demo remove dsh-vault` 卸载(同时移除依赖与 layer)。
 
@@ -132,7 +157,7 @@ pnpm typecheck       # tsc -p tsconfig.json --noEmit
 # 构建（host 侧 lib/*.js 与浏览器 bundle lib/client.js）
 pnpm build           # = build:host (tsc) + build:client (tsdown)
 
-# 打包发布（可选：npm pack 产物可直接 `dsh plugin add ./dsh-vault-0.1.0.tgz`）
+# 打包发布（可选：npm pack 产物可直接 `dsh plugin add ./dsh-vault-0.1.1.tgz`）
 npm pack
 ```
 
@@ -150,7 +175,7 @@ npm pack
 可选发布途径:
 
 ```sh
-npm pack                  # 产出 tarball → dsh plugin add ./dsh-vault-0.1.0.tgz
+npm pack                  # 产出 tarball → dsh plugin add ./dsh-vault-0.1.1.tgz
 npm publish --access public   # 发布 npm → dsh plugin add dsh-vault
 ```
 

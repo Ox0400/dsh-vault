@@ -55,6 +55,15 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 
 dsh-vault is a **bundle** (a package declaring `dsh.bundle`): once installed into a profile, its `cordis.patch.yml` automatically inserts the `vault` plugin row (referenced by package name `dsh-vault`; the master password is injected via the `DSH_VAULT_PASSWORD` environment variable). The package ships a self-contained build script — git installs compile `lib/` automatically.
 
+All four install paths below are **verified end-to-end** (install → bundle layer recognized → plugin activates with all 7 `vault_*` tools registered → real `vault_add`/`vault_get` round trip → uninstall removes the layer):
+
+| Path | Command | Build needed | `allowBuilds` |
+|---|---|---|---|
+| npm | `add dsh-vault` | no (prebuilt `lib/`) | no |
+| GitHub | `add github:Ox0400/dsh-vault#v0.1.1` | yes (`prepare`) | yes (first run) |
+| local path | `add /abs/path/to/dsh-vault` | no (link to built source) | no |
+| tarball | `add ./dsh-vault-0.1.1.tgz` | no (prebuilt `lib/`) | no |
+
 ### Option 1: Install from npm (easiest)
 
 ```sh
@@ -70,16 +79,28 @@ export DSH_VAULT_PASSWORD='your strong master password'
 ### Option 2: Install from GitHub (pin a tag or commit)
 
 ```sh
-dsh plugin --profile demo add github:Ox0400/dsh-vault#v0.1.0
+dsh plugin --profile demo add github:Ox0400/dsh-vault#v0.1.1
 ```
 
-A git install fetches **sources, not built artifacts**, so the `prepare` script builds `lib/` at install time. pnpm ≥10 blocks git dependencies from running build scripts by default — the first `add` fails and prints an `allowBuilds` key. Copy the **exact key** (the line containing the repo URL) into the profile's `pnpm-workspace.yaml`, then re-run `add`:
+A git install fetches **sources, not built artifacts**, so the `prepare` script builds `lib/` at install time. pnpm ≥10 blocks git dependencies from running build scripts by default. The verified flow:
 
-```yaml
-# $DSH_HOME/profiles/<name>/pnpm-workspace.yaml
-allowBuilds:
-  dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
-```
+1. Run the `add` command — it fails with an `allowBuilds` error and prints the exact key to allow (the line containing the repo URL, including the resolved commit hash):
+
+   ```text
+   allowBuilds:
+     dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
+   ```
+
+2. Append that exact key to the profile's `pnpm-workspace.yaml` (`$DSH_HOME/profiles/<name>/pnpm-workspace.yaml`):
+
+   ```yaml
+   packages:
+     - .
+   allowBuilds:
+     dsh-vault@https://codeload.github.com/Ox0400/dsh-vault/tar.gz/<sha>: true
+   ```
+
+3. Re-run the `add` — pnpm now runs the `prepare` script, builds `lib/`, and installs.
 
 **Pin a tag/commit** so a later upstream push cannot silently change what runs on install. Treat the allowance for what it is: permission to execute that package's code on your machine at install time — only grant it to sources you trust.
 
@@ -89,11 +110,15 @@ allowBuilds:
 dsh plugin --profile demo add /absolute/path/to/dsh-vault
 ```
 
+pnpm links the checkout into the profile; the bundle is recognized as long as `lib/` exists (run `pnpm build` in the checkout first if needed).
+
 ### Option 4: Install from a tarball
 
 ```sh
-npm pack && dsh plugin --profile demo add ./dsh-vault-0.1.0.tgz
+npm pack && dsh plugin --profile demo add ./dsh-vault-0.1.1.tgz
 ```
+
+The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` is required.
 
 `dsh plugin --profile demo remove dsh-vault` uninstalls (removes both the dependency and the layer).
 
@@ -128,7 +153,7 @@ Common commands:
 pnpm test          # unit + integration tests (vitest, 41)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
-npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.0.tgz`
+npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
 All 41 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
@@ -145,7 +170,7 @@ This package is a standard npm bundle:
 Distribution options:
 
 ```sh
-npm pack                  # tarball → dsh plugin add ./dsh-vault-0.1.0.tgz
+npm pack                  # tarball → dsh plugin add ./dsh-vault-0.1.1.tgz
 npm publish --access public   # registry → dsh plugin add dsh-vault
 ```
 
