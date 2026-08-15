@@ -591,7 +591,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           </select>
         )}
         <label className={css.searchBox}>
-          <span className="sr-only">{t('searchPlaceholder')}</span>
+          <span className={css.srOnly}>{t('searchPlaceholder')}</span>
           <input
             id={searchId}
             type="search"

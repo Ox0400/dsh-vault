@@ -11,14 +11,26 @@
   font-size: 13px;
 }
 
+.srOnly {
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  row-gap: 8px;
 }
 
 .searchBox {
-  flex: 1;
+  flex: 1 1 150px;
+  min-width: 150px;
   display: flex;
 }
 
