@@ -79,6 +79,8 @@ export function apply(ctx: ClientContext): void {
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),
     generatePassword: (options) => invoke<{ password: string }>('generatePassword', { ...(options ?? {}) }),
     strength: (password) => invoke<{ score: number; verdict: string; feedback: string; bits: number }>('strength', { password }),
+    templates: () => invoke<Array<{ name: string; kind: string; fields: Record<string, string> }>>('templates'),
+    saveTemplate: (name, kind, fields) => invoke<{ saved: boolean }>('saveTemplate', { name, kind, fields }),
     generateUsername: () => invoke<{ username: string }>('generateUsername'),
     duplicateGroups: () => invoke<Array<Array<{ id: string; title: string }>>>('duplicateGroups'),
     merge: (fromId, toId, keepSource) => invoke<{ found: boolean }>('merge', { fromId, toId, keepSource: keepSource ?? false }),

@@ -88,6 +88,16 @@ export const Config: Schema<Config> = Schema.object({
   backupRetention: Schema.number().description('How many encrypted backups to keep (default 10; vault_backup prunes older copies).'),
 })
 
+/** Built-in field templates per credential kind. */
+const TEMPLATES: Record<string, Record<string, string>> = {
+  login: { username: 'account username', email: 'account email', password: 'account password' },
+  ssh: { host: 'server host', port: 'port (e.g. 22)', username: 'login user', password: 'password or passphrase', privateKey: 'PEM private key' },
+  'api-key': { apiKey: 'the API key', url: 'API base URL', username: 'owner/account (optional)' },
+  oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)', scope: 'granted scopes (via fields)', tokenUrl: 'token endpoint (via fields)' },
+  secret: { secret: 'the shared secret', notes: 'what it is for' },
+  custom: { fields: 'arbitrary key/value pairs' },
+}
+
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const masterPassword = resolveMasterPassword(config)
   const WRITE_TOOLS = new Set(['vault_add', 'vault_update', 'vault_delete'])
@@ -1345,6 +1355,65 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_copy: copy an entry into another named vault ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_copy',
+    description: 'Copy an entry (including secrets) into another named vault (same master password). '
+      + 'Useful for 1Password-style vault organization. Returns copied or a reason when skipped.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Source entry id.' },
+      to: { type: 'string', required: true, description: 'Target vault name (e.g. "work").' },
+      overwrite: { type: 'boolean', description: 'Update the target entry with the same title (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { copied: { type: 'boolean', required: true }, reason: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.copied ? 'entry copied' : `not copied: ${v.reason ?? '?'}` }] },
+    async execute(args) {
+      assertWritable('vault_copy')
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) throw new Error('vault_copy: source entry not found')
+      const name = args.to.trim()
+      if (!/^[a-zA-Z0-9._-]+$/.test(name)) throw new Error('vault_copy: invalid target vault name')
+      // Pin the target path explicitly: resolveVaultPath prefers the module-level
+      // currentVaultName (set by vault_switch), which would misroute the copy.
+      const target = await sharedVaultStore(masterPassword, { name, path: defaultVaultPath(name) })
+      const existing = target.list().find(e => e.title === entry.title)
+      if (existing && args.overwrite !== true) {
+        return { copied: false, reason: `entry "${entry.title}" already exists in vault "${name}" (pass overwrite: true to update)` }
+      }
+      const patch: VaultEntryPatch = {
+        ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
+        ...(entry.username !== undefined ? { username: entry.username } : {}),
+        ...(entry.email !== undefined ? { email: entry.email } : {}),
+        ...(entry.phone !== undefined ? { phone: entry.phone } : {}),
+        ...(entry.password !== undefined ? { password: entry.password } : {}),
+        ...(entry.host !== undefined ? { host: entry.host } : {}),
+        ...(entry.port !== undefined ? { port: entry.port } : {}),
+        ...(entry.privateKey !== undefined ? { privateKey: entry.privateKey } : {}),
+        ...(entry.apiKey !== undefined ? { apiKey: entry.apiKey } : {}),
+        ...(entry.secret !== undefined ? { secret: entry.secret } : {}),
+        ...(entry.accessToken !== undefined ? { accessToken: entry.accessToken } : {}),
+        ...(entry.refreshToken !== undefined ? { refreshToken: entry.refreshToken } : {}),
+        ...(entry.expiresAt !== undefined ? { expiresAt: entry.expiresAt } : {}),
+        ...(entry.otpSecret !== undefined ? { otpSecret: entry.otpSecret } : {}),
+        ...(entry.url !== undefined ? { url: entry.url } : {}),
+        ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
+        ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
+        ...(entry.icon !== undefined ? { icon: entry.icon } : {}),
+        ...(entry.color !== undefined ? { color: entry.color } : {}),
+        ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
+        ...(entry.favorite === true ? { favorite: true } : {}),
+        ...(entry.rotationDays !== undefined ? { rotationDays: entry.rotationDays } : {}),
+        ...(entry.fields !== undefined ? { fields: entry.fields } : {}),
+      }
+      if (existing) {
+        await target.update(existing.id, patch)
+      } else {
+        await target.add({ title: entry.title, ...patch })
+      }
+      return { copied: true }
+    },
+  }))
+
   // ── vault_touch: mark an entry as recently used ─────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_touch',
@@ -2250,23 +2319,58 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_templates: field templates by kind ───────────────────────────────
-  const TEMPLATES: Record<string, Record<string, string>> = {
-    login: { username: 'account username', email: 'account email', password: 'account password' },
-    ssh: { host: 'server host', port: 'port (e.g. 22)', username: 'login user', password: 'password or passphrase', privateKey: 'PEM private key' },
-    'api-key': { apiKey: 'the API key', url: 'API base URL', username: 'owner/account (optional)' },
-    oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)', scope: 'granted scopes (via fields)', tokenUrl: 'token endpoint (via fields)' },
-    secret: { secret: 'the shared secret', notes: 'what it is for' },
-    custom: { fields: 'arbitrary key/value pairs' },
-  }
   ctx.tools.register(defineTool({
     name: 'vault_templates',
     description: 'Return the recommended fields for a credential kind, so vault_add can be called with '
-      + 'the right field names (e.g. kind ssh → host/port/username/password/privateKey).',
-    parameters: { kind: { type: 'string', description: 'Entry kind; default login.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string', required: true }, fields: { type: 'json', required: true } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.fields) }] },
+      + 'the right field names (e.g. kind ssh → host/port/username/password/privateKey). Also supports '
+      + 'user-defined templates (action: save/list/remove) persisted next to the vault (KeePassXC-style).',
+    parameters: {
+      kind: { type: 'string', description: 'Entry kind; default login.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      action: { type: 'string', description: 'get (default) | save | list | remove.', enum: ['get', 'save', 'list', 'remove'] },
+      name: { type: 'string', description: 'Custom template name (required for save/remove).' },
+      fields: { type: 'json', description: 'Field template for action=save, e.g. {"username":"account","password":""}.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string' }, fields: { type: 'json' }, templates: { type: 'array', items: { type: 'json' } }, saved: { type: 'boolean' }, removed: { type: 'boolean' }, message: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.message ?? JSON.stringify(v.fields) }] },
     async execute(args) {
       const kind = args.kind ?? 'login'
-      return { kind, fields: TEMPLATES[kind] ?? TEMPLATES.login! }
+      const tplPath = join(dirname(resolveVaultPath(config)), 'templates.json')
+      // Custom templates live next to the vault file (same dir).
+      let custom: Array<{ name: string; kind: string; fields: Record<string, string> }> = []
+      try {
+        const raw = await readFile(tplPath, 'utf8')
+        custom = JSON.parse(raw)
+      } catch { /* no custom templates yet */ }
+      if (args.action === 'save') {
+        assertWritable('vault_templates')
+        const name = typeof args.name === 'string' ? args.name.trim() : ''
+        if (!name) throw new Error('vault_templates: name is required for save')
+        const fields = (args.fields ?? {}) as Record<string, unknown>
+        const clean: Record<string, string> = {}
+        for (const [k, v] of Object.entries(fields)) {
+          if (typeof v === 'string') clean[k] = v
+        }
+        custom = custom.filter(t => t.name !== name)
+        custom.push({ name, kind, fields: clean })
+        await mkdir(dirname(tplPath), { recursive: true, mode: 0o700 })
+        await writeFile(tplPath, JSON.stringify(custom, null, 2), { mode: 0o600 })
+        return { saved: true, message: `template "${name}" saved (${Object.keys(clean).length} fields)` }
+      }
+      if (args.action === 'remove') {
+        assertWritable('vault_templates')
+        const name = typeof args.name === 'string' ? args.name.trim() : ''
+        const before = custom.length
+        custom = custom.filter(t => t.name !== name)
+        if (custom.length === before) return { removed: false, message: `template "${name}" not found` }
+        await writeFile(tplPath, JSON.stringify(custom, null, 2), { mode: 0o600 })
+        return { removed: true, message: `template "${name}" removed` }
+      }
+      if (args.action === 'list') {
+        return { templates: custom, message: `${custom.length} custom template(s)` }
+      }
+      // get: named custom template wins over the built-in kind template.
+      const named = typeof args.name === 'string' ? custom.find(t => t.name === args.name) : undefined
+      if (named) return { kind: named.kind, fields: named.fields, message: `template "${named.name}"` }
+      return { kind, fields: TEMPLATES[kind] ?? TEMPLATES.login!, message: `${kind} template` }
     },
   }))
 
@@ -2954,6 +3058,32 @@ export class VaultGateway extends TypertRemoteService {
   async generatePassword(options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }): Promise<{ password: string }> {
     const { generatePassword } = await import('./password.ts')
     return { password: generatePassword({ length: options?.length ?? 24, lowercase: options?.lowercase ?? true, uppercase: options?.uppercase ?? true, digits: options?.digits ?? true, symbols: options?.symbols ?? true, excludeAmbiguous: options?.excludeAmbiguous ?? false }) }
+  }
+
+  /** List built-in + custom templates for the editor's template picker. */
+  @Remote('templates')
+  async templates(): Promise<Array<{ name: string; kind: string; fields: Record<string, string> }>> {
+    const builtin = Object.entries(TEMPLATES).map(([kind, fields]) => ({ name: `builtin:${kind}`, kind, fields }))
+    const tplPath = join(dirname(this.vaultPath ?? defaultVaultPath(this.activeName)), 'templates.json')
+    let custom: Array<{ name: string; kind: string; fields: Record<string, string> }> = []
+    try {
+      custom = JSON.parse(await readFile(tplPath, 'utf8'))
+    } catch { /* none yet */ }
+    return [...builtin, ...custom]
+  }
+
+  /** Save the current form as a reusable template. */
+  @Remote('saveTemplate')
+  async saveTemplate(name: string, kind: string, fields: Record<string, string>): Promise<{ saved: boolean }> {
+    const tplPath = join(dirname(this.vaultPath ?? defaultVaultPath(this.activeName)), 'templates.json')
+    let custom: Array<{ name: string; kind: string; fields: Record<string, string> }> = []
+    try {
+      custom = JSON.parse(await readFile(tplPath, 'utf8'))
+    } catch { /* none yet */ }
+    custom = custom.filter(t => t.name !== name)
+    custom.push({ name, kind, fields })
+    await writeFile(tplPath, JSON.stringify(custom, null, 2), { mode: 0o600 })
+    return { saved: true }
   }
 
   /** Estimate a password's strength for the editor's live meter. */

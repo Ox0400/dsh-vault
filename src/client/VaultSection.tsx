@@ -88,6 +88,8 @@ export interface VaultSectionInjected {
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
   generatePassword: (options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }) => Promise<{ password: string }>
   strength: (password: string) => Promise<{ score: number; verdict: string; feedback: string; bits: number }>
+  templates: () => Promise<Array<{ name: string; kind: string; fields: Record<string, string> }>>
+  saveTemplate: (name: string, kind: string, fields: Record<string, string>) => Promise<{ saved: boolean }>
   generateUsername: () => Promise<{ username: string }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
@@ -197,7 +199,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -214,6 +216,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false })
   const [showGenOpts, setShowGenOpts] = useState(false)
   const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string } | null>(null)
+  const [tplList, setTplList] = useState<Array<{ name: string; kind: string; fields: Record<string, string> }>>([])
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -237,7 +240,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   const readonly = policy?.accessMode === 'readonly'
 
-  // Live password strength meter (debounced) for the editor's password field.
+  // Suggest an icon from the URL domain (1Password-style visual hint).
+  useEffect(() => {
+    const url = form.url ?? ''
+    if (url.length === 0 || (form.icon ?? '').length > 0) return
+    const host = url.replace(/^https?:\/\//i, '').split('/')[0]!.toLowerCase()
+    const map: Record<string, string> = {
+      github: '🐙', gitlab: '🦊', google: '🔎', 'google.com': '🔎', amazon: '📦', apple: '',
+      aws: '☁️', azure: '☁️', digitalocean: '🐳', docker: '🐳', npm: '📦', figma: '🎨',
+      notion: '📝', slack: '💬', discord: '🎮', twitter: '🐦', facebook: '👥', instagram: '📷',
+      linkedin: '💼', youtube: '▶️', netflix: '🎬', spotify: '🎵', dropbox: '📁', drive: '🗂️',
+    }
+    const hostBase = host.split('.')[0] ?? ''
+    const icon = map[host] ?? map[hostBase] ?? ''
+    if (icon) setForm(previous => ({ ...previous, icon }))
+  }, [form.url, form.icon])
   useEffect(() => {
     const pw = form.password ?? ''
     if (pw.length === 0) { setPwStrength(null); return }
@@ -249,6 +266,33 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }, 250)
     return () => window.clearTimeout(timer)
   }, [form.password, strength])
+
+  /** Apply a template's field values to the current form. */
+  function applyTemplate(name: string): void {
+    const tpl = tplList.find(t => t.name === name)
+    if (!tpl) return
+    const next: Partial<FormFields> = {}
+    if (tpl.kind !== 'builtin:custom') next.kind = tpl.kind.replace('builtin:', '')
+    for (const [key, value] of Object.entries(tpl.fields)) {
+      if (key === 'password' || key === 'otpSecret' || key === 'apiKey' || key === 'secret') continue
+      ;(next as Record<string, unknown>)[key] = value
+    }
+    setForm(previous => ({ ...previous, ...next }))
+  }
+
+  /** Save the current form as a reusable template. */
+  async function saveAsTemplate(): Promise<void> {
+    const name = window.prompt(t('tplNamePrompt'))
+    if (!name) return
+    const fields: Record<string, string> = {}
+    for (const key of ['username', 'email', 'phone', 'host', 'port', 'url', 'notes', 'icon', 'color']) {
+      const v = (form as Record<string, unknown>)[key]
+      if (typeof v === 'string' && v.length > 0) fields[key] = v
+    }
+    await saveTemplate(name.trim(), form.kind ?? 'login', fields)
+    await templates().then(setTplList).catch(() => {})
+    setMessage(`${t('tplSaved')} ${name.trim()}`)
+  }
 
   /** Switch the active vault and reload everything. */
   async function switchVaultTo(name: string): Promise<void> {
@@ -328,8 +372,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       () => { /* ignore */ },
     )
     void listVaults().then(setVaults).catch(() => {})
+    void templates().then(setTplList).catch(() => {})
     return () => { current = false }
-  }, [config, status, listVaults])
+  }, [config, status, listVaults, templates])
 
   const refresh = useMemo(() => async () => {
     setState({ status: 'loading' })
@@ -1118,6 +1163,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {editor.status !== 'closed' && (
         <div className={css.editor} role="dialog" aria-label={editor.status === 'creating' ? t('add') : t('edit')}>
           <div className={css.editorBody}>
+            <div className={css.genOpts}>
+              <label className={css.genOptRow}>
+                <span>{t('tplApply')}</span>
+                <select
+                  value=""
+                  onChange={event => { const v = event.target.value; if (v) applyTemplate(v) }}
+                >
+                  <option value="">—</option>
+                  {tplList.map(tpl => <option key={tpl.name} value={tpl.name}>{tpl.name}</option>)}
+                </select>
+              </label>
+              {editor.status === 'editing' && (
+                <button type="button" className={css.retryButton} onClick={() => void saveAsTemplate()} disabled={busy}>{t('tplSave')}</button>
+              )}
+            </div>
             {FORM_FIELDS.map(field => (
               <label key={field.key} className={css.field}>
                 <span>{t(field.label)}</span>

@@ -78,6 +78,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_changes',
       'vault_clipboard',
       'vault_compare',
+      'vault_copy',
       'vault_count',
       'vault_delete',
       'vault_describe',
@@ -2383,5 +2384,44 @@ test('vault_import_browser picks up otpauth and notes columns', async () => {
     assert.ok(full.entry.otpSecret.includes('GEZDGNBVGY3TQOJQ'))
     assert.equal(full.entry.notes, 'note here')
     await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_templates save/list/remove custom templates', async () => {
+  await withContext(async ctx => {
+    const saved = await call(ctx, 'vault_templates', { action: 'save', name: 'MySSH', kind: 'ssh', fields: { host: 'prod.example', username: 'deploy' } }) as { saved: boolean }
+    assert.equal(saved.saved, true)
+    const list = await call(ctx, 'vault_templates', { action: 'list' }) as { templates: Array<{ name: string }> }
+    assert.ok(list.templates.some(t => t.name === 'MySSH'))
+    const got = await call(ctx, 'vault_templates', { name: 'MySSH' }) as { kind: string; fields: Record<string, string> }
+    assert.equal(got.kind, 'ssh')
+    assert.equal(got.fields.host, 'prod.example')
+    const removed = await call(ctx, 'vault_templates', { action: 'remove', name: 'MySSH' }) as { removed: boolean }
+    assert.equal(removed.removed, true)
+  })
+})
+
+test('vault_copy copies an entry into another vault', async () => {
+  await withContext(async ctx => {
+    const target = `alt-${Date.now()}`
+    // Clean any leftover named-vault file from previous runs (named vaults
+    // resolve into $DSH_HOME/vault, which persists between test runs).
+    const { unlink } = await import('node:fs/promises')
+    const { homedir } = await import('node:os')
+    const { join: j } = await import('node:path')
+    await unlink(j(homedir(), '.dsh', 'vault', `${target}.json`)).catch(() => {})
+    const a = await call(ctx, 'vault_add', { title: 'CopySrc', username: 'u', password: 'pw-secret', url: 'https://x.example' }) as { id: string }
+    const r = await call(ctx, 'vault_copy', { id: a.id, to: target }) as { copied: boolean; reason?: string }
+    assert.equal(r.copied, true, `reason: ${r.reason}`)
+    // Switch to the target vault and confirm the entry exists with secrets.
+    await call(ctx, 'vault_switch', { name: target })
+    const found = await call(ctx, 'vault_search', { query: 'CopySrc' }) as { results: Array<{ id: string }> }
+    assert.equal(found.results.length, 1)
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { password: string; url: string } }
+    assert.equal(full.entry.password, 'pw-secret')
+    assert.equal(full.entry.url, 'https://x.example')
+    // Duplicate copy without overwrite is refused.
+    const dup = await call(ctx, 'vault_copy', { id: a.id, to: target }) as { copied: boolean; reason?: string }
+    assert.equal(dup.copied, false)
   })
 })
