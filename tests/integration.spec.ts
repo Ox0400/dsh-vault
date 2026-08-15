@@ -2455,3 +2455,25 @@ test('vault_breach_check reports elapsed time', async () => {
     assert.equal(typeof r.elapsedMs, 'number')
   })
 })
+
+test('vault_search smart sort puts favorites and recent first', async () => {
+  await withContext(async ctx => {
+    const fav = await call(ctx, 'vault_add', { title: 'ZetaFav' }) as { id: string }
+    await call(ctx, 'vault_pin', { id: fav.id })
+    await call(ctx, 'vault_add', { title: 'AlphaOld' })
+    await new Promise(r => setTimeout(r, 10))
+    await call(ctx, 'vault_add', { title: 'BetaNew' })
+    const r = await call(ctx, 'vault_search', { query: '', sortBy: 'smart' }) as { results: Array<{ title: string }> }
+    assert.equal(r.results[0]!.title, 'ZetaFav', 'favorite first')
+    assert.equal(r.results[1]!.title, 'BetaNew', 'recent before older')
+  })
+})
+
+test('vault_find includes a match score', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Exact Target', host: 'x.example' })
+    const r = await call(ctx, 'vault_find', { text: 'exact target' }) as { results: Array<{ score?: number }> }
+    assert.ok(r.results.length >= 1)
+    assert.equal(r.results[0]!.score, 0, 'exact title match scored 0')
+  })
+})

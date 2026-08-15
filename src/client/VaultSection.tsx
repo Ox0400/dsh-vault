@@ -1001,8 +1001,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (
+        <>
+        <p className={css.resultCount}>
+          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter)}
+          {(() => {
+            const byKind = new Map<string, number>()
+            for (const e of state.entries) {
+              if ((kindFilter === '' || e.kind === kindFilter) && (tagFilter === '' || (e.tags ?? []).includes(tagFilter))) {
+                const k = e.kind ?? 'login'
+                byKind.set(k, (byKind.get(k) ?? 0) + 1)
+              }
+            }
+            return [...byKind.entries()].map(([k, n]) => (
+              <span key={k} className={css.kindChip}>{t(KIND_KEYS[k] ?? 'kindCustom')} {n}</span>
+            ))
+          })()}
+        </p>
         <ul className={css.list}>
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, visibleCount).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
@@ -1092,6 +1108,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             )
           })}
         </ul>
+        </>
       )}
 
       {state.status === 'ready' && (
@@ -1347,10 +1364,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <label className={css.field}>
               <span>{t('fieldTags')}</span>
               <input
+                list="dsh-vault-tags"
                 value={tagsDraft}
                 onChange={event => setTagsDraft(event.target.value)}
                 placeholder="dev, prod"
               />
+              <datalist id="dsh-vault-tags">
+                {[...new Set(state.status === 'ready' ? state.entries.flatMap(e => e.tags ?? []) : [])].sort().map(tag => (
+                  <option key={tag} value={tag} />
+                ))}
+              </datalist>
             </label>
             <label className={css.field}>
               <span>{t('fieldCustom')}</span>

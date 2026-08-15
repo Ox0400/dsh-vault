@@ -375,7 +375,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
       regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
-      sortBy: { type: 'string', enum: ['alpha', 'recent', 'favorite'], description: 'Sort: alphabetical (default), by updatedAt desc, or favorites first (then alphabetical).' },
+      sortBy: { type: 'string', enum: ['alpha', 'recent', 'favorite', 'smart'], description: 'Sort: alphabetical (default), by updatedAt desc, favorites first, or smart (favorites → recently used → alphabetical).' },
       createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
       createdBefore: { type: 'integer', description: 'Only entries created before this epoch millis.' },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
@@ -430,6 +430,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           const af = (a as VaultEntrySummary & { favorite?: boolean }).favorite === true ? 0 : 1
           const bf = (b as VaultEntrySummary & { favorite?: boolean }).favorite === true ? 0 : 1
           return af - bf || a.title.localeCompare(b.title)
+        })
+      } else if (args.sortBy === 'smart') {
+        filtered = [...filtered].sort((a, b) => {
+          const af = (a as VaultEntrySummary & { favorite?: boolean }).favorite === true ? 0 : 1
+          const bf = (b as VaultEntrySummary & { favorite?: boolean }).favorite === true ? 0 : 1
+          if (af !== bf) return af - bf
+          const au = (a as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
+          const bu = (b as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
+          return bu - au || a.title.localeCompare(b.title)
         })
       }
       return { results: filtered, total: filtered.length }
@@ -864,7 +873,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         }
       }
       scored.sort((a, b) => a.score - b.score)
-      return { results: scored.slice(0, validateLimit(args.limit, 'vault_find')).map(x => x.entry) }
+      return { results: scored.slice(0, validateLimit(args.limit, 'vault_find')).map(x => ({ ...(toSummaryJson(x.entry) as Record<string, unknown>), score: x.score })) }
     },
   }))
 

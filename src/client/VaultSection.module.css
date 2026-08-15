@@ -578,3 +578,20 @@
 .pwFair { background: #c98a1b; }
 .pwStrong { background: #2e9e5b; }
 .pwLabel { color: var(--dsh-color-text-2, #666); }
+
+
+.resultCount {
+  align-items: center;
+  color: var(--dsh-color-text-2, #666);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.kindChip {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 2px 8px;
+}
