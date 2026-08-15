@@ -1,0 +1,5 @@
+***Top of File***
+***1Password 4 Password Item***  {"uuid":"item1","typeName":"webforms.WebForm","title":"GitHub Login","location":"https://github.com","trashed":false,"secureContents":{"fields":[{"name":"username","designation":"username","value":"pif-alice"},{"name":"password","designation":"password","value":"pif-pass-1"},{"name":"totp","designation":"totp","value":"JBSWY3DPEHPK3PXP"}],"notesPlain":"pif notes"},"tags":["dev"]}
+***1Password 4 Folder Item***  {"uuid":"folder1","typeName":"system.folder.Regular","title":"Work","trashed":false}
+***1Password 4 Password Item***  {"uuid":"item2","typeName":"webforms.WebForm","title":"Bank PIF","location":"https://bank.example","trashed":false,"secureContents":{"fields":[{"name":"username","designation":"username","value":"pif-bob"},{"name":"password","designation":"password","value":"bank-pif-9"}],"sections":[{"name":"Section 1","fields":[{"n":"TOTP","v":"otpauth://totp/Bank?secret=JBSWY3DPEHPK3PXP&issuer=Bank"}]}]}}
+***Top of File***

@@ -17,6 +17,8 @@ import { chacha20Xor } from './chacha20.ts'
 import { salsa20Xor } from './salsa20.ts'
 import { argon2 } from './argon2.ts'
 
+export type KdbxField = [string, string, boolean]
+
 export interface KdbxCredential {
   title: string
   username: string
@@ -132,7 +134,7 @@ function unprotect(value: Buffer, streamId: number, streamKey: Buffer): string {
  * protected values (including <History> snapshots, which share the same
  * continuous protected stream and must be consumed for alignment).
  */
-function extractEntries(xml: string): {
+export function extractEntries(xml: string): {
   entries: Array<Array<[string, string, boolean]>>
   /** [entryIndexWithinTopLevel, fieldIndex, base64] for top-level fields, and
    * [-1, index, base64] for History-only protected values (consumed only). */

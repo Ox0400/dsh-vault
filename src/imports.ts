@@ -20,6 +20,7 @@
  */
 
 import { readZip, zipEntry } from './zip.ts'
+import { extractEntries as kdbxExtractEntries } from './kdbx.ts'
 
 export interface ImportedCredential {
   title: string
@@ -271,6 +272,103 @@ export function readBitwardenJson(input: string): ImportedCredential[] {
     })
   }
   return out
+}
+
+/** ── 1Password 1PIF (legacy text export) ───────────────────────────────── */
+
+/**
+ * Read a 1Password 1PIF export (1Password 4–7 "1PIF" text format): a stream
+ * of JSON records separated by `***Top of File***`-style markers. Login items
+ * carry `secureContents.fields[]` with designations (username/password),
+ * `title`, `location` (URL), `notesPlain`, `tags` and optional otpauth URIs.
+ * Reference: pass-import OnePassword4PIF (onepassword.py).
+ */
+export function readOnePasswordPif(input: string): ImportedCredential[] {
+  // Strip the `***…***` record markers; remaining lines are concatenated JSON.
+  const cleaned = input
+    .replace(/^\*\*\*.*\*\*\*\s+/gm, '')
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .join(',')
+    .replace(/,\s*$/, '')
+  let records: Array<Record<string, unknown>>
+  try {
+    records = JSON.parse(`[${cleaned}]`) as Array<Record<string, unknown>>
+  } catch {
+    throw new Error('1pif: not a valid 1PIF export (expected JSON records)')
+  }
+  const out: ImportedCredential[] = []
+  for (const item of records) {
+    const typeName = String(item.typeName ?? '')
+    if (typeName === 'system.folder.Regular') continue // folder record
+    if (item.trashed === true) continue
+    if (!typeName.includes('Login') && !typeName.includes('WebForm') && !typeName.includes('Password')) continue
+    const secure = (item.secureContents ?? {}) as Record<string, unknown>
+    const fields = (secure.fields ?? []) as Array<{ name?: string; designation?: string; value?: string }>
+    let username = ''
+    let password = ''
+    let otp = ''
+    const named = new Map<string, string>()
+    for (const f of fields) {
+      const value = f.value ?? ''
+      const designation = (f.designation ?? '').toLowerCase()
+      const name = f.name ?? ''
+      if (designation === 'username' || name.toLowerCase() === 'username') username = username || value
+      else if (designation === 'password' || name.toLowerCase() === 'password') password = value
+      else if (name.toLowerCase() === 'totp' || name.toLowerCase() === 'one-time password' || value.startsWith('otpauth://')) otp = value
+      else if (name !== '') named.set(name.toLowerCase(), value)
+    }
+    // Sections may hold otpauth:// fields.
+    if (otp === '') {
+      for (const section of (secure.sections ?? []) as Array<{ fields?: Array<{ v?: string }> }>) {
+        for (const f of section.fields ?? []) {
+          if ((f.v ?? '').startsWith('otpauth://')) otp = f.v!
+        }
+      }
+    }
+    const tags = Array.isArray(item.tags) ? (item.tags as string[]) : []
+    const title = String(item.title ?? named.get('title') ?? '')
+    const url = String(item.location ?? '')
+    const notes = String(secure.notesPlain ?? item.notesPlain ?? '')
+    if (title === '' && username === '' && password === '') continue
+    out.push({
+      title,
+      username,
+      password,
+      url,
+      notes,
+      ...(otp.length > 0 ? { otp } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+    })
+  }
+  return out
+}
+
+/** ── KeePass 2.x XML export (plaintext) ─────────────────────────────────── */
+
+/**
+ * Read a KeePass 2.x XML export (File > Export > XML) — the same document
+ * structure as a decrypted KDBX. Protected values are base64'd against a
+ * plaintext-protected stream only when the export protected them; since the
+ * KeePass XML export writes values in the clear (Protected="True" values are
+ * replaced by "********" unless "Export passwords" is checked), we surface
+ * them as-is. Reference: KeePass XML schema (keepassxc-specs).
+ */
+export function readKeePassXml(input: string): ImportedCredential[] {
+  // Reuse the KDBX XML parser for the entry shape.
+  const { entries } = kdbxExtractEntries(input)
+  return entries.map(fields => {
+    const out: Record<string, string> = {}
+    for (const [name, value] of fields) out[name] = value
+    return {
+      title: out.Title ?? '',
+      username: out.UserName ?? '',
+      password: out.Password ?? '',
+      url: out.URL ?? '',
+      notes: out.Notes ?? '',
+    }
+  })
 }
 
 /** ── Generic password CSV (Dashlane / NordPass / Keeper) ────────────────── */

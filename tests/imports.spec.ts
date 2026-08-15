@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson } from '../src/imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml } from '../src/imports.ts'
 import { readZip } from '../src/zip.ts'
 import { deflateRawSync } from 'node:zlib'
 
@@ -237,5 +237,39 @@ describe('LastPass CSV import', () => {
     expect(gh!.favorite).toBe(true)
     const mail = creds.find(c => c.title === 'Mail LP')
     expect(mail!.favorite).toBe(false)
+  })
+})
+
+describe('1Password 1PIF import', () => {
+  it('parses a legacy 1PIF export (markers + JSON records)', () => {
+    const pif = readFileSync(join(__dirname, 'fixtures', '1pif-sample.1pif'), 'utf8')
+    const creds = readOnePasswordPif(pif)
+    expect(creds.length).toBe(2)
+    const gh = creds.find(c => c.title === 'GitHub Login')
+    expect(gh).toBeDefined()
+    expect(gh!.username).toBe('pif-alice')
+    expect(gh!.password).toBe('pif-pass-1')
+    expect(gh!.url).toBe('https://github.com')
+    expect(gh!.otp).toBe('JBSWY3DPEHPK3PXP')
+    expect(gh!.tags).toContain('dev')
+    const bank = creds.find(c => c.title === 'Bank PIF')
+    expect(bank!.otp).toContain('otpauth://')
+    // folder records are skipped
+    expect(creds.some(c => c.title === 'Work')).toBe(false)
+  })
+
+  it('rejects non-1PIF input', () => {
+    expect(() => readOnePasswordPif('just some text')).toThrow(/not a valid 1PIF/)
+  })
+})
+
+describe('KeePass 2.x XML export import', () => {
+  it('parses a KeePass XML export (plaintext protected values)', () => {
+    const xml = readFileSync(join(__dirname, 'fixtures', 'keepass-export.xml'), 'utf8')
+    const creds = readKeePassXml(xml)
+    expect(creds).toEqual([
+      { title: 'XML Site', username: 'xml-user', password: 'xml-pass', url: 'https://xml.example', notes: 'xml note' },
+      { title: 'Masked Site', username: 'masked-user', password: '********', url: 'https://masked.example', notes: '' },
+    ])
   })
 })

@@ -35,7 +35,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'importBitwarden', 'importChrome', 'importEnpass', 'importFirefox', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importChrome', 'importEnpass', 'importFirefox', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
@@ -248,4 +248,25 @@ test('VaultGateway importKdbxTool supports KDBX 3.1 legacy databases', async () 
   expect(entries).toHaveLength(2)
   expect(entries[0]!.title).toBe('Sample Entry')
   expect(entries[1]!.password).toBe('SecurePassword')
+})
+
+test('VaultGateway import1pif imports a legacy 1PIF export', async () => {
+  const pif = join(__dirname, 'fixtures', '1pif-sample.1pif')
+  await withGateway(async gateway => {
+    const r = await gateway.import1pif(pif)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    expect(entries.some(e => e.title === 'GitHub Login' && e.username === 'pif-alice')).toBe(true)
+  })
+})
+
+test('VaultGateway importKeePassXml imports a KeePass XML export', async () => {
+  const xml = join(__dirname, 'fixtures', 'keepass-export.xml')
+  await withGateway(async gateway => {
+    const r = await gateway.importKeePassXml(xml)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    const site = entries.find(e => e.title === 'XML Site')!
+    expect(site.username).toBe('xml-user')
+  })
 })

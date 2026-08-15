@@ -34,7 +34,7 @@ import { readChromeLogins } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx } from './kdbx.ts'
-import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson } from './imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml } from './imports.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -2836,6 +2836,86 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_1pif: import a 1Password 1PIF export ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_1pif',
+    description: 'Import credentials from a legacy 1Password 1PIF export (1Password 4–7 text '
+      + 'format): JSON records separated by "***Top of File***" markers. Login/WebForm items are '
+      + 'imported with title, username, password, url (location), notes, TOTP and tags; folder '
+      + 'records and trashed items are skipped.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the .1pif file.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_1pif')
+      const s = await guardStore()
+      const raw = await readFile(args.path, 'utf8')
+      const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      const creds = readOnePasswordPif(cleaned)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.title.trim()
+        if (!title) { skipped++; continue }
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = {
+          ...(c.username.length > 0 ? { username: c.username } : {}),
+          ...(c.password.length > 0 ? { password: c.password } : {}),
+          ...(c.url.length > 0 ? { url: c.url } : {}),
+          ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+          ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+          ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+          ...(c.favorite === true ? { favorite: true } : {}),
+        }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `1Password 1PIF import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
+  // ── vault_import_keepass_xml: import a KeePass 2.x XML export ─────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_keepass_xml',
+    description: 'Import credentials from a KeePass 2.x XML export (File > Export > XML). Values are '
+      + 'imported as written: protected values appear as plaintext when "Export passwords" was checked, '
+      + 'or as "********" (masked, not recoverable) otherwise. Uses the same entry structure as KDBX.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the KeePass .xml export.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_keepass_xml')
+      const s = await guardStore()
+      const raw = await readFile(args.path, 'utf8')
+      const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      const creds = readKeePassXml(cleaned)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.title.trim()
+        if (!title) { skipped++; continue }
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = {
+          ...(c.username.length > 0 ? { username: c.username } : {}),
+          ...(c.password.length > 0 ? { password: c.password } : {}),
+          ...(c.url.length > 0 ? { url: c.url } : {}),
+          ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+        }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `KeePass XML import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
   // ── vault_import_enpass: import an Enpass JSON export ─────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_import_enpass',
@@ -3783,6 +3863,59 @@ export class VaultGateway extends TypertRemoteService {
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `CSV import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Import a legacy 1Password 1PIF export. */
+  @Remote('import1pif')
+  async import1pif(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const raw = await readFile(path, 'utf8')
+    const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+    const creds = readOnePasswordPif(cleaned)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (!title) { skipped++; continue }
+      const existing = store.list().find(e => e.title === title)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = {
+        ...(c.username.length > 0 ? { username: c.username } : {}),
+        ...(c.password.length > 0 ? { password: c.password } : {}),
+        ...(c.url.length > 0 ? { url: c.url } : {}),
+        ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+        ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+        ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
+      }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `1Password 1PIF import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Import a KeePass 2.x XML export. */
+  @Remote('importKeePassXml')
+  async importKeePassXml(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const raw = await readFile(path, 'utf8')
+    const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+    const creds = readKeePassXml(cleaned)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (!title) { skipped++; continue }
+      const existing = store.list().find(e => e.title === title)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = {
+        ...(c.username.length > 0 ? { username: c.username } : {}),
+        ...(c.password.length > 0 ? { password: c.password } : {}),
+        ...(c.url.length > 0 ? { url: c.url } : {}),
+        ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+      }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `KeePass XML import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
   /** Import an Enpass JSON export. */

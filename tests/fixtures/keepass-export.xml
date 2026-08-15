@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Meta><DatabaseName>TestXML</DatabaseName></Meta>
+  <Root>
+    <Group>
+      <Name>Internet</Name>
+      <Entry>
+        <String><Key>Title</Key><Value>XML Site</Value></String>
+        <String><Key>UserName</Key><Value>xml-user</Value></String>
+        <String><Key>Password</Key><Value Protected="True">xml-pass</Value></String>
+        <String><Key>URL</Key><Value>https://xml.example</Value></String>
+        <String><Key>Notes</Key><Value>xml note</Value></String>
+      </Entry>
+      <Entry>
+        <String><Key>Title</Key><Value>Masked Site</Value></String>
+        <String><Key>UserName</Key><Value>masked-user</Value></String>
+        <String><Key>Password</Key><Value Protected="True">********</Value></String>
+        <String><Key>URL</Key><Value>https://masked.example</Value></String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>
