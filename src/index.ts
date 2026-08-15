@@ -852,7 +852,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       id: { type: 'string', description: 'Entry id to verify (omit when all is true).' },
       all: { type: 'boolean', description: 'Verify every active entry and return a per-entry audit.' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } }, audited: { type: 'integer' }, withIssues: { type: 'integer' }, perEntry: { type: 'array', items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: v.audited !== undefined ? `audited ${v.audited} entries, ${v.withIssues} with issues` : (v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}`) }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } }, audited: { type: 'integer' }, withIssues: { type: 'integer' }, perEntry: { type: 'array', items: { type: 'json' } }, summary: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.audited !== undefined ? `audited ${v.audited} entries, ${v.withIssues} with issues` : (v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}`) }] },
     async execute(args) {
       const s = await guardStore()
       if (args.all === true) {
@@ -877,7 +877,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           perEntry.push({ id: e.id, title: e.title, ok: issues.length === 0, issues })
         }
         const withIssues = perEntry.filter(p => !p.ok).length
-        return { ok: withIssues === 0, issues: [], audited: perEntry.length, withIssues, perEntry }
+        const summary: Record<string, number> = {}
+        for (const p of perEntry) {
+          for (const issue of p.issues) summary[issue] = (summary[issue] ?? 0) + 1
+        }
+        return { ok: withIssues === 0, issues: [], audited: perEntry.length, withIssues, perEntry, summary }
       }
       if (args.id === undefined) throw new Error('vault_verify: provide id or set all: true')
       const entry = s.get(args.id)
@@ -1997,6 +2001,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
       since: { type: 'integer', description: 'Only export active entries created or updated at/after this epoch millis (incremental backup).' },
+      path: { type: 'string', description: 'Optional absolute output path; defaults to <vault dir>/vault-export-<ts>.json.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { exported: { type: 'boolean', required: true }, note: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
     async execute(args) {
@@ -2011,7 +2016,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       } else {
         blob = await s.exportEncrypted(exportPassword)
       }
-      const file = join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.json`)
+      const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.json`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
       await writeFile(file, blob, { mode: 0o600 })
       return { exported: true, note: `vault exported to ${file}` }
@@ -2024,7 +2029,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'id (gaps filled) or replacing them with overwrite. dryRun previews without writing. Pass the '
       + 'document path; the export password comes from the exportPasswordEnv config.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Absolute path of the exported vault JSON file.' },
+      path: { type: 'string', description: 'Absolute path of the exported vault JSON file (provide exactly one of path or blob).' },
+      blob: { type: 'string', description: 'The exported vault document content directly (provide exactly one of path or blob).' },
       overwrite: { type: 'boolean', description: 'Replace existing entries with the same id instead of merging (default false).' },
       dryRun: { type: 'boolean', description: 'Preview how many entries would be imported without writing anything (default false).' },
     },
@@ -2033,7 +2039,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       assertWritable('vault_import')
       const exportPassword = resolveExportPassword(config)
       const s = await guardStore()
-      const blob = await readFile(args.path, 'utf8')
+      if (args.path === undefined && args.blob === undefined) {
+        throw new Error('vault_import: provide either path or blob')
+      }
+      const blob = args.path !== undefined ? await readFile(args.path, 'utf8') : args.blob!
       const count = await s.importEncrypted(blob, exportPassword, args.overwrite === true, args.dryRun === true)
       return { imported: count }
     },

@@ -520,6 +520,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Relative time like "5m ago" / "2d ago". */
+  function relTime(epoch: unknown): string {
+    const n = Number(epoch)
+    if (!Number.isFinite(n) || n <= 0) return ''
+    const secs = Math.max(0, Math.floor((Date.now() - n) / 1000))
+    if (secs < 60) return `${secs}s`
+    if (secs < 3600) return `${Math.floor(secs / 60)}m`
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h`
+    return `${Math.floor(secs / 86400)}d`
+  }
+
   /** Human-friendly value formatting for the expanded detail box. */
   function formatDetail(key: string, value: unknown): string {
     if (key === 'expiresAt' || key === 'updatedAt' || key === 'createdAt') {
@@ -682,7 +693,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentlyAdded')}</p>
           {recentEntries.map((e, i) => (
-            <p key={i} className={css.reportLine}>{String(e.title ?? '')}</p>
+            <p key={i} className={css.reportLine}>{String(e.title ?? '')}{relTime((e as Record<string, unknown>).updatedAt) !== '' && ` · ${relTime((e as Record<string, unknown>).updatedAt)}`}</p>
           ))}
         </div>
       )}
@@ -692,7 +703,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('recentActivity')}</p>
           {recentEvents.map((ev, i) => (
             <p key={i} className={css.reportLine}>
-              {String(ev.action ?? '')} · {String(ev.title ?? ev.id ?? '')}
+              {String(ev.action ?? '')} · {String(ev.title ?? ev.id ?? '')}{relTime((ev as Record<string, unknown>).at) !== '' && ` · ${relTime((ev as Record<string, unknown>).at)}`}
             </p>
           ))}
         </div>
@@ -951,7 +962,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {backupInfo !== null && backupInfo.daysSinceBackup >= 0 && (
             <span className={`${css.badge} ${backupInfo.daysSinceBackup > 14 ? css.badgeDanger : backupInfo.daysSinceBackup > 7 ? css.badgeWarn : ''}`}>
-              {t('healthBackup')}: {backupInfo.daysSinceBackup}d
+              {t('healthBackup')}: {backupInfo.daysSinceBackup}d ({backupInfo.backups})
             </span>
           )}
           <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>

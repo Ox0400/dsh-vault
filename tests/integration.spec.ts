@@ -2116,3 +2116,34 @@ test('vault_templates includes oauth scope and custom fields', async () => {
     assert.ok('fields' in custom.fields)
   })
 })
+
+test('vault_import accepts a blob directly', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-blob-'))
+    process.env.DSH_VAULT_EXPORT_PW6 = 'export-pw-6'
+    const a = await call(ctx, 'vault_add', { title: 'BlobSrc', password: 'pw' }) as { id: string }
+    const exported = await call(ctx, 'vault_export', { ids: [a.id], path: join(dir, 'exp.json') }) as { note: string }
+    const { readFile } = await import('node:fs/promises')
+    const content = await readFile(join(dir, 'exp.json'), 'utf8')
+    // Import into a fresh context by deleting then re-importing via blob
+    await call(ctx, 'vault_delete', { id: a.id })
+    const r = await call(ctx, 'vault_import', { blob: content }) as { imported: number }
+    assert.ok(r.imported >= 1)
+    const found = await call(ctx, 'vault_search', { query: 'BlobSrc' }) as { results: Array<{ id: string }> }
+    assert.equal(found.results.length, 1, 're-imported via blob')
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW6
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW6' })
+})
+
+test('vault_verify all returns a summary of issue types', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'NoSshHost', kind: 'ssh', username: 'u' })
+    const r = await call(ctx, 'vault_verify', { all: true }) as { summary?: Record<string, number>; withIssues: number }
+    assert.ok(r.withIssues >= 1)
+    assert.ok(r.summary !== undefined && Object.keys(r.summary).length >= 1, 'summary present')
+  })
+})
