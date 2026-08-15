@@ -2782,6 +2782,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.notes.length > 0 ? { notes: c.notes } : {}),
           ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
+          ...(c.favorite === true ? { favorite: true } : {}),
         }
         if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
@@ -2794,10 +2796,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_import_manager_csv',
     description: 'Import credentials from a password-manager CSV export. The header row is matched '
-      + 'against known column names so Dashlane, NordPass, Keeper (and similar exports) are '
+      + 'against known column names so Dashlane, NordPass, Keeper, LastPass (and similar exports) are '
       + 'auto-detected; header-less legacy files are treated as title,url,login,password,notes. '
-      + 'Recognized columns: title/name, username/login, password, url/website address, notes, '
-      + 'otp/2fa secret, tags/folder/group/category.',
+      + 'Recognized columns: title/name, username/login, password, url/website address, notes/extra, '
+      + 'otp/2fa secret, tags/folder/group/grouping/category, fav.',
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the CSV file.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
@@ -2824,6 +2826,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.notes.length > 0 ? { notes: c.notes } : {}),
           ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
+          ...(c.favorite === true ? { favorite: true } : {}),
         }
         if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
@@ -2865,6 +2869,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.notes.length > 0 ? { notes: c.notes } : {}),
           ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
+          ...(c.favorite === true ? { favorite: true } : {}),
           ...(c.favorite === true ? { favorite: true } : {}),
         }
         if (existing) { await s.update(existing.id, patch); updated++ }
@@ -3743,6 +3749,7 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.notes.length > 0 ? { notes: c.notes } : {}),
         ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
       }
       if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
@@ -3770,6 +3777,7 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.notes.length > 0 ? { notes: c.notes } : {}),
         ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
       }
       if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
@@ -3798,6 +3806,7 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
       }
       if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
@@ -3825,6 +3834,7 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.notes.length > 0 ? { notes: c.notes } : {}),
         ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
       }
       if (existing) { await store.update(existing.id, patch); updated++ }

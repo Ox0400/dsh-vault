@@ -77,6 +77,21 @@ function parseDynamicHeader(buf: Buffer): { fields: Record<number, Buffer>; end:
   return { fields, end: p }
 }
 
+/** Parse the KDBX 3.1 header (uint16 field lengths, no variant dictionary). */
+function parseKdbx3Header(buf: Buffer): { fields: Record<number, Buffer>; end: number } {
+  const fields: Record<number, Buffer> = {}
+  let p = 0
+  while (p < buf.length) {
+    const type = buf[p]!
+    const len = buf.readUInt16LE(p + 1)
+    const data = buf.subarray(p + 3, p + 3 + len)
+    p += 3 + len
+    if (type === 0) break // end
+    fields[type] = Buffer.from(data)
+  }
+  return { fields, end: p }
+}
+
 /** AES-ECB single-block encrypt (AES-KDF transform). */
 function aesEcbEncrypt(key: Buffer, block: Buffer): Buffer {
   const cipher = createCipheriv('aes-256-ecb', key as Buffer<ArrayBuffer>, null)
@@ -111,28 +126,111 @@ function unprotect(value: Buffer, streamId: number, streamKey: Buffer): string {
  * Each entry is a list of [fieldName, value, protected] in document order,
  * because the protected stream must be consumed sequentially.
  */
-function extractEntries(xml: string): Array<Array<[string, string, boolean]>> {
+/**
+ * Extract entry fields from a KeePass XML group/entry (lightweight parser).
+ * Returns the current (top-level) entries plus the full document-order list of
+ * protected values (including <History> snapshots, which share the same
+ * continuous protected stream and must be consumed for alignment).
+ */
+function extractEntries(xml: string): {
+  entries: Array<Array<[string, string, boolean]>>
+  /** [entryIndexWithinTopLevel, fieldIndex, base64] for top-level fields, and
+   * [-1, index, base64] for History-only protected values (consumed only). */
+  protectedOrder: Array<[number, number, string]>
+} {
   const entries: Array<Array<[string, string, boolean]>> = []
-  const entryRe = /<Entry>([\s\S]*?)<\/Entry>/g
+  const protectedOrder: Array<[number, number, string]> = []
   // Each field is <String><Key>Name</Key><Value [Protected="True"]>data</Value></String>.
   const stringRe = /<String>([\s\S]*?)<\/String>/g
   const kvRe = /<Key>([\s\S]*?)<\/Key>\s*<Value([^>]*)>([\s\S]*?)<\/Value>/
-  let m: RegExpExecArray | null
-  while ((m = entryRe.exec(xml)) !== null) {
-    const body = m[1]!
-    const fields: Array<[string, string, boolean]> = []
-    let sm: RegExpExecArray | null
-    stringRe.lastIndex = 0
-    while ((sm = stringRe.exec(body)) !== null) {
-      const kv = kvRe.exec(sm[1]!)
-      if (!kv) continue
-      const name = kv[1]!.trim()
-      const protectedFlag = /\bProtected="True"/.test(kv[2] ?? '')
-      fields.push([name, kv[3]!.trim(), protectedFlag])
+
+  // Scan for <Entry> … </Entry> with depth tracking so History's nested
+  // entries are consumed (stream alignment) but not returned.
+  let pos = 0
+  while (true) {
+    const open = xml.indexOf('<Entry>', pos)
+    if (open === -1) break
+    // Find the matching close by counting nesting.
+    let depth = 1
+    let scan = open + '<Entry>'.length
+    let close = -1
+    while (scan < xml.length && depth > 0) {
+      const nextOpen = xml.indexOf('<Entry>', scan)
+      const nextClose = xml.indexOf('</Entry>', scan)
+      if (nextClose === -1) break
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth++
+        scan = nextOpen + '<Entry>'.length
+      } else {
+        depth--
+        scan = nextClose + '</Entry>'.length
+        if (depth === 0) close = nextClose
+      }
     }
-    entries.push(fields)
+    if (close === -1) break
+    // Determine whether this entry sits inside a <History> element.
+    const before = xml.slice(0, open)
+    const historyDepth = countOpenTags(before, '<History>') - countOpenTags(before, '</History>')
+    const body = xml.slice(open + '<Entry>'.length, close)
+    if (historyDepth === 0) {
+      // Current entry fields live before the <History> section; the History
+      // section's protected values share the continuous stream and must be
+      // consumed for alignment (but produce no returned fields).
+      const historyIdx = body.indexOf('<History>')
+      const currentPart = historyIdx === -1 ? body : body.slice(0, historyIdx)
+      const fields: Array<[string, string, boolean]> = []
+      let sm: RegExpExecArray | null
+      stringRe.lastIndex = 0
+      while ((sm = stringRe.exec(currentPart)) !== null) {
+        const kv = kvRe.exec(sm[1]!)
+        if (!kv) continue
+        const name = kv[1]!.trim()
+        const protectedFlag = /\bProtected="True"/.test(kv[2] ?? '')
+        const value = kv[3]!.trim()
+        fields.push([name, value, protectedFlag])
+        if (protectedFlag && value.length > 0) {
+          protectedOrder.push([entries.length, fields.length - 1, value])
+        }
+      }
+      entries.push(fields)
+      if (historyIdx !== -1) {
+        const historyPart = body.slice(historyIdx)
+        let hm: RegExpExecArray | null
+        stringRe.lastIndex = 0
+        while ((hm = stringRe.exec(historyPart)) !== null) {
+          const kv = kvRe.exec(hm[1]!)
+          if (!kv) continue
+          const protectedFlag = /\bProtected="True"/.test(kv[2] ?? '')
+          const value = kv[3]!.trim()
+          if (protectedFlag && value.length > 0) protectedOrder.push([-1, 0, value])
+        }
+      }
+    } else {
+      // Nested (History) entry reached directly: consume protected values.
+      let sm: RegExpExecArray | null
+      stringRe.lastIndex = 0
+      while ((sm = stringRe.exec(body)) !== null) {
+        const kv = kvRe.exec(sm[1]!)
+        if (!kv) continue
+        const protectedFlag = /\bProtected="True"/.test(kv[2] ?? '')
+        const value = kv[3]!.trim()
+        if (protectedFlag && value.length > 0) protectedOrder.push([-1, 0, value])
+      }
+    }
+    pos = close + '</Entry>'.length
   }
-  return entries
+  return { entries, protectedOrder }
+}
+
+/** Count occurrences of an exact tag string in text. */
+function countOpenTags(text: string, tag: string): number {
+  let count = 0
+  let idx = text.indexOf(tag)
+  while (idx !== -1) {
+    count++
+    idx = text.indexOf(tag, idx + tag.length)
+  }
+  return count
 }
 
 /**
@@ -148,9 +246,15 @@ export function readKdbx(data: Buffer, password: string, keyfileData?: Buffer): 
   const sig2 = data.readUInt32LE(4)
   const version = data.readUInt32LE(8)
   if (sig1 !== 0x9aa2d903 || sig2 !== 0xb54bfb67) throw new Error('kdbx: not a KeePass database (bad signature)')
-  if ((version & 0xffff0000) !== 0x00040000) {
-    throw new Error(`kdbx: unsupported KDBX version 0x${version.toString(16)} (only KDBX 4.x is supported)`)
-  }
+  const major = version & 0xffff0000
+  if (major === 0x00040000) return readKdbx4(data, version, password, keyfileData)
+  if (major === 0x00030000) return readKdbx3(data, version, password, keyfileData)
+  throw new Error(`kdbx: unsupported KDBX version 0x${version.toString(16)} (supported: KDBX 3.1 and 4.x)`)
+}
+
+/** KDBX 4.x: AES-KDF/Argon2, header HMAC blocks. */
+function readKdbx4(data: Buffer, version: number, password: string, keyfileData?: Buffer): KdbxCredential[] {
+  void version
   const headerEnd = 12
   const { fields, end } = parseDynamicHeader(data.subarray(headerEnd))
   const headerForHash = data.subarray(0, headerEnd + end)
@@ -265,7 +369,99 @@ export function readKdbx(data: Buffer, password: string, keyfileData?: Buffer): 
   const streamId = inner.fields[1] ? le32(inner.fields[1], 0) : 0
   const streamKey = inner.fields[2]
 
-  const entries = extractEntries(xml)
+  return entriesFromXml(xml, streamId, streamKey)
+}
+
+/**
+ * KDBX 3.1 (legacy KeePass 2.x, 2010–2019): AES-KDF without the final
+ * SHA-256, integrity via StreamStartBytes + HashedBlockStream, protected
+ * stream parameters in the outer header. Format per keepassxc-specs and
+ * KeePassXC Kdbx3Reader.
+ */
+function readKdbx3(data: Buffer, version: number, password: string, keyfileData?: Buffer): KdbxCredential[] {
+  void version
+  const headerEnd = 12
+  const { fields, end } = parseKdbx3Header(data.subarray(headerEnd))
+  const headerForHash = data.subarray(0, headerEnd + end)
+
+  const cipherId = fields[2]
+  const compression = fields[3]
+  const masterSeed = fields[4]
+  const transformSeed = fields[5]
+  const transformRounds = fields[6]
+  const encryptionIv = fields[7]
+  const protectedStreamKey = fields[8]
+  const streamStartBytes = fields[9]
+  const streamIdField = fields[10]
+  if (!cipherId || !masterSeed || !encryptionIv || !transformSeed || !transformRounds || !protectedStreamKey || !streamStartBytes) {
+    throw new Error('kdbx: missing required header fields')
+  }
+  if (!cipherId.equals(AES_CIPHER_ID)) throw new Error('kdbx: only AES-256 cipher is supported')
+
+  // key_composite = SHA256(SHA256(password) || SHA256(keyfile)).
+  const pwHash = createHash('sha256').update(Buffer.from(password, 'utf8')).digest()
+  const keyfileHash = keyfileData !== undefined ? createHash('sha256').update(keyfileData).digest() : Buffer.alloc(0)
+  const composite = createHash('sha256').update(Buffer.from(Buffer.concat([pwHash, keyfileHash]))).digest()
+
+  // KDBX3 AES-KDF: R rounds of AES-ECB (key = TransformSeed), then SHA-256
+  // (matches KeePassXC KdfAes and pykeepass aes_kdf — the final hash is
+  // present in KDBX3 too).
+  const rounds = transformRounds.readUInt32LE(0)
+  let transformed: Buffer = composite
+  for (let i = 0; i < rounds; i++) transformed = aesEcbEncrypt(transformSeed, transformed)
+  const transformedKey = createHash('sha256').update(transformed).digest()
+  const masterKey = createHash('sha256').update(Buffer.concat([masterSeed, transformedKey])).digest()
+
+  // Decrypt the whole payload with AES-256-CBC.
+  const payload = data.subarray(headerEnd + end)
+  const decipher = createDecipheriv('aes-256-cbc', masterKey as Buffer<ArrayBuffer>, encryptionIv as Buffer<ArrayBuffer>)
+  decipher.setAutoPadding(false)
+  const decryptedRaw = Buffer.concat([decipher.update(payload), decipher.final()])
+
+  // Verify the StreamStartBytes (32 bytes of known plaintext at the start).
+  const realStart = decryptedRaw.subarray(0, 32)
+  if (!realStart.equals(streamStartBytes)) throw new Error('kdbx: invalid credentials or corrupt file (stream start bytes mismatch)')
+
+  // HashedBlockStream: [index u32][sha256 u32 bytes][size u32][data]…,
+  // terminated by a size-0 block with a zero hash.
+  let p = 32
+  const blocks: Buffer[] = []
+  let blockIndex = 0
+  while (p < decryptedRaw.length) {
+    const index = le32(decryptedRaw, p)
+    const hash = decryptedRaw.subarray(p + 4, p + 36)
+    const blkLen = le32(decryptedRaw, p + 36)
+    const blk = decryptedRaw.subarray(p + 40, p + 40 + blkLen)
+    p += 40 + blkLen
+    if (blkLen === 0) {
+      if (!hash.every(b => b === 0)) throw new Error('kdbx: invalid final hashed block')
+      break
+    }
+    if (index !== blockIndex) throw new Error(`kdbx: unexpected hashed block index ${index}`)
+    const expected = createHash('sha256').update(blk).digest()
+    if (!hash.equals(expected)) throw new Error(`kdbx: hashed block ${index} SHA-256 mismatch`)
+    blocks.push(Buffer.from(blk))
+    blockIndex++
+  }
+  let payloadRaw = Buffer.concat(blocks)
+
+  // Decompress (compression flag 1 = gzip).
+  if (compression !== undefined && compression[0] === 1) {
+    payloadRaw = gunzipSync(payloadRaw)
+  }
+
+  // KDBX3 has no inner header: the payload IS the XML, and the protected
+  // stream parameters live in the outer header (default id 2 = Salsa20).
+  const xml = payloadRaw.toString('utf8')
+  const streamId = streamIdField ? le32(streamIdField, 0) : 2
+  const streamKey = protectedStreamKey
+  void headerForHash
+  return entriesFromXml(xml, streamId, streamKey)
+}
+
+/** Shared: parse entries from KDBX XML and unprotect values with the stream. */
+function entriesFromXml(xml: string, streamId: number, streamKey: Buffer | undefined): KdbxCredential[] {
+  const { entries, protectedOrder } = extractEntries(xml)
   if (streamId !== 2 && streamId !== 3) {
     // Without a supported protected stream we cannot decrypt protected values.
     if (streamKey && streamId !== 2 && streamId !== 3) throw new Error(`kdbx: unsupported inner random stream id ${streamId} (only Salsa20 and ChaCha20 are supported)`)
@@ -273,12 +469,6 @@ export function readKdbx(data: Buffer, password: string, keyfileData?: Buffer): 
   }
   // Decrypt protected values with one continuous keystream in document order.
   const decryptedEntries: KdbxCredential[] = []
-  const protectedValues: Array<[number, number, string]> = [] // [entryIdx, fieldIdx, base64]
-  entries.forEach((fields, ei) => {
-    fields.forEach(([name, value, isProtected], fi) => {
-      if (isProtected && value.length > 0) protectedValues.push([ei, fi, value])
-    })
-  })
   // Build the whole keystream lazily: Salsa20/ChaCha20 blocks are 64 bytes,
   // so a value may span block boundaries. We track a running byte offset and
   // XOR each protected ciphertext with keystream bytes at the same offset.
@@ -299,7 +489,7 @@ export function readKdbx(data: Buffer, password: string, keyfileData?: Buffer): 
   const valuesByIdx = new Map<string, string>()
   let streamOffset = 0
   const keystreamCache = new Map<number, Buffer>()
-  for (const [ei, fi, b64] of protectedValues) {
+  for (const [ei, fi, b64] of protectedOrder) {
     try {
       const enc = Buffer.from(b64, 'base64')
       const plain = Buffer.alloc(enc.length)

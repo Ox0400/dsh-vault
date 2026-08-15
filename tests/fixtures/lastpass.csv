@@ -1,0 +1,3 @@
+url,username,password,otp,extra,name,grouping,fav
+"https://github.com","lp-alice","lp-pass-1","JBSWY3DPEHPK3PXP","primary account","GitHub LP","Work",1
+"https://mail.example","lp@example.com","mail-lp-9","","","Mail LP","Personal",0

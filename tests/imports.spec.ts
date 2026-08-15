@@ -220,3 +220,22 @@ describe('Bitwarden JSON import', () => {
     expect(() => readBitwardenJson('{"encrypted": true, "items": []}')).toThrow(/encrypted exports are not supported/)
   })
 })
+
+describe('LastPass CSV import', () => {
+  it('detects a LastPass export by header (url/username/password/otp/extra/name/grouping/fav)', () => {
+    const csv = readFileSync(join(__dirname, 'fixtures', 'lastpass.csv'), 'utf8')
+    const creds = readPasswordCsv(csv)
+    expect(creds.length).toBe(2)
+    const gh = creds.find(c => c.title === 'GitHub LP')
+    expect(gh).toBeDefined()
+    expect(gh!.username).toBe('lp-alice')
+    expect(gh!.password).toBe('lp-pass-1')
+    expect(gh!.url).toBe('https://github.com')
+    expect(gh!.otp).toBe('JBSWY3DPEHPK3PXP')
+    expect(gh!.notes).toContain('primary account')
+    expect(gh!.tags).toContain('Work')
+    expect(gh!.favorite).toBe(true)
+    const mail = creds.find(c => c.title === 'Mail LP')
+    expect(mail!.favorite).toBe(false)
+  })
+})

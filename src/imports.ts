@@ -281,9 +281,10 @@ const CSV_SYNONYMS: Array<[string, string[]]> = [
   ['username', ['username', 'login', 'user', 'email', 'login name', 'user name']],
   ['password', ['password', 'pass', 'secret']],
   ['url', ['url', 'website', 'website address', 'web site', 'link', 'login uri', 'uri']],
-  ['notes', ['notes', 'note', 'comments', 'comment', 'description', 'remark']],
+  ['notes', ['notes', 'note', 'comments', 'comment', 'description', 'remark', 'extra']],
   ['otp', ['otp', 'totp', 'otp secret', '2fa secret', '2fa', 'secret', 'auth']],
-  ['tags', ['tags', 'tag', 'labels', 'group', 'category', 'folder']],
+  ['tags', ['tags', 'tag', 'labels', 'group', 'grouping', 'category', 'folder']],
+  ['favorite', ['fav', 'favorite', 'favourite']],
 ]
 
 /** Map a CSV header row to canonical fields; unknown columns are skipped. */
@@ -330,6 +331,7 @@ export function readPasswordCsv(input: string): ImportedCredential[] {
       const notes = pick(row, 'notes')
       const otp = pick(row, 'otp')
       const tagsRaw = pick(row, 'tags')
+      const favRaw = pick(row, 'favorite')
       if (username === '' && password === '' && url === '' && notes === '') continue // blank row
       out.push({
         title,
@@ -339,6 +341,7 @@ export function readPasswordCsv(input: string): ImportedCredential[] {
         notes,
         ...(otp.length > 0 ? { otp } : {}),
         ...(tagsRaw.length > 0 ? { tags: tagsRaw.split(/[;,]/).map(t => t.trim()).filter(Boolean) } : {}),
+        ...(favRaw.length > 0 ? { favorite: favRaw.toLowerCase() === '1' || favRaw.toLowerCase() === 'true' || favRaw.toLowerCase() === 't' || favRaw.toLowerCase() === 'yes' } : {}),
       })
     } else {
       // Legacy header-less rows (pass-import style): title,url,login,password,notes

@@ -79,3 +79,19 @@ describe('chacha20', () => {
     )
   })
 })
+
+describe('KDBX 3.1 (legacy KeePass 2.x)', () => {
+  const FIXTURE_KDBX3 = join(__dirname, 'fixtures', 'kdbx3-legacy.kdbx')
+
+  it('decrypts a KeePassXC KDBX3 test database (password "a")', () => {
+    const entries = readKdbx(readFileSync(FIXTURE_KDBX3), 'a')
+    expect(entries).toEqual([
+      { title: 'Sample Entry', username: 'User Name', password: 'Password', url: 'http://www.somesite.com/', notes: 'Notes' },
+      { title: 'Subgroup Entry', username: 'Bank User Name', password: 'SecurePassword', url: 'https://www.bank.com', notes: 'Important note' },
+    ])
+  })
+
+  it('rejects a wrong password with a stream-start mismatch', () => {
+    expect(() => readKdbx(readFileSync(FIXTURE_KDBX3), 'wrong')).toThrow(/stream start bytes mismatch|bad decrypt/)
+  })
+})

@@ -226,3 +226,26 @@ test('VaultGateway importBitwarden imports a Bitwarden JSON export', async () =>
     expect(entries[0]!.title).toBe('BW GitHub')
   })
 })
+
+test('VaultGateway importManagerCsv imports a LastPass export (fav → favorite)', async () => {
+  const csv = join(__dirname, 'fixtures', 'lastpass.csv')
+  await withGateway(async gateway => {
+    const r = await gateway.importManagerCsv(csv)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    const gh = entries.find(e => e.title === 'GitHub LP')!
+    expect(gh.tags).toContain('Work')
+    expect(gh.favorite).toBe(true)
+  })
+})
+
+test('VaultGateway importKdbxTool supports KDBX 3.1 legacy databases', async () => {
+  // The tool-level kdbx import path is exercised through the imports module;
+  // verify the gateway's readKdbx handles a legacy file identically.
+  const { readKdbx } = await import('../src/kdbx.ts')
+  const { readFileSync } = await import('node:fs')
+  const entries = readKdbx(readFileSync(join(__dirname, 'fixtures', 'kdbx3-legacy.kdbx')), 'a')
+  expect(entries).toHaveLength(2)
+  expect(entries[0]!.title).toBe('Sample Entry')
+  expect(entries[1]!.password).toBe('SecurePassword')
+})
