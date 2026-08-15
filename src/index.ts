@@ -2796,10 +2796,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_import_manager_csv',
     description: 'Import credentials from a password-manager CSV export. The header row is matched '
-      + 'against known column names so Dashlane, NordPass, Keeper, LastPass (and similar exports) are '
-      + 'auto-detected; header-less legacy files are treated as title,url,login,password,notes. '
-      + 'Recognized columns: title/name, username/login, password, url/website address, notes/extra, '
-      + 'otp/2fa secret, tags/folder/group/grouping/category, fav.',
+      + 'against known column names so Bitwarden, 1Password (CSV), Dashlane, NordPass, Keeper, LastPass '
+      + '(and similar exports) are auto-detected; header-less legacy files are treated as '
+      + 'title,url,login,password,notes. Recognized columns: title/name, username/login, password, '
+      + 'url/website address/login_uri, notes/extra, otp/2fa/otpauth/login_totp, '
+      + 'tags/folder/group/grouping/category, fav.',
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the CSV file.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },

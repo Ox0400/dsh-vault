@@ -376,11 +376,11 @@ export function readKeePassXml(input: string): ImportedCredential[] {
 /** Header synonyms → canonical field. Order matters: first match wins. */
 const CSV_SYNONYMS: Array<[string, string[]]> = [
   ['title', ['title', 'name', 'item name', 'entry']],
-  ['username', ['username', 'login', 'user', 'email', 'login name', 'user name']],
-  ['password', ['password', 'pass', 'secret']],
-  ['url', ['url', 'website', 'website address', 'web site', 'link', 'login uri', 'uri']],
+  ['username', ['username', 'login', 'user', 'email', 'login name', 'user name', 'login_username']],
+  ['password', ['password', 'pass', 'secret', 'login_password']],
+  ['url', ['url', 'website', 'website address', 'web site', 'link', 'login uri', 'login_uri', 'uri']],
   ['notes', ['notes', 'note', 'comments', 'comment', 'description', 'remark', 'extra']],
-  ['otp', ['otp', 'totp', 'otp secret', '2fa secret', '2fa', 'secret', 'auth']],
+  ['otp', ['otp', 'totp', 'otp secret', '2fa secret', '2fa', 'secret', 'auth', 'otpauth', 'login_totp']],
   ['tags', ['tags', 'tag', 'labels', 'group', 'grouping', 'category', 'folder']],
   ['favorite', ['fav', 'favorite', 'favourite']],
 ]
@@ -419,6 +419,17 @@ export function readPasswordCsv(input: string): ImportedCredential[] {
     }
     return ''
   }
+  // Join all columns mapped to `tags` (e.g. 1Password 8's Category + Tags).
+  const pickAll = (row: string[], field: string): string[] => {
+    const values: string[] = []
+    for (const [index, canonical] of mapped) {
+      if (canonical === field) {
+        const v = (row[index] ?? '').trim()
+        if (v.length > 0) values.push(v)
+      }
+    }
+    return values
+  }
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i]!
     if (hasHeader) {
@@ -428,7 +439,7 @@ export function readPasswordCsv(input: string): ImportedCredential[] {
       const url = pick(row, 'url')
       const notes = pick(row, 'notes')
       const otp = pick(row, 'otp')
-      const tagsRaw = pick(row, 'tags')
+      const tagColumns = pickAll(row, 'tags')
       const favRaw = pick(row, 'favorite')
       if (username === '' && password === '' && url === '' && notes === '') continue // blank row
       out.push({
@@ -438,7 +449,7 @@ export function readPasswordCsv(input: string): ImportedCredential[] {
         url,
         notes,
         ...(otp.length > 0 ? { otp } : {}),
-        ...(tagsRaw.length > 0 ? { tags: tagsRaw.split(/[;,]/).map(t => t.trim()).filter(Boolean) } : {}),
+        ...(tagColumns.length > 0 ? { tags: tagColumns.flatMap(v => v.split(/[;,]/)).map(t => t.trim()).filter(Boolean) } : {}),
         ...(favRaw.length > 0 ? { favorite: favRaw.toLowerCase() === '1' || favRaw.toLowerCase() === 'true' || favRaw.toLowerCase() === 't' || favRaw.toLowerCase() === 'yes' } : {}),
       })
     } else {

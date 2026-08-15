@@ -1,0 +1,3 @@
+folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+"Work",0,login,"BW Site","a note","",0,"https://bw.example","bw-user","bw-pass-1","JBSWY3DPEHPK3PXP"
+"Personal",1,login,"BW Mail","","",0,"https://mail.bw.example","bw@example.com","bw-mail-pass",""
