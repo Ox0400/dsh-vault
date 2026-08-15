@@ -1903,3 +1903,53 @@ test('vault_env and vault_export_env support key prefix', async () => {
     await rm(dir, { recursive: true, force: true })
   })
 })
+
+test('vault_get_many returns missing ids and dedupes', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'GM1', password: 'pw-1' }) as { id: string }
+    const r = await call(ctx, 'vault_get_many', { ids: [a.id, a.id, 'does-not-exist'] }) as { entries: Array<{ title: string }>; missing: string[] }
+    assert.equal(r.entries.length, 1, 'duplicate id deduped')
+    assert.deepEqual(r.missing, ['does-not-exist'])
+  })
+})
+
+test('vault_backup_status reports lastBackupAt', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'BS', password: 'pw' })
+    await call(ctx, 'vault_backup', {})
+    const r = await call(ctx, 'vault_backup_status', {}) as { daysSinceBackup: number; backups: number; lastBackupAt?: number }
+    assert.ok(r.backups >= 1)
+    assert.ok(r.lastBackupAt !== undefined && r.lastBackupAt > 0, 'lastBackupAt present')
+    assert.ok(r.daysSinceBackup >= 0)
+  })
+})
+
+test('vault_export_csv filters by tag and favoriteOnly', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csvf-'))
+    await call(ctx, 'vault_add', { title: 'CsvFav', tags: ['env'], username: 'u1' })
+    await call(ctx, 'vault_add', { title: 'CsvPlain', tags: ['dev'], username: 'u2' })
+    const file = join(dir, 'out.csv')
+    const r = await call(ctx, 'vault_export_csv', { path: file, tag: 'env' }) as { count: number }
+    assert.equal(r.count, 1)
+    const content = await readFile(file, 'utf8')
+    assert.ok(content.includes('CsvFav'))
+    assert.ok(!content.includes('CsvPlain'))
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_rotation sorts expired before soon', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'RotSoon', expiresAt: Date.now() + 2 * 86_400_000 })
+    await call(ctx, 'vault_add', { title: 'RotExpired', expiresAt: Date.now() - 1000 })
+    const r = await call(ctx, 'vault_rotation', {}) as { entries: Array<{ title: string; due: string }> }
+    const idxExpired = r.entries.findIndex(e => e.title === 'RotExpired')
+    const idxSoon = r.entries.findIndex(e => e.title === 'RotSoon')
+    assert.ok(idxExpired >= 0 && idxSoon >= 0, 'both present')
+    assert.ok(idxExpired < idxSoon, 'expired listed before soon')
+  })
+})

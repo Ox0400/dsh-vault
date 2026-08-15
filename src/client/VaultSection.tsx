@@ -79,6 +79,7 @@ export interface VaultSectionInjected {
   health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>
   duplicates: () => Promise<{ groups: number }>
   duplicateGroups: () => Promise<Array<Array<{ id: string; title: string }>>>
+  status: () => Promise<{ locked: boolean; entries: number }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -175,7 +176,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -204,6 +205,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [recentEntries, setRecentEntries] = useState<Array<Record<string, unknown>>>([])
   const [dupGroups, setDupGroups] = useState<number>(0)
   const [dupList, setDupList] = useState<Array<Array<{ id: string; title: string }>>>([])
+  const [locked, setLocked] = useState(false)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -246,8 +248,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       value => { if (current) setPolicy(value) },
       () => { /* policy is informational; ignore failures */ },
     )
+    void status().then(
+      value => { if (current) setLocked(value.locked) },
+      () => { /* ignore */ },
+    )
     return () => { current = false }
-  }, [config])
+  }, [config, status])
 
   const refresh = useMemo(() => async () => {
     setState({ status: 'loading' })
@@ -256,6 +262,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         ? await list()
         : await search(query.trim())
       setState({ status: 'ready', entries })
+      status().then(value => setLocked(value.locked)).catch(() => {})
     } catch {
       setState({ status: 'error' })
     }
@@ -515,6 +522,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     <section className={css.section} aria-labelledby="vault-heading">
       <h2 id="vault-heading">{t('heading')}</h2>
       <p className={css.intro}>{t('intro')}</p>
+
+      {locked && (
+        <p role="alert" className={css.lockedBanner}>{t('lockedBanner')}</p>
+      )}
 
       <div className={css.toolbar}>
         <label className={css.searchBox}>

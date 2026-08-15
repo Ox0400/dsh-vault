@@ -135,6 +135,17 @@
   opacity: 0.8;
 }
 
+.lockedBanner {
+  background: #fff4e5;
+  border: 1px solid #e0a83a;
+  border-radius: 6px;
+  color: #8a5a00;
+  font-size: 13px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+}
+
+
 .modeReadonly,
 .modeAsk,
 .modeAuto {

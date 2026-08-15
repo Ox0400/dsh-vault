@@ -1216,7 +1216,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Report how many days have passed since the last vault-backup-* file was written '
       + '(1Password-style backup reminder). Returns daysSinceBackup and a suggestion.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { daysSinceBackup: { type: 'integer', required: true }, backups: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `last backup ${v.daysSinceBackup} days ago (${v.backups} backup file(s))` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { daysSinceBackup: { type: 'integer', required: true }, backups: { type: 'integer', required: true }, lastBackupAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: `last backup ${v.daysSinceBackup} days ago (${v.backups} backup file(s))` }] },
     async execute() {
       const s = await guardStore()
       const dir = dirname(resolveVaultPath(config))
@@ -1231,7 +1231,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const last = backups.length > 0 ? Math.max(...backups) : 0
       const days = last > 0 ? Math.floor((Date.now() - last) / 86_400_000) : -1
       void s
-      return { daysSinceBackup: days, backups: backups.length }
+      return { daysSinceBackup: days, backups: backups.length, ...(last > 0 ? { lastBackupAt: last } : {}) }
     },
   }))
 
@@ -1754,13 +1754,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       ids: { type: 'array', required: true, items: { type: 'string' }, description: 'Entry ids.' },
       fields: { type: 'array', items: { type: 'string' }, description: 'Fields to include per entry (e.g. ["username", "password"]).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `returned ${(v.entries as unknown[]).length} entries` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } }, missing: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: `returned ${(v.entries as unknown[]).length} entries` }] },
     async execute(args) {
       const s = await guardStore()
       const out: JsonValue[] = []
+      const missing: string[] = []
+      const seen = new Set<string>()
       for (const id of args.ids ?? []) {
+        if (seen.has(id)) continue
+        seen.add(id)
         const e = s.get(id)
-        if (!e) continue
+        if (!e) { missing.push(id); continue }
         const full = stripTimestamps(e) as Record<string, unknown>
         if (Array.isArray(args.fields) && args.fields.length > 0) {
           const picked: Record<string, unknown> = {}
@@ -1772,7 +1776,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           out.push(full as unknown as JsonValue)
         }
       }
-      return { entries: out }
+      return { entries: out, missing }
     },
   }))
 
@@ -2109,12 +2113,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       path: { type: 'string', description: 'Optional absolute output path; defaults to <vault dir>/vault-export-<ts>.csv.' },
       kind: { type: 'string', description: 'Only export entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       includeSecrets: { type: 'boolean', description: 'Include secret columns (password/apiKey/secret/tokens). Default false — the CSV is secret-free for safe handling.' },
+      favoriteOnly: { type: 'boolean', description: 'Only export pinned (favorite) entries.' },
+      tag: { type: 'string', description: 'Only export entries carrying this tag.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
     async execute(args) {
       const s = await guardStore()
       const kind = args.kind
-      const entries = s.list().filter(e => kind === undefined || (e.kind ?? 'login') === kind)
+      const tag = typeof args.tag === 'string' ? args.tag.trim() : ''
+      const entries = s.list().filter(e => (kind === undefined || (e.kind ?? 'login') === kind)
+        && (args.favoriteOnly !== true || e.favorite === true)
+        && (tag.length === 0 || (e.tags ?? []).includes(tag)))
       const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey']
       const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color']
       const fields = args.includeSecrets === true
@@ -2547,6 +2556,13 @@ export class VaultGateway extends TypertRemoteService {
       byKey.set(key, list)
     }
     return [...byKey.values()].filter(g => g.length > 1)
+  }
+
+  /** Vault lock/entry status for the UI banner. */
+  @Remote('status')
+  async status(): Promise<{ locked: boolean; entries: number }> {
+    const store = await this.ensureStore()
+    return { locked: store.isLocked, entries: store.isLocked ? 0 : store.list().length }
   }
 
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */

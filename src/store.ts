@@ -520,7 +520,9 @@ export class VaultStore {
       if (due === undefined) continue
       report.push({ ...toSummary(entry), due, daysLeft })
     }
-    return report
+    // Most urgent first: expired < rotation-due < soon, then fewest days left.
+    const severity = { expired: 0, due: 1, soon: 2 } as const
+    return report.sort((a, b) => severity[a.due] - severity[b.due] || a.daysLeft - b.daysLeft)
   }
 
   /** Advanced multi-criteria search: title/username/kind/tag text + created-after. */
