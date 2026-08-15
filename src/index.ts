@@ -4077,7 +4077,6 @@ export class VaultGateway extends TypertRemoteService {
   /** Generate a strong random password for the editor's password field. */
   @Remote('generatePassword')
   async generatePassword(options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }): Promise<{ password: string }> {
-    const { generatePassword } = await import('./password.ts')
     const password = generatePassword({ length: options?.length ?? 24, lowercase: options?.lowercase ?? true, uppercase: options?.uppercase ?? true, digits: options?.digits ?? true, symbols: options?.symbols ?? true, excludeAmbiguous: options?.excludeAmbiguous ?? false })
     this.genHistory.unshift({ password, at: Date.now() })
     if (this.genHistory.length > 10) this.genHistory.length = 10
