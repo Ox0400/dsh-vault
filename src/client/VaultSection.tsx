@@ -77,7 +77,7 @@ export interface VaultSectionInjected {
   recent: () => Promise<unknown[]>
   backupStatus: () => Promise<{ daysSinceBackup: number; backups: number }>
   backup: (maxBackups?: number) => Promise<{ path: string; kept: number; pruned: number }>
-  health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>
+  health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number }; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string }>
   duplicates: () => Promise<{ groups: number }>
   duplicateGroups: () => Promise<Array<Array<{ id: string; title: string }>>>
   status: () => Promise<{ locked: boolean; entries: number }>
@@ -157,6 +157,8 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'color', label: 'fieldColor' },
 ]
 
+const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
+
 const KIND_KEYS: Record<string, VaultLocaleKey> = {
   login: 'kindLogin',
   ssh: 'kindSsh',
@@ -203,7 +205,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
-  const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null } | null>(null)
+  const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
   const [dueMap, setDueMap] = useState<Record<string, { due: string; daysLeft: number }>>({})
   const [recentEvents, setRecentEvents] = useState<Array<Record<string, unknown>>>([])
   const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
@@ -366,7 +368,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
-        setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]), strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null })
+        setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]), strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null, no2fa: ((hl?.no2fa ?? []) as unknown[]), httpSites: ((hl?.httpSites ?? []) as unknown[]), score: Number(hl?.score ?? 100), verdict: String(hl?.verdict ?? 'good') })
         const due: Record<string, { due: string; daysLeft: number }> = {}
         for (const item of (rot ?? []) as Array<{ id?: string; due?: string; daysLeft?: number }>) {
           if (item.id !== undefined && item.due !== undefined) due[item.id] = { due: item.due, daysLeft: item.daysLeft ?? 0 }
@@ -759,6 +761,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               ))}
             </>
           )}
+          {report.no2fa.length > 0 && (
+            <>
+              <p className={css.reportLine}>{t('no2fa')}: {report.no2fa.length}</p>
+              {(report.no2fa as Array<{ title?: string }>).slice(0, 5).map((item, i) => (
+                <p key={i} className={css.reportSub}>· {String(item.title ?? '?')}</p>
+              ))}
+            </>
+          )}
+          {report.httpSites.length > 0 && (
+            <>
+              <p className={css.reportLine}>{t('httpSites')}: {report.httpSites.length}</p>
+              {(report.httpSites as Array<{ title?: string }>).slice(0, 5).map((item, i) => (
+                <p key={i} className={css.reportSub}>· {String(item.title ?? '?')}</p>
+              ))}
+            </>
+          )}
         </div>
       )}
 
@@ -963,6 +981,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={`${css.badge} ${report.strength.weak > 0 ? css.badgeDanger : css.badgeOk}`}>
               {t('healthStrength')}: {report.strength.weak}W/{report.strength.fair}F/{report.strength.strong}S
             </span>
+          )}
+          {report !== null && (
+            <span className={`${css.badge} ${report.verdict === 'good' ? css.badgeOk : report.verdict === 'fair' ? css.badgeWarn : css.badgeDanger}`}>
+              {t('healthScore')}: {report.score} ({t(VERDICT_KEYS[report.verdict] ?? 'verdictGood')})
+            </span>
+          )}
+          {report !== null && report.no2fa.length > 0 && (
+            <span className={`${css.badge} ${css.badgeWarn}`}>{t('no2fa')}: {report.no2fa.length}</span>
+          )}
+          {report !== null && report.httpSites.length > 0 && (
+            <span className={`${css.badge} ${css.badgeWarn}`}>{t('httpSites')}: {report.httpSites.length}</span>
           )}
           {report !== null && report.rotation.length > 0 && (
             <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>

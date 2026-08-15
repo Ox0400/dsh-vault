@@ -69,7 +69,7 @@ export function apply(ctx: ClientContext): void {
     recent: () => invoke<{ entries: unknown[] }>('recent').then(r => r.entries),
     backupStatus: () => invoke<{ daysSinceBackup: number; backups: number }>('backupStatus'),
     backup: (maxBackups) => invoke<{ path: string; kept: number; pruned: number }>('backup', { ...(maxBackups !== undefined ? { maxBackups } : {}) }),
-    health: () => invoke<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>('health'),
+    health: () => invoke<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number }; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string }>('health'),
     duplicates: () => invoke<{ groups: number }>('duplicates'),
     status: () => invoke<{ locked: boolean; entries: number }>('status'),
     switchVault: (name) => invoke<{ switched: boolean; name: string }>('switchVault', { name }),

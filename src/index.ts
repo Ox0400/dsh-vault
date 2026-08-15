@@ -1970,7 +1970,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'across entries. Returns non-secret findings (entry summaries grouped by the reused value).',
     parameters: {},
     output: {
-      schema: { type: 'object', additionalProperties: false, properties: { weak: { type: 'array', required: true, items: { type: 'json' } }, reused: { type: 'array', required: true, items: { type: 'json' } }, strength: { type: 'json', required: true } } },
+      schema: { type: 'object', additionalProperties: false, properties: { weak: { type: 'array', required: true, items: { type: 'json' } }, reused: { type: 'array', required: true, items: { type: 'json' } }, strength: { type: 'json', required: true }, no2fa: { type: 'array', required: true, items: { type: 'json' } }, httpSites: { type: 'array', required: true, items: { type: 'json' } }, score: { type: 'integer', required: true }, verdict: { type: 'string', required: true } } },
       render: (_a, v) => [{ type: 'text', text: `weak: ${v.weak.length}, reused groups: ${v.reused.length}` }],
     },
     async execute() {
@@ -2654,7 +2654,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Health scan findings (no secrets). */
   @Remote('health')
-  async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }> {
+  async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number }; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string }> {
     const store = await this.guardedStore()
     return store.health()
   }

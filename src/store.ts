@@ -648,13 +648,34 @@ export class VaultStore {
    * Health scan: weak passwords (too short), and passwords/API keys reused
    * across entries. Returns non-secret findings keyed by entry id.
    */
-  health(): { weak: Array<VaultEntrySummary>; reused: Array<{ value: string; entries: VaultEntrySummary[] }>; strength: { weak: number; fair: number; strong: number } } {
+  health(): {
+    weak: Array<VaultEntrySummary>
+    reused: Array<{ value: string; entries: VaultEntrySummary[] }>
+    strength: { weak: number; fair: number; strong: number }
+    no2fa: Array<VaultEntrySummary>
+    httpSites: Array<VaultEntrySummary>
+    score: number
+    verdict: 'good' | 'fair' | 'poor'
+  } {
     const weak: VaultEntrySummary[] = []
     const strength = { weak: 0, fair: 0, strong: 0 }
+    const no2fa: VaultEntrySummary[] = []
+    const httpSites: VaultEntrySummary[] = []
     const passwordCounts = new Map<string, VaultEntrySummary[]>()
     const keyCounts = new Map<string, VaultEntrySummary[]>()
+    const now = Date.now()
     for (const entry of this.list()) {
       const summary = toSummary(entry)
+      const kind = entry.kind ?? 'login'
+      // Inactive 2FA (Bitwarden report): a credential with a password but no
+      // TOTP secret on an account kind that supports it.
+      if (entry.password !== undefined && (kind === 'login' || kind === 'ssh') && entry.otpSecret === undefined) {
+        no2fa.push(summary)
+      }
+      // Unsecured websites (Bitwarden report): http:// URLs.
+      if (typeof entry.url === 'string' && /^http:\/\//i.test(entry.url)) {
+        httpSites.push(summary)
+      }
       if (entry.password !== undefined) {
         const len = entry.password.length
         if (len < VaultStore.MIN_PASSWORD_LENGTH) { weak.push(summary); strength.weak++ }
@@ -670,12 +691,23 @@ export class VaultStore {
         list.push(summary)
         keyCounts.set(key, list)
       }
+      void now
     }
     const reused = [
       ...[...passwordCounts.entries()].filter(([, v]) => v.length > 1),
       ...[...keyCounts.entries()].filter(([, v]) => v.length > 1),
     ].map(([value, entries]) => ({ value, entries }))
-    return { weak, reused, strength }
+    // Vault security score (Bitwarden-style): start at 100 and deduct for the
+    // concrete risks found, floored at 0.
+    let score = 100
+    score -= Math.min(weak.length * 10, 40)
+    score -= Math.min(reused.length * 15, 30)
+    score -= Math.min(no2fa.length * 5, 20)
+    score -= Math.min(httpSites.length * 5, 10)
+    score -= Math.min([...this.list()].filter(e => e.expiresAt !== undefined && e.expiresAt < now).length * 5, 15)
+    score = Math.max(0, score)
+    const verdict = score >= 80 ? 'good' : score >= 50 ? 'fair' : 'poor'
+    return { weak, reused, strength, no2fa, httpSites, score, verdict }
   }
 
   /**

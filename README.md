@@ -60,7 +60,8 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
 | `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials; `soonWindowDays` (1-90, default 7) tunes the soon horizon (no secrets) |
-| `vault_health` | Scan for weak passwords and credentials reused across entries (no secrets) |
+| `vault_health` | Vault health scan: weak/reused passwords, missing 2FA, insecure http:// sites, and an overall security score (0–100) |
+| `vault_breach_check` | Watchtower-style breach scan against Have I Been Pwned (k-anonymity: only the SHA-1 prefix leaves the machine), with an offline common-password fallback |
 | `vault_merge` | Merge one entry into another; `keepSource: true` keeps the source after merging |
 | `vault_quick_add` | Fast capture (title + one secret) with optional tags/notes |
 | `vault_expiry` | Set/clear expiry (`expiresAt: 0` removes it) |

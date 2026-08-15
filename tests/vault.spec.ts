@@ -522,3 +522,23 @@ test('store: merge with keepSource keeps the source entry', async () => {
     assert.equal(vault.list().length, 2)
   })
 })
+
+test('store: health reports no-2FA, HTTP sites, and a security score', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    await vault.add({ title: 'NoTOTP', username: 'u', password: 'a-very-long-password-ok-1' })
+    await vault.add({ title: 'HasTOTP', username: 'u', password: 'a-very-long-password-ok-2', otpSecret: 'GEZDGNBVGY3TQOJQ' })
+    await vault.add({ title: 'HttpSite', username: 'u', password: 'a-very-long-password-ok-3', url: 'http://insecure.example' })
+    await vault.add({ title: 'WeakOne', password: 'short' })
+    const h = vault.health()
+    // NoTOTP, HttpSite and WeakOne are all login-kind entries with a password but no otpSecret.
+    assert.equal(h.no2fa.length, 3, 'login entries without TOTP flagged')
+    assert.ok(h.no2fa.some(x => x.title === 'NoTOTP'))
+    assert.ok(!h.no2fa.some(x => x.title === 'HasTOTP'))
+    assert.equal(h.httpSites.length, 1)
+    assert.equal(h.httpSites[0]!.title, 'HttpSite')
+    // 100 - 10(weak) - 15(no2fa x3) - 5(http) = 70
+    assert.equal(h.score, 70)
+    assert.equal(h.verdict, 'fair')
+  })
+})
