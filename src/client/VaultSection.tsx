@@ -4,7 +4,7 @@
  * are shown only inside the edit form or a copy action, never in the list.
  */
 
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime, InjectFace, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VaultLocaleKey } from './locales.ts'
 import css from './VaultSection.module.css'
@@ -521,6 +521,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Copy a field value to the clipboard and flash the row. */
+  const clipboardTimer = useRef<number | null>(null)
+  const CLIPBOARD_CLEAR_MS = 30_000
+
   async function copyValue(id: string, value: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(value)
@@ -534,7 +537,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       textarea.remove()
     }
     setCopiedId(id)
-    window.setTimeout(() => setCopiedId(null), 1500)
+    window.setTimeout(() => setCopiedId(null), 3000)
+    // Auto-clear the clipboard after 30s (1Password/Bitwarden-style), so a
+    // copied secret does not linger for anyone using the machine later.
+    if (clipboardTimer.current !== null) window.clearTimeout(clipboardTimer.current)
+    clipboardTimer.current = window.setTimeout(() => {
+      void navigator.clipboard.writeText('').catch(() => {})
+      clipboardTimer.current = null
+    }, CLIPBOARD_CLEAR_MS)
   }
 
   /** Fetch and display a TOTP code for an entry with an otpSecret. */
@@ -952,7 +962,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   </div>
                 )}
                 <div className={css.rowActions}>
-                  {copiedId === entry.id && <span className={css.copied}>{t('copied')}</span>}
+                  {copiedId === entry.id && <span className={css.copied}>{t('copied')} · {t('clearsIn30s')}</span>}
                   <button
                     type="button"
                     onClick={() => void copyValue(entry.id, entry.username ?? entry.title)}
@@ -972,6 +982,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
                   {code !== undefined && (
                     <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy}>{t('copyCode')}</button>
+                  )}
+                  {entry.url !== undefined && entry.url !== '' && (
+                    <button type="button" onClick={() => window.open(entry.url!, '_blank', 'noopener')} title={t('openUrlHint')}>{t('openUrl')}</button>
                   )}
                   <button type="button" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly} title={t('touchHint')}>{t('touch')}</button>
                   <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly}>{t('edit')}</button>

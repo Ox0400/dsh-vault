@@ -2305,3 +2305,15 @@ test('vault_import rejects a future export format', async () => {
     delete process.env.DSH_VAULT_EXPORT_PW8
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW8' })
 })
+
+test('vault_clipboard supports masked output and reports auto-clear', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', { title: 'ClipMask', password: 'super-secret-pw' }) as { id: string }
+    const plain = await call(ctx, 'vault_clipboard', { id: added.id, field: 'password' }) as { value: string; autoClearSeconds: number }
+    assert.equal(plain.value, 'super-secret-pw')
+    assert.equal(plain.autoClearSeconds, 30)
+    const masked = await call(ctx, 'vault_clipboard', { id: added.id, field: 'password', masked: true }) as { value: string }
+    assert.ok(masked.value.endsWith('***'), 'masked value')
+    assert.ok(!masked.value.includes('super-secret-pw'), 'no plaintext leak')
+  })
+})

@@ -730,10 +730,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       id: { type: 'string', required: true, description: 'Entry id.' },
       field: { type: 'string', required: true, description: 'Field to copy: username, password, apiKey, secret, accessToken, refreshToken, otpSecret, privateKey.' },
+      masked: { type: 'boolean', description: 'Return the value masked (e.g. hunter***) instead of plaintext.' },
     },
     output: {
-      schema: { type: 'object', additionalProperties: false, properties: { value: { type: 'string', required: true }, caution: { type: 'string', required: true } } },
-      render: (_a, v) => [{ type: 'text', text: `copied value (do not echo) — ${v.caution}` }],
+      schema: { type: 'object', additionalProperties: false, properties: { value: { type: 'string', required: true }, caution: { type: 'string', required: true }, autoClearSeconds: { type: 'integer', required: true } } },
+      render: (_a, v) => [{ type: 'text', text: `copied value (auto-clears in ${v.autoClearSeconds}s, do not echo) — ${v.caution}` }],
     },
     async execute(args) {
       const entry = await readEntry(args.id)
@@ -742,7 +743,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (typeof value !== 'string' || value.length === 0) {
         throw new Error(`vault_clipboard: entry ${args.id} has no ${args.field}`)
       }
-      return { value, caution: 'value returned for copy; do not repeat it in the conversation' }
+      const outValue = args.masked === true ? value.slice(0, 6) + '***' : value
+      return { value: outValue, caution: 'value returned for copy; do not repeat it in the conversation', autoClearSeconds: 30 }
     },
   }))
 
