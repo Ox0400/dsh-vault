@@ -88,6 +88,7 @@ export interface VaultSectionInjected {
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
   backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
+  restoreBackup: (path: string) => Promise<{ entries: number; safetyBackup: string; note: string }>
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importFirefox: (masterPassword?: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
@@ -174,7 +175,8 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
 
 const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
 const TAB_KEYS: Record<string, VaultLocaleKey> = {
-  entries: 'tabEntries', security: 'tabSecurity', transfer: 'tabTransfer', organize: 'tabOrganize',
+  entries: 'tabEntries', security: 'tabSecurity', transfer: 'tabTransfer',
+  backup: 'tabBackup', permissions: 'tabPermissions', trash: 'tabTrash',
 }
 const VERDICT_KEYS_SHORT: Record<string, VaultLocaleKey> = { weak: 'verdictPoor', fair: 'verdictFair', strong: 'verdictGood', 'very strong': 'verdictGood' }
 const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
@@ -212,7 +214,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, importChrome, importFirefox, keychainImport, searchSystem } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, keychainImport, searchSystem } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -241,9 +243,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'favorite' | 'smart'>('alpha')
-  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'organize'>('entries')
+  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
-  const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
   const [dueMap, setDueMap] = useState<Record<string, { due: string; daysLeft: number }>>({})
@@ -470,6 +471,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Restore the vault from a backup file (asks for confirmation first). */
+  async function restoreBackupFrom(b: { path: string; at: number }): Promise<void> {
+    if (!window.confirm(t('backupRestoreConfirm'))) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await restoreBackup(b.path)
+      setMessage(result.note)
+      setBackupInfo(null)
+      void refresh()
+      if (result.safetyBackup !== '') setMessage(`${result.note} — ${t('backupSafetyHint')} ${result.safetyBackup}`)
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => {
     let current = true
     void config().then(
@@ -552,7 +571,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         verifyAll().then(setAudit).catch(() => {})
         tags().then(setTagList).catch(() => {})
         generatorHistory().then(setGenHistory).catch(() => {})
-        backups(5).then(setBackupList).catch(() => {})
+        backups(20).then(setBackupList).catch(() => {})
+        trash().then(setTrashEntries).catch(() => {})
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
@@ -822,7 +842,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
 
       <nav className={css.tabs} aria-label={t('sectionTabs')}>
-        {(['entries', 'security', 'transfer', 'organize'] as const).map(tab => (
+        {(['entries', 'security', 'transfer', 'backup', 'permissions', 'trash'] as const).map(tab => (
           <button
             key={tab}
             type="button"
@@ -892,56 +912,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </button>
       </div>
       </div>)}
-
-      {policy !== null && (
-        <div className={css.policyBar}>
-          <label className={css.policyField}>
-            <span>{t('modeLabel')}</span>
-            <select
-              value={policy.accessMode}
-              disabled={busy}
-              onChange={event => {
-                const next = event.target.value as 'readonly' | 'ask' | 'auto'
-                setBusy(true)
-                setMessage(null)
-                void setAccessMode(next).then(
-                  value => { setPolicy(value); setBusy(false) },
-                  () => { setMessage(t('error')); setBusy(false) },
-                )
-              }}
-            >
-              <option value="readonly">{t('modeReadonly')}</option>
-              <option value="ask">{t('modeAsk')}</option>
-              <option value="auto">{t('modeAuto')}</option>
-            </select>
-          </label>
-          <label className={css.policyField}>
-            <span>{t('autoCaptureLabel')}</span>
-            <input
-              type="checkbox"
-              checked={policy.autoCapture}
-              disabled={busy}
-              onChange={event => {
-                const next = event.target.checked
-                setBusy(true)
-                setMessage(null)
-                void setAutoCapture(next).then(
-                  value => { setPolicy(value); setBusy(false) },
-                  () => { setMessage(t('error')); setBusy(false) },
-                )
-              }}
-            />
-          </label>
-          <p className={policy.accessMode === 'readonly' ? css.modeReadonly : policy.accessMode === 'ask' ? css.modeAsk : css.modeAuto}>
-            {policy.accessMode === 'readonly'
-              ? t('modeReadonlyHint')
-              : policy.accessMode === 'ask'
-                ? t('modeAskHint')
-                : t('modeAutoHint')}
-            {policy.autoCapture ? ` · ${t('autoCaptureOn')}` : ` · ${t('autoCaptureOff')}`}
-          </p>
-        </div>
-      )}
 
       {message !== null && <p role="alert" className={css.error}>{message}</p>}
 
@@ -1096,13 +1066,91 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>
       </div>)}
 
-      {activeTab === 'organize' && (<div className={css.tabPane}>
+      {activeTab === 'backup' && (<div className={css.tabPane}>
+      <div className={css.reportBox}>
+        <p className={css.reportTitle}>{t('backupTitle')}</p>
+        <p className={css.reportSub}>{t('backupHint')}</p>
+        {backupInfo !== null && (
+          <p className={css.reportSub}>{t('healthBackup')}: {backupInfo.daysSinceBackup}d ({backupInfo.backups})</p>
+        )}
+        <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>
+          {t('backupNow')}
+        </button>
+      </div>
+
       {backupList.length > 0 && (
         <div className={css.reportBox}>
-          <p className={css.reportTitle}>{t('recentBackups')}</p>
+          <p className={css.reportTitle}>{t('recentBackups')} ({backupList.length})</p>
           {backupList.map(b => (
-            <p key={b.path} className={css.reportSub}>· {new Date(b.at).toLocaleString()}</p>
+            <div key={b.path} className={css.dupGroup}>
+              <span className={css.dupNames}>{new Date(b.at).toLocaleString()}</span>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void restoreBackupFrom(b)}
+                disabled={busy || readonly || locked}
+                title={t('backupRestoreHint')}
+              >{t('backupRestore')}</button>
+            </div>
           ))}
+        </div>
+      )}
+      {backupList.length === 0 && (
+        <p className={css.empty}>{t('noBackups')}</p>
+      )}
+      </div>)}
+
+      {activeTab === 'permissions' && (<div className={css.tabPane}>
+      {policy !== null && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('permTitle')}</p>
+          <div className={css.policyBar}>
+            <label className={css.policyField}>
+              <span>{t('modeLabel')}</span>
+              <select
+                value={policy.accessMode}
+                disabled={busy}
+                onChange={event => {
+                  const next = event.target.value as 'readonly' | 'ask' | 'auto'
+                  setBusy(true)
+                  setMessage(null)
+                  void setAccessMode(next).then(
+                    value => { setPolicy(value); setBusy(false) },
+                    () => { setMessage(t('error')); setBusy(false) },
+                  )
+                }}
+              >
+                <option value="readonly">{t('modeReadonly')}</option>
+                <option value="ask">{t('modeAsk')}</option>
+                <option value="auto">{t('modeAuto')}</option>
+              </select>
+            </label>
+            <label className={css.policyField}>
+              <span>{t('autoCaptureLabel')}</span>
+              <input
+                type="checkbox"
+                checked={policy.autoCapture}
+                disabled={busy}
+                onChange={event => {
+                  const next = event.target.checked
+                  setBusy(true)
+                  setMessage(null)
+                  void setAutoCapture(next).then(
+                    value => { setPolicy(value); setBusy(false) },
+                    () => { setMessage(t('error')); setBusy(false) },
+                  )
+                }}
+              />
+            </label>
+            <p className={policy.accessMode === 'readonly' ? css.modeReadonly : policy.accessMode === 'ask' ? css.modeAsk : css.modeAuto}>
+              {policy.accessMode === 'readonly'
+                ? t('modeReadonlyHint')
+                : policy.accessMode === 'ask'
+                  ? t('modeAskHint')
+                  : t('modeAutoHint')}
+              {policy.autoCapture ? ` · ${t('autoCaptureOn')}` : ` · ${t('autoCaptureOff')}`}
+            </p>
+          </div>
         </div>
       )}
 
@@ -1139,30 +1187,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           ))}
         </div>
       )}
-
       </div>)}
 
-      {activeTab === 'entries' && (<div className={css.tabPane}>
-      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter) > visibleCount && (
-        <button
-          type="button"
-          className={css.trashButton}
-          onClick={() => setVisibleCount(count => count + 50)}
-        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter) - visibleCount})</button>
-      )}
-
-      {state.status === 'ready' && (state.entries.length > 0 || trashEntries.length > 0) && (
-        <button
-          type="button"
-          className={css.trashButton}
-          onClick={() => {
-            if (!showTrash) void trash().then(setTrashEntries)
-            setShowTrash(!showTrash)
-          }}
-        >{showTrash ? t('hideTrash') : t('showTrash')}{trashEntries.length > 0 ? ` (${trashEntries.length})` : ''}</button>
-      )}
-
-      {showTrash && (
+      {activeTab === 'trash' && (<div className={css.tabPane}>
+      {trashEntries.length === 0 && <p className={css.empty}>{t('trashEmpty')}</p>}
+      {trashEntries.length > 0 && (
         <ul className={css.list}>
           {trashEntries.map(entry => (
             <li key={entry.id} className={css.row}>
@@ -1179,10 +1208,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               </div>
             </li>
           ))}
-          {trashEntries.length === 0 && <p className={css.empty}>{t('trashEmpty')}</p>}
         </ul>
       )}
-      {showTrash && trashEntries.length > 0 && (
+      {trashEntries.length > 0 && (
         <>
           <button
             type="button"
@@ -1212,6 +1240,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             disabled={busy || readonly}
           >{t('clearTrash')}</button>
         </>
+      )}
+      </div>)}
+
+      {activeTab === 'entries' && (<div className={css.tabPane}>
+      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter) > visibleCount && (
+        <button
+          type="button"
+          className={css.trashButton}
+          onClick={() => setVisibleCount(count => count + 50)}
+        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter) - visibleCount})</button>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (

@@ -35,7 +35,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'importChrome', 'importFirefox', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'importChrome', 'importFirefox', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
@@ -118,5 +118,52 @@ test('VaultGateway renameTag merges a tag across entries', async () => {
     expect(a.tags).toContain('new')
     expect(a.tags).not.toContain('old')
     expect(a.tags).toContain('keep')
+  })
+})
+
+test('VaultGateway exposes the system-import remotes (importChrome/keychainImport/importFirefox/searchSystem)', async () => {
+  await withGateway(async gateway => {
+    const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method)
+    expect(methods).toContain('importChrome')
+    expect(methods).toContain('keychainImport')
+    expect(methods).toContain('importFirefox')
+    expect(methods).toContain('searchSystem')
+  })
+})
+
+test('VaultGateway keychainImport validates arguments before touching the keychain', async () => {
+  await withGateway(async gateway => {
+    // Bad limit is rejected by the gateway without any security CLI call.
+    await expect(gateway.keychainImport({ limit: 9999 })).rejects.toThrow(/limit/)
+  })
+})
+
+test('VaultGateway backup/backups/restoreBackup round trip', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'GitHub', username: 'ada', password: 'hunter2!' })
+    const bk = await gateway.backup()
+    expect(bk.path).toMatch(/vault-backup-\d+.*\.json$/)
+
+    const list = await gateway.backups(5)
+    expect(list.length).toBe(1)
+    expect(list[0]!.path).toBe(bk.path)
+
+    // Mutate the vault, then restore from the backup — the original entry returns.
+    await gateway.add({ title: 'Temp', username: 'x', password: 'y' })
+    expect((await gateway.list()).entries).toHaveLength(2)
+
+    const restored = await gateway.restoreBackup(bk.path)
+    expect(restored.entries).toBe(1)
+    expect(restored.safetyBackup).toMatch(/pre-restore\.json$/)
+    const entries = (await gateway.list()).entries
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.title).toBe('GitHub')
+    expect(entries[0]!.username).toBe('ada')
+  })
+})
+
+test('VaultGateway restoreBackup rejects non-backup paths', async () => {
+  await withGateway(async gateway => {
+    await expect(gateway.restoreBackup('/tmp/not-a-backup.json')).rejects.toThrow(/not a vault backup/)
   })
 })

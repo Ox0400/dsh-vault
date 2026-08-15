@@ -33,6 +33,7 @@ import { checkPassword } from './breach.ts'
 import { readChromeLogins } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { readFirefoxLogins } from './firefox.ts'
+import { readKdbx } from './kdbx.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -1918,6 +1919,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_restore_backup: restore the vault from an encrypted backup ──────
+  ctx.tools.register(defineTool({
+    name: 'vault_restore_backup',
+    description: 'Restore the vault from one of its encrypted `vault-backup-*.json` files. A safety '
+      + 'snapshot of the current state is written first (named *-pre-restore.json), then the backup '
+      + 'overwrites the live vault file and the store reloads. Use vault_backups to list available '
+      + 'backup paths first.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of a vault-backup-<timestamp>.json file.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'integer', required: true }, safetyBackup: { type: 'string' }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `restored (${v.entries} entries)` }] },
+    async execute(args) {
+      assertWritable('vault_restore_backup')
+      const s = await guardStore()
+      const result = await restoreVaultFromBackup(masterPassword, config, args.path)
+      void s
+      return result
+    },
+  }))
+
   // ── vault_search_history: search including deleted entries ─────────────────
   ctx.tools.register(defineTool({
     name: 'vault_search_history',
@@ -2689,6 +2710,46 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_kdbx: import from a KeePass KDBX4 database ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_kdbx',
+    description: 'Import entries from a KeePass KDBX 4.x database (AES-KDF + AES-256-CBC, ChaCha20 '
+      + 'protected fields) using the open-source KDBX4 spec. Password and optional keyfile supported; '
+      + 'Argon2 KDF databases are rejected with a hint to re-save via KeePassXC with AES-KDF.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the .kdbx file.' },
+      password: { type: 'string', description: 'Database password (empty allowed).' },
+      keyfile: { type: 'string', description: 'Optional absolute path of a keyfile.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_kdbx')
+      const s = await guardStore()
+      const data = await readFile(args.path)
+      const keyfile = args.keyfile !== undefined ? await readFile(args.keyfile) : undefined
+      const creds = readKdbx(data, args.password ?? '', keyfile)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.title.trim()
+        if (!title) { skipped++; continue }
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = {
+          ...(c.username.length > 0 ? { username: c.username } : {}),
+          ...(c.password.length > 0 ? { password: c.password } : {}),
+          ...(c.url.length > 0 ? { url: c.url } : {}),
+          ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+        }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `KeePass import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
   // ── vault_import_chrome: import passwords from Chrome's Login Data ─────────
   ctx.tools.register(defineTool({
     name: 'vault_import_chrome',
@@ -2890,6 +2951,30 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
       await writeFile(args.path, JSON.stringify(doc, null, 2), { mode: 0o600 })
       return { path: args.path, count: items.length }
+    },
+  }))
+
+  // ── vault_backups: list available encrypted backups ────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_backups',
+    description: 'List available encrypted `vault-backup-*.json` files (newest first) with their '
+      + 'absolute paths and timestamps. Use the returned path with vault_restore_backup to restore.',
+    parameters: { limit: { type: 'number', description: 'Max results (default 20, max 100).' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { backups: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} backup(s)` }] },
+    async execute(args) {
+      await guardStore()
+      const dir = dirname(resolveVaultPath(config))
+      const limit = validateLimit(args.limit, 'vault_backups')
+      const found: JsonValue[] = []
+      try {
+        const entries = await readdir(dir)
+        for (const entry of entries) {
+          const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
+          if (m) found.push({ path: join(dir, entry), at: Number(m[1]) })
+        }
+      } catch { /* no dir yet */ }
+      found.sort((a, b) => Number((b as { at: number }).at) - Number((a as { at: number }).at))
+      return { backups: found.slice(0, limit), count: found.length }
     },
   }))
 
@@ -3521,6 +3606,9 @@ export class VaultGateway extends TypertRemoteService {
   async keychainImport(options?: { limit?: number; overwrite?: boolean; preview?: boolean }): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const limit = options?.limit ?? 10
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new Error('keychainImport: limit must be an integer 1–200')
+    }
     if (options?.preview === true) {
       const entries = listKeychainEntries(limit)
       return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
@@ -3579,6 +3667,18 @@ export class VaultGateway extends TypertRemoteService {
       }
     } catch { /* no dir yet */ }
     return found.sort((a, b) => b.at - a.at).slice(0, limit)
+  }
+
+  /** Restore the active vault from one of its encrypted backups. A safety
+   * snapshot of the current state is written first, then the store reloads. */
+  @Remote('restoreBackup')
+  async restoreBackup(path: string): Promise<{ entries: number; safetyBackup: string; note: string }> {
+    this.assertWritable('restoreBackup')
+    await this.guardedStore()
+    return restoreVaultFromBackup(this.masterPassword, {
+      ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}),
+      ...(this.activeName !== undefined ? { name: this.activeName } : {}),
+    }, path)
   }
 
   /** Lock the vault immediately (wipe the in-memory key); UI "lock" button. */
@@ -3991,6 +4091,40 @@ function toSummaryJson(entry: VaultEntry | VaultEntrySummary): JsonValue {
 
 /** Strip timestamps from an entry for model-visible output (keeps secrets
  * when the caller asked for the full entry via vault_get). */
+
+/** Restore the active vault from an encrypted backup file: validate the path
+ * is one of our `vault-backup-*` files, snapshot the current state as a new
+ * backup first, then copy the backup over the live file and reload the shared
+ * store so both the tools and the UI see the restored entries immediately. */
+async function restoreVaultFromBackup(masterPassword: string, config: Config, backupPath: string): Promise<{ entries: number; safetyBackup: string; note: string }> {
+  const target = resolveVaultPath(config)
+  const backup = join(dirname(target), basename(backupPath))
+  if (!/^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(basename(backup))) {
+    throw new Error('vault_restore_backup: not a vault backup file (expected vault-backup-<timestamp>.json)')
+  }
+  if (backup === target) throw new Error('vault_restore_backup: cannot restore the live vault file onto itself')
+  const raw = await readFile(backup, 'utf8').catch(() => {
+    throw new Error('vault_restore_backup: backup file not found')
+  })
+  // Safety snapshot of the current state before overwriting.
+  const safety = join(dirname(target), `vault-backup-${Date.now()}-pre-restore.json`)
+  const current = await readFile(target, 'utf8').catch(() => undefined)
+  if (current !== undefined) {
+    await writeFile(safety, current, { mode: 0o600 })
+  }
+  await writeFile(target, raw, { mode: 0o600 })
+  // The restored file may use different KDF parameters (rare) — drop the
+  // cached store instance so the next open derives fresh from disk.
+  const cacheKey = `${target}\0${masterPassword}`
+  sharedVaultStores.delete(cacheKey)
+  const store = await sharedVaultStore(masterPassword, config)
+  await clearFailedAttempts(config)
+  return {
+    entries: store.list().length,
+    safetyBackup: current !== undefined ? safety : '',
+    note: `vault restored from ${basename(backup)} (${store.list().length} entries)` + (current !== undefined ? `; pre-restore snapshot: ${basename(safety)}` : ''),
+  }
+}
 
 
 /** Minimal RFC-4180-ish CSV parser: handles quoted fields with embedded

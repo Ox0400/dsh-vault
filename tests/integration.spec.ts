@@ -100,6 +100,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_backup',
       'vault_backup_now',
       'vault_backup_status',
+      'vault_backups',
       'vault_breach_check',
       'vault_bulk_export',
       'vault_changes',
@@ -135,6 +136,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_chrome',
       'vault_import_csv',
       'vault_import_firefox',
+      'vault_import_kdbx',
       'vault_import_keychain',
       'vault_import_wallet',
       'vault_integrity',
@@ -154,6 +156,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rename',
       'vault_report',
       'vault_restore',
+      'vault_restore_backup',
       'vault_restore_recent',
       'vault_rotate_password',
       'vault_rotation',
@@ -175,7 +178,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_unpin',
       'vault_update',
       'vault_verify',
-])
+    ])
   })
 })
 

@@ -81,6 +81,7 @@ export function apply(ctx: ClientContext): void {
     renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),
     generatorHistory: () => invoke<Array<{ password: string; at: number }>>('generatorHistory'),
     backups: (limit) => invoke<Array<{ path: string; at: number }>>('backups', { limit: limit ?? 5 }),
+    restoreBackup: (path) => invoke<{ entries: number; safetyBackup: string; note: string }>('restoreBackup', { path }),
     importChrome: (overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importChrome', { overwrite: overwrite ?? false }),
     importFirefox: (masterPassword, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importFirefox', { masterPassword: masterPassword ?? '', overwrite: overwrite ?? false }),
     keychainImport: (options) => invoke<{ added: number; skipped: number; updated: number; note: string }>('keychainImport', { ...(options ?? {}) }),
