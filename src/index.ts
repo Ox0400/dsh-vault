@@ -2003,7 +2003,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       since: { type: 'integer', description: 'Only export active entries created or updated at/after this epoch millis (incremental backup).' },
       path: { type: 'string', description: 'Optional absolute output path; defaults to <vault dir>/vault-export-<ts>.json.' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { exported: { type: 'boolean', required: true }, note: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { exported: { type: 'boolean', required: true }, note: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
     async execute(args) {
       const exportPassword = resolveExportPassword(config)
       const s = await guardStore()
@@ -2019,7 +2019,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.json`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
       await writeFile(file, blob, { mode: 0o600 })
-      return { exported: true, note: `vault exported to ${file}` }
+      const count = args.ids !== undefined && args.ids.length > 0
+        ? args.ids.length
+        : args.since !== undefined
+          ? s.list().filter(e => e.createdAt >= args.since! || e.updatedAt >= args.since!).length
+          : s.list().length + s.listTrash().length
+      return { exported: true, note: `vault exported to ${file}`, count }
     },
   }))
 
@@ -2376,13 +2381,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Switch the active vault for this session. Future vault_* calls operate on the named '
       + 'vault (created on first use). Returns the newly active vault name.',
     parameters: { name: { type: 'string', required: true, description: 'Vault name (e.g. "work" or "personal").' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { active: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `switched to vault "${v.active}"` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { active: { type: 'string', required: true }, vaults: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `switched to vault "${v.active}"` }] },
     async execute(args) {
       const name = args.name.trim()
       if (name.length === 0) throw new Error('vault_switch: name must not be empty')
       if (!/^[a-zA-Z0-9._-]+$/.test(name)) throw new Error('vault_switch: name may contain only letters, digits, . _ -')
       currentVaultName = name
-      return { active: name }
+      // List known vaults (mirrors vault_list) so the caller sees the roster.
+      let names: string[] = []
+      try {
+        const entries = await readdir(dirname(resolveVaultPath(config)))
+        for (const entry of entries) {
+          const m = /^(.*)\.json$/.exec(entry)
+          if (!m) continue
+          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-')) continue
+          names.push(m[1]!)
+        }
+      } catch { /* no dir yet */ }
+      return { active: name, vaults: names.sort().map(v => ({ name: v, active: v === name })) }
     },
   }))
 
@@ -2447,6 +2463,15 @@ export class VaultGateway extends TypertRemoteService {
     })
   }
 
+  /** Ensure the store and refuse reads/writes while the vault is locked. */
+  private async guardedStore(): Promise<VaultStore> {
+    const store = await this.ensureStore()
+    if (store.isLocked) {
+      throw new Error('vault is locked — run vault_unlock first')
+    }
+    return store
+  }
+
   /** Reject mutations when the vault is in readonly mode (UI surface). */
   private assertWritable(action: string): void {
     if (this.accessPolicy.mode === 'readonly') {
@@ -2493,14 +2518,14 @@ export class VaultGateway extends TypertRemoteService {
   /** List every entry as a non-secret summary. */
   @Remote('list')
   async list(): Promise<{ entries: VaultEntrySummaryWire[] }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { entries: store.list().map(toSummary) }
   }
 
   /** List trashed (soft-deleted) entries as non-secret summaries. */
   @Remote('trash')
   async trash(): Promise<{ entries: VaultEntrySummaryWire[] }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { entries: store.listTrash().map(toSummary) }
   }
 
@@ -2508,7 +2533,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('undeleteAll')
   async undeleteAll(): Promise<{ restored: number }> {
     this.assertWritable('undeleteAll')
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     let restored = 0
     for (const e of store.listTrash()) {
       if (await store.restore(e.id)) restored++
@@ -2520,7 +2545,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('restore')
   async restore(id: string): Promise<{ restored: boolean }> {
     this.assertWritable('restore')
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { restored: await store.restore(id) }
   }
 
@@ -2566,28 +2591,28 @@ export class VaultGateway extends TypertRemoteService {
   /** Vault overview stats (no secrets). */
   @Remote('stats')
   async stats(): Promise<Record<string, unknown>> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return store.stats() as unknown as Record<string, unknown>
   }
 
   /** Most recently created entries (no secrets). */
   @Remote('recent')
   async recent(): Promise<{ entries: unknown[] }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { entries: store.recent(5) as unknown as unknown[] }
   }
 
   /** Recent mutation history (no secrets). */
   @Remote('history')
   async history(): Promise<{ events: unknown[] }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { events: store.getHistory().slice(0, 20) }
   }
 
   /** Rotation/expiry report (no secrets). */
   @Remote('rotation')
   async rotation(soonWindowDays?: number): Promise<{ entries: unknown[] }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const window = soonWindowDays === undefined ? 7 : soonWindowDays
     return { entries: store.rotationReport(Date.now(), window) as unknown as unknown[] }
   }
@@ -2595,14 +2620,14 @@ export class VaultGateway extends TypertRemoteService {
   /** Health scan findings (no secrets). */
   @Remote('health')
   async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return store.health()
   }
 
   /** Duplicate groups count for the UI health badge (title+kind matches). */
   @Remote('duplicates')
   async duplicates(): Promise<{ groups: number }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const byKey = new Map<string, unknown[]>()
     for (const e of store.list()) {
       const key = `${e.title.toLowerCase()}::${e.kind ?? 'login'}`
@@ -2616,7 +2641,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Duplicate groups with ids+titles for the UI cleanup panel (title+kind). */
   @Remote('duplicateGroups')
   async duplicateGroups(): Promise<Array<Array<{ id: string; title: string }>>> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const byKey = new Map<string, Array<{ id: string; title: string }>>()
     for (const e of store.list()) {
       const key = `${e.title.toLowerCase()}::${e.kind ?? 'login'}`
@@ -2630,7 +2655,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Per-entry verification issues for the UI audit panel (no secrets). */
   @Remote('verifyAll')
   async verifyAll(): Promise<Array<{ id: string; title: string; issues: string[] }>> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const out: Array<{ id: string; title: string; issues: string[] }> = []
     for (const e of store.list()) {
       const issues: string[] = []
@@ -2657,7 +2682,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Vault lock/entry status for the UI banner. */
   @Remote('status')
   async status(): Promise<{ locked: boolean; entries: number }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { locked: store.isLocked, entries: store.isLocked ? 0 : store.list().length }
   }
 
@@ -2692,7 +2717,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Mark an entry as recently used (touches updatedAt). */
   @Remote('touch')
   async touch(id: string): Promise<{ touched: boolean }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const updated = await store.markUsed(id)
     return { touched: updated !== undefined }
   }
@@ -2700,7 +2725,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */
   @Remote('merge')
   async merge(fromId: string, toId: string, keepSource?: boolean): Promise<{ found: boolean }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const merged = await store.merge(fromId, toId, { keepSource: keepSource === true })
     return { found: merged !== undefined }
   }
@@ -2708,7 +2733,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Read one full entry (including secrets) by id. */
   @Remote('get')
   async get(id: string): Promise<{ found: boolean; entry?: VaultEntryWire }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const entry = store.get(id)
     if (entry === undefined) return { found: false }
     return { found: true, entry: toWire(entry) }
@@ -2717,7 +2742,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Search entries across text fields; returns non-secret summaries. */
   @Remote('search')
   async search(query: string, limit: number): Promise<{ entries: VaultEntrySummaryWire[] }> {
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { entries: store.search(query, limit) }
   }
 
@@ -2726,7 +2751,7 @@ export class VaultGateway extends TypertRemoteService {
   async add(patch: VaultEntryPatch & { title: string }): Promise<VaultEntrySummaryWire> {
     this.assertWritable('add')
     if (!patch.title.trim()) throw new Error('vault: title must not be empty')
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const entry = await store.add(patch)
     return toSummary(entry)
   }
@@ -2735,7 +2760,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('update')
   async update(id: string, patch: VaultEntryPatch): Promise<{ found: boolean; entry?: VaultEntrySummaryWire }> {
     this.assertWritable('update')
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     const updated = await store.update(id, patch)
     if (updated === undefined) return { found: false }
     return { found: true, entry: toSummary(updated) }
@@ -2745,7 +2770,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('delete')
   async delete(id: string): Promise<{ deleted: boolean }> {
     this.assertWritable('delete')
-    const store = await this.ensureStore()
+    const store = await this.guardedStore()
     return { deleted: await store.delete(id) }
   }
 
@@ -2758,7 +2783,7 @@ export class VaultGateway extends TypertRemoteService {
     let input: string
     let label: string | undefined
     if (id !== undefined) {
-      const store = await this.ensureStore()
+      const store = await this.guardedStore()
       const entry = store.get(id)
       if (entry?.otpSecret === undefined) throw new Error(`vault.totp: entry ${id} has no otpSecret`)
       input = entry.otpSecret

@@ -77,3 +77,12 @@ test('VaultGateway totp uses a stored secret', async () => {
     expect(result.label).toBe('2FA')
   })
 })
+
+test('VaultGateway status reports unlocked with entry count', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'StatusEntry', password: 'pw' })
+    const st = await gateway.status()
+    expect(st.locked).toBe(false)
+    expect(st.entries).toBe(1)
+  })
+})

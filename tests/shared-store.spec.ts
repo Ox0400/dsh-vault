@@ -76,3 +76,20 @@ test('model-tool writes are visible through the VaultGateway remote', async () =
     void dir
   })
 })
+
+test('gateway reads refuse while the vault is locked via tools', async () => {
+  await withContext(async (ctx, dir) => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const added = await callTool(ctx, 'vault_add', { title: 'LockedRead', password: 'pw' })
+    expect((added.id as string).length).toBeGreaterThan(0)
+    // Tool-level lock wipes the shared store's key; the gateway must then refuse reads.
+    await callTool(ctx, 'vault_lock', {})
+    await expect(gateway.list()).rejects.toThrow(/locked/)
+    await expect(gateway.get(added.id as string)).rejects.toThrow(/locked/)
+    // Unlock restores access.
+    await callTool(ctx, 'vault_unlock', {})
+    const after = await gateway.list()
+    expect(after.entries).toHaveLength(1)
+    void dir
+  })
+})

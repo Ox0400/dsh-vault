@@ -948,6 +948,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {report !== null && report.rotation.length > 0 && (
             <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>
           )}
+          {vaultStats !== null && typeof vaultStats.expired === 'number' && vaultStats.expired > 0 && (
+            <span className={`${css.badge} ${css.badgeDanger}`}>{t('dueExpired')}: {String(vaultStats.expired)}</span>
+          )}
           {report !== null && report.weak.length > 0 && (
             <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>
           )}

@@ -1621,9 +1621,11 @@ test('vault_backup prunes old backups beyond maxBackups', async () => {
     const first = await call(ctx, 'vault_backup', {}) as { path: string; kept: number; pruned: number }
     assert.equal(first.pruned, 0)
     assert.equal(first.kept, 1)
+    await new Promise(r => setTimeout(r, 10))
     // Two more with maxBackups 2: the oldest must be pruned.
     const second = await call(ctx, 'vault_backup', { maxBackups: 2 }) as { path: string; kept: number; pruned: number }
     assert.equal(second.pruned, 0)
+    await new Promise(r => setTimeout(r, 10))
     const third = await call(ctx, 'vault_backup', { maxBackups: 2 }) as { path: string; pruned: number }
     assert.equal(third.pruned, 1)
     const { readdir } = await import('node:fs/promises')
@@ -2145,5 +2147,31 @@ test('vault_verify all returns a summary of issue types', async () => {
     const r = await call(ctx, 'vault_verify', { all: true }) as { summary?: Record<string, number>; withIssues: number }
     assert.ok(r.withIssues >= 1)
     assert.ok(r.summary !== undefined && Object.keys(r.summary).length >= 1, 'summary present')
+  })
+})
+
+test('vault_export note includes the entry count', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-cnt-'))
+    process.env.DSH_VAULT_EXPORT_PW7 = 'export-pw-7'
+    await call(ctx, 'vault_add', { title: 'CntA', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'CntB', password: 'pw' })
+    const exported = await call(ctx, 'vault_export', { path: join(dir, 'e.json') }) as { note: string; count: number }
+    assert.equal(exported.count, 2)
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW7
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW7' })
+})
+
+test('vault_switch returns the vault roster', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_switch', { name: 'other' }) as { active: string; vaults: Array<{ name: string; active: boolean }> }
+    assert.equal(r.active, 'other')
+    assert.ok(Array.isArray(r.vaults))
+    // A not-yet-created vault may be absent from the roster until first use.
+    assert.ok(r.vaults.every(v => v.active === (v.name === r.active)), 'active flag consistent')
   })
 })
