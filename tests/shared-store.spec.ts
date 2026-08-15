@@ -20,12 +20,16 @@ let callCounter = 0
 async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): Promise<T> {
   const ctx = new Context()
   const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-shared-'))
+  const prevDshHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(dir, 'dsh-home')
   try {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(VaultPlugin, { masterPassword: 'shared-test', path: join(dir, 'vault.json'), accessMode: 'auto' })
     return await run(ctx, dir)
   } finally {
+    if (prevDshHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = prevDshHome
     ctx.registry.delete(VaultPlugin)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)

@@ -26,6 +26,10 @@ async function withContext<T>(
 ): Promise<T> {
   const ctx = new Context()
   const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-ctx-'))
+  // Isolate named-vault resolution ($DSH_HOME/vault/<name>.json) into the
+  // temp dir so tests never write into the real ~/.dsh/vault.
+  const prevDshHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(dir, 'dsh-home')
   try {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
@@ -43,6 +47,8 @@ async function withContext<T>(
     await ctx.plugin(VaultPlugin, mountConfig)
     return await run(ctx, dir)
   } finally {
+    if (prevDshHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = prevDshHome
     // Clean up registered plugins; the ephemeral vault dir is removed too.
     ctx.registry.delete(VaultPlugin)
     ctx.registry.delete(ToolRuntime)
