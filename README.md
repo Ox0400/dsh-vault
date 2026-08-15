@@ -63,7 +63,6 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_health` | Vault health scan: weak/reused passwords, missing 2FA, insecure http:// sites, and an overall security score (0–100) |
 | `vault_breach_check` | Watchtower-style breach scan against Have I Been Pwned (k-anonymity: only the SHA-1 prefix leaves the machine), with an offline common-password fallback |
 | `vault_integrity` | Verify the on-disk vault file decrypts correctly and matches the in-memory store |
-| `vault_integrity` | Verify the on-disk vault file decrypts correctly and matches the in-memory store |
 | `vault_merge` | Merge one entry into another; `keepSource: true` keeps the source after merging |
 | `vault_quick_add` | Fast capture (title + one secret) with optional tags/notes |
 | `vault_expiry` | Set/clear expiry (`expiresAt: 0` removes it) |
@@ -75,7 +74,14 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON interop (full field mapping, overwrite support) |
-| `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (decrypted via the macOS keychain key) or the macOS Keychain (session cache + preview, no prompt spam) |
+| `vault_import_bitwarden_encrypted` | Decrypt a Bitwarden password-protected JSON export (PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC) and import it; pass the export passphrase |
+| `vault_import_manager_csv` | Password-manager CSV auto-detected by header: Bitwarden (`login_uri`/`login_username`/…), 1Password 8, Dashlane, NordPass, Keeper, LastPass (`fav`/`grouping`/`extra`); dryRun preview |
+| `vault_import_kdbx` | KeePass KDBX: 3.1 and 4.x, AES-KDF or Argon2 (RFC 9106), AES-256-CBC or ChaCha20 payload, keyfile support |
+| `vault_import_1password` / `vault_import_1pif` | 1Password 1PUX (ZIP) and legacy 1PIF text exports |
+| `vault_import_enpass` | Enpass JSON export (folders → tags, typed fields, TOTP) |
+| `vault_import_keepass_xml` | KeePass 2.x XML export (plaintext or `********` masked values) |
+| `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (macOS keychain / Linux keyring or `peanuts` / Windows DPAPI) or the macOS Keychain (session cache + preview, no prompt spam); every file import supports `dryRun` preview |
+| `vault_import_firefox` | Firefox profile import (logins.json + key4.db, NSS 3DES / PBES2-AES, primary-password aware) |
 | `vault_search_system` | Search Chrome / Keychain for sites & usernames — never exposes passwords |
 | `vault_copy` | Copy an entry (secrets included) into another named vault |
 | `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
