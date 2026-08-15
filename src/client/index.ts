@@ -82,6 +82,7 @@ export function apply(ctx: ClientContext): void {
     generatorHistory: () => invoke<Array<{ password: string; at: number }>>('generatorHistory'),
     backups: (limit) => invoke<Array<{ path: string; at: number }>>('backups', { limit: limit ?? 5 }),
     importChrome: (overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importChrome', { overwrite: overwrite ?? false }),
+    importFirefox: (masterPassword, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importFirefox', { masterPassword: masterPassword ?? '', overwrite: overwrite ?? false }),
     keychainImport: (options) => invoke<{ added: number; skipped: number; updated: number; note: string }>('keychainImport', { ...(options ?? {}) }),
     searchSystem: (query, source, limit) => invoke<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>('searchSystem', { query, source: source ?? 'all', limit: limit ?? 15 }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),

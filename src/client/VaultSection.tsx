@@ -89,6 +89,7 @@ export interface VaultSectionInjected {
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
   backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importFirefox: (masterPassword?: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   searchSystem: (query: string, source?: string, limit?: number) => Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
@@ -211,7 +212,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, importChrome, keychainImport, searchSystem } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, importChrome, importFirefox, keychainImport, searchSystem } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -323,6 +324,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setQuery('')
       void refresh()
       status().then(value => setLocked(value.locked)).catch(() => {})
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Import from Firefox (prompts for the primary password when one is set). */
+  async function runFirefoxImport(): Promise<void> {
+    const mp = window.prompt(t('firefoxMasterPw'))
+    if (mp === null) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await importFirefox(mp, false)
+      setMessage(r.note)
+      void refresh()
     } catch {
       setMessage(t('error'))
     } finally {
@@ -1065,6 +1083,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importChromeDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('chrome', false)} disabled={busy || readonly || locked}>{t('importChrome')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('importFirefoxDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runFirefoxImport()} disabled={busy || readonly || locked}>{t('importFirefox')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importKeychainDesc')}</span>

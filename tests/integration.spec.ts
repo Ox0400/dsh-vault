@@ -134,6 +134,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_browser',
       'vault_import_chrome',
       'vault_import_csv',
+      'vault_import_firefox',
       'vault_import_keychain',
       'vault_import_wallet',
       'vault_integrity',

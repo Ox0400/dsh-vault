@@ -24,6 +24,7 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
@@ -31,6 +32,7 @@ import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
 import { readChromeLogins } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
+import { readFirefoxLogins } from './firefox.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -99,6 +101,26 @@ const TEMPLATES: Record<string, Record<string, string>> = {
   oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)', scope: 'granted scopes (via fields)', tokenUrl: 'token endpoint (via fields)' },
   secret: { secret: 'the shared secret', notes: 'what it is for' },
   custom: { fields: 'arbitrary key/value pairs' },
+}
+
+/** Resolve the newest Firefox profile directory with a logins.json. */
+function defaultFirefoxProfileDir(): string {
+  const base = join(homedir(), 'Library/Application Support/Firefox/Profiles')
+  try {
+    const dirs = readdirSync(base)
+    const withLogins = dirs.filter(d => existsSync(join(base, d, 'logins.json')))
+    if (withLogins.length === 0) throw new Error('no Firefox profile with logins.json found')
+    // Prefer "*.default-release", then newest mtime.
+    withLogins.sort((a, b) => {
+      const aRelease = a.includes('default-release') ? 1 : 0
+      const bRelease = b.includes('default-release') ? 1 : 0
+      if (aRelease !== bRelease) return bRelease - aRelease
+      return statSync(join(base, b)).mtimeMs - statSync(join(base, a)).mtimeMs
+    })
+    return join(base, withLogins[0]!)
+  } catch (error) {
+    throw new Error(`Firefox profile not found: ${(error as Error).message}`)
+  }
 }
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -2634,6 +2656,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_firefox: import passwords from a Firefox profile ──────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_firefox',
+    description: 'Import passwords from a Firefox profile (logins.json + key4.db) using the NSS '
+      + 'decryption scheme from the open-source firepwd tool. Both legacy 3DES and modern PBES2/AES '
+      + 'encryption are supported. Pass masterPassword when Firefox has a primary password set.',
+    parameters: {
+      dir: { type: 'string', description: 'Optional absolute path to the Firefox profile directory; defaults to the latest profile in the Firefox profiles.ini.' },
+      masterPassword: { type: 'string', description: 'Firefox primary password (leave empty when none is set).' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same origin+username (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_firefox')
+      const s = await guardStore()
+      const dir = args.dir ?? defaultFirefoxProfileDir()
+      const creds = readFirefoxLogins(dir, typeof args.masterPassword === 'string' ? args.masterPassword : '')
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        let title = c.origin
+        try { title = new URL(c.origin).hostname || c.origin } catch { /* keep origin */ }
+        const existing = s.list().find(e => e.title === title && e.username === c.username)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `Firefox import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
   // ── vault_import_chrome: import passwords from Chrome's Login Data ─────────
   ctx.tools.register(defineTool({
     name: 'vault_import_chrome',
@@ -3421,6 +3476,25 @@ export class VaultGateway extends TypertRemoteService {
       } catch { /* skip */ }
     }
     return { matches: matches.slice(0, max), note: 'system search (no passwords exposed)' }
+  }
+
+  /** Import Firefox profile passwords into the vault. */
+  @Remote('importFirefox')
+  async importFirefox(masterPassword?: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const dir = defaultFirefoxProfileDir()
+    const creds = readFirefoxLogins(dir, masterPassword ?? '')
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      let title = c.origin
+      try { title = new URL(c.origin).hostname || c.origin } catch { /* keep origin */ }
+      const existing = store.list().find(e => e.title === title && e.username === c.username)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `Firefox import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
   /** Import Chrome passwords (Login Data) into the vault. */
