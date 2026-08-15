@@ -86,6 +86,7 @@ export interface VaultSectionInjected {
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
+  generatePassword: () => Promise<{ password: string }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -184,7 +185,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -699,7 +700,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {message !== null && <p role="alert" className={css.error}>{message}</p>}
 
       {state.status === 'loading' && <p className={css.status}>{t('loading')}</p>}
-      {state.status === 'error' && <p role="alert" className={css.error}>{t('error')}</p>}
+      {state.status === 'error' && (
+        <p role="alert" className={css.error}>
+          {t('error')}{' '}
+          <button type="button" className={css.retryButton} onClick={() => void refresh()}>{t('retry')}</button>
+        </p>
+      )}
       {state.status === 'ready' && state.entries.length === 0 && (
         <div className={css.emptyBox}>
           <p className={css.empty}>{t('empty')}</p>
@@ -1077,6 +1083,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       value={(form[field.key] as string | undefined) ?? ''}
                       onChange={event => setForm(previous => ({ ...previous, [field.key]: event.target.value }))}
                     />
+                    {field.key === 'password' && (
+                      <button
+                        type="button"
+                        className={css.revealButton}
+                        title={t('genPwHint')}
+                        onClick={() => { void generatePassword().then(r => setForm(previous => ({ ...previous, password: r.password }))) }}
+                      >{t('genPw')}</button>
+                    )}
                     <button
                       type="button"
                       className={css.revealButton}

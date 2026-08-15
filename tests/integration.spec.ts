@@ -2188,3 +2188,45 @@ test('vault_breach_check flags common passwords offline and reports clean entrie
     assert.ok(r.pwned.length >= 0)
   })
 })
+
+test('vault_breach_check supports bounded concurrency', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Conc1', password: '123456' })
+    await call(ctx, 'vault_add', { title: 'Conc2', password: 'password1234' })
+    const r = await call(ctx, 'vault_breach_check', { concurrency: 2 }) as { checked: number; weak: Array<{ title: string }>; offline: boolean }
+    assert.equal(r.checked, 2)
+    assert.ok(r.weak.some(w => w.title === 'Conc1'))
+    const bad = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-breach-${++callCounter}`),
+      name: 'vault_breach_check', arguments: { concurrency: 0 },
+    })
+    assert.equal(bad.isError, true)
+  })
+})
+
+test('vault_import_csv enforces a row safety limit', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-limit-'))
+    const file = join(dir, 'big.csv')
+    const rows = ['title,username,password']
+    for (let i = 0; i < 5002; i++) rows.push(`t${i},u,pw`)
+    await writeFile(file, rows.join('\n') + '\n')
+    const r = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-csvlimit-${++callCounter}`),
+      name: 'vault_import_csv', arguments: { path: file },
+    })
+    assert.equal(r.isError, true, 'over-limit import rejected')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_verify all honors a limit', async () => {
+  await withContext(async ctx => {
+    for (let i = 0; i < 3; i++) await call(ctx, 'vault_add', { title: `VL${i}` })
+    const r = await call(ctx, 'vault_verify', { all: true, limit: 2 }) as { audited: number }
+    assert.equal(r.audited, 2)
+  })
+})

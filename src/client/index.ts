@@ -77,6 +77,7 @@ export function apply(ctx: ClientContext): void {
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),
+    generatePassword: () => invoke<{ password: string }>('generatePassword'),
     duplicateGroups: () => invoke<Array<Array<{ id: string; title: string }>>>('duplicateGroups'),
     merge: (fromId, toId, keepSource) => invoke<{ found: boolean }>('merge', { fromId, toId, keepSource: keepSource ?? false }),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),

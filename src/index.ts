@@ -852,13 +852,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       id: { type: 'string', description: 'Entry id to verify (omit when all is true).' },
       all: { type: 'boolean', description: 'Verify every active entry and return a per-entry audit.' },
+      limit: { type: 'integer', description: 'Max entries audited with all: true (default 500, 1–5000).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } }, audited: { type: 'integer' }, withIssues: { type: 'integer' }, perEntry: { type: 'array', items: { type: 'json' } }, summary: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.audited !== undefined ? `audited ${v.audited} entries, ${v.withIssues} with issues` : (v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}`) }] },
     async execute(args) {
       const s = await guardStore()
       if (args.all === true) {
+        const limit = args.limit === undefined ? 500 : args.limit
+        if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
+          throw new Error('vault_verify: limit must be an integer 1–5000')
+        }
         const perEntry: Array<{ id: string; title: string; ok: boolean; issues: string[] }> = []
-        for (const e of s.list()) {
+        for (const e of s.list().slice(0, limit)) {
           const issues: string[] = []
           if (e.port !== undefined && !/^\d{1,5}$/.test(String(e.port))) issues.push('port is not numeric')
           if (e.port !== undefined && /^\d{1,5}$/.test(String(e.port)) && Number(e.port) > 65535) issues.push('port out of range')
@@ -1940,6 +1945,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       ids: { type: 'array', items: { type: 'string' }, description: 'Only check these entry ids (optional; default all).' },
       online: { type: 'boolean', description: 'Allow online Pwned Passwords lookups (default true).' },
+      concurrency: { type: 'integer', description: 'Max parallel online lookups (default 4, 1–16).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { checked: { type: 'integer', required: true }, pwned: { type: 'array', required: true, items: { type: 'json' } }, weak: { type: 'array', required: true, items: { type: 'json' } }, offline: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: `checked ${v.checked} password(s): ${(v.pwned as unknown[]).length} breached, ${(v.weak as unknown[]).length} weak${v.offline ? ' (offline fallback)' : ''}` }] },
     async execute(args) {
@@ -1950,15 +1956,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const pwned: Array<{ id: string; title: string; count: number }> = []
       const weak: Array<{ id: string; title: string }> = []
       let offline = false
-      for (const e of targets) {
-        const verdict = await checkPassword(e.password!)
-        if (verdict.source !== 'hibp') offline = true
-        if (verdict.breached && verdict.reason === 'pwned') {
-          pwned.push({ id: e.id, title: e.title, count: verdict.count })
-        } else if (verdict.breached && verdict.reason === 'weak') {
-          weak.push({ id: e.id, title: e.title })
+      const concurrency = args.concurrency === undefined ? 4 : args.concurrency
+      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
+        throw new Error('vault_breach_check: concurrency must be an integer 1–16')
+      }
+      // Bounded parallelism: run up to `concurrency` lookups at once so a large
+      // vault never hammers the API or times out as one serial queue.
+      let index = 0
+      const worker = async (): Promise<void> => {
+        while (index < targets.length) {
+          const e = targets[index++]!
+          const verdict = await checkPassword(e.password!)
+          if (verdict.source !== 'hibp') offline = true
+          if (verdict.breached && verdict.reason === 'pwned') {
+            pwned.push({ id: e.id, title: e.title, count: verdict.count })
+          } else if (verdict.breached && verdict.reason === 'weak') {
+            weak.push({ id: e.id, title: e.title })
+          }
         }
       }
+      await Promise.all(Array.from({ length: Math.min(concurrency, targets.length || 1) }, () => worker()))
       return { checked: targets.length, pwned, weak, offline }
     },
   }))
@@ -2081,6 +2098,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       if (args.path === undefined && args.blob === undefined) {
         throw new Error('vault_import: provide either path or blob')
+      }
+      if (args.blob !== undefined && args.blob.length > 64 * 1024 * 1024) {
+        throw new Error('vault_import: blob exceeds 64 MiB — write it to a file and pass path instead')
       }
       const blob = args.path !== undefined ? await readFile(args.path, 'utf8') : args.blob!
       const count = await s.importEncrypted(blob, exportPassword, args.overwrite === true, args.dryRun === true)
@@ -2310,6 +2330,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
       const rows = parseCsv(cleaned, args.delimiter ?? ',')
       if (rows.length === 0) return { added: 0, skipped: 0, updated: 0 }
+      if (rows.length - 1 > 5000) {
+        throw new Error(`vault_import_csv: ${rows.length - 1} rows exceeds the 5000-row safety limit — split the file`)
+      }
       const headers = rows[0]!.map(h => h.trim())
       const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
         'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'notes', 'tags',
@@ -2731,6 +2754,13 @@ export class VaultGateway extends TypertRemoteService {
       if (issues.length > 0) out.push({ id: e.id, title: e.title, issues })
     }
     return out
+  }
+
+  /** Generate a strong random password for the editor's password field. */
+  @Remote('generatePassword')
+  async generatePassword(): Promise<{ password: string }> {
+    const { generatePassword } = await import('./password.ts')
+    return { password: generatePassword({ length: 24 }) }
   }
 
   /** Vault lock/entry status for the UI banner. */

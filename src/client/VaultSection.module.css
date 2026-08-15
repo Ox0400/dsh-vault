@@ -526,3 +526,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
+.retryButton {
+  border: 1px solid var(--dsh-color-border, #ccc);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 6px;
+  padding: 2px 8px;
+}
