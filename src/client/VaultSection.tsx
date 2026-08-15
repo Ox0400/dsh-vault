@@ -273,11 +273,26 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     // refresh is memoized on query (debounced); list/search are stable.
   }, [refresh])
 
-  // TOTP countdown: tick every second so the progress ring stays live.
+  // TOTP countdown: tick every second so the progress ring stays live, and
+  // auto-refresh any code whose 30s window just expired.
   useEffect(() => {
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    for (const [id, info] of Object.entries(totpMap)) {
+      if (info.until > 0 && nowTick >= info.until && info.code !== t('error')) {
+        void totp(id).then(
+          result => setTotpMap(previous => ({
+            ...previous,
+            [id]: { code: result.code, until: Date.now() + result.secondsRemaining * 1000 },
+          })),
+          () => { /* keep the last code; next window retries */ },
+        )
+      }
+    }
+  }, [nowTick, totpMap, totp])
 
   // Vault health & meta: load once on mount (stats, backup age, rotation,
   // weak/reused scan, recent activity) and refresh on window focus.

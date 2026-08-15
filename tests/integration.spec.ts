@@ -1856,3 +1856,50 @@ test('vault_export_csv round-trips icon/color/favorite/rotationDays via vault_im
     await rm(dir, { recursive: true, force: true })
   })
 })
+
+test('vault_recent filters by kind', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'RecA', kind: 'api-key', secret: 'k' })
+    await call(ctx, 'vault_add', { title: 'RecB', kind: 'ssh', username: 'u' })
+    const api = await call(ctx, 'vault_recent', { kind: 'api-key' }) as { entries: Array<{ title: string; kind?: string }> }
+    assert.ok(api.entries.some(e => e.title === 'RecA'))
+    assert.ok(!api.entries.some(e => e.title === 'RecB'))
+    assert.ok(api.entries.every(e => (e.kind ?? 'login') === 'api-key'))
+  })
+})
+
+test('vault_search sortBy favorite puts pinned entries first', async () => {
+  await withContext(async ctx => {
+    const b = await call(ctx, 'vault_add', { title: 'Bbb' }) as { id: string }
+    await call(ctx, 'vault_add', { title: 'Aaa' })
+    await call(ctx, 'vault_pin', { id: b.id })
+    const r = await call(ctx, 'vault_search', { query: '', sortBy: 'favorite' }) as { results: Array<{ title: string }> }
+    assert.equal(r.results[0]!.title, 'Bbb', 'pinned entry first')
+  })
+})
+
+test('vault_stats reports duplicates count', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'DupA' })
+    await call(ctx, 'vault_add', { title: 'dupA' })
+    await call(ctx, 'vault_add', { title: 'Solo' })
+    const stats = await call(ctx, 'vault_stats', {}) as { duplicates: number }
+    assert.equal(stats.duplicates, 1, 'one duplicate title group (case-insensitive)')
+  })
+})
+
+test('vault_env and vault_export_env support key prefix', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'GitHub', kind: 'api-key', apiKey: 'gh-token', tags: ['env'] })
+    const r = await call(ctx, 'vault_env', { prefix: 'APP_' }) as { lines: string[] }
+    assert.ok(r.lines.some(l => l.startsWith('APP_GITHUB_APIKEY=')), 'prefixed key present')
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-envp-'))
+    const file = join(dir, '.env')
+    const w = await call(ctx, 'vault_export_env', { path: file, prefix: 'APP_' }) as { lines: number }
+    assert.ok(w.lines >= 1)
+    await rm(dir, { recursive: true, force: true })
+  })
+})

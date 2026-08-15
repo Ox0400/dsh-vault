@@ -364,7 +364,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
       regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
-      sortBy: { type: 'string', enum: ['alpha', 'recent'], description: 'Sort results alphabetically (default) or by updatedAt desc.' },
+      sortBy: { type: 'string', enum: ['alpha', 'recent', 'favorite'], description: 'Sort: alphabetical (default), by updatedAt desc, or favorites first (then alphabetical).' },
       createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
       createdBefore: { type: 'integer', description: 'Only entries created before this epoch millis.' },
       limit: { type: 'number', description: 'Maximum results (default 20).' },
@@ -413,6 +413,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           const au = (a as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
           const bu = (b as VaultEntrySummary & { updatedAt?: number }).updatedAt ?? 0
           return bu - au
+        })
+      } else if (args.sortBy === 'favorite') {
+        filtered = [...filtered].sort((a, b) => {
+          const af = (a as VaultEntrySummary & { favorite?: boolean }).favorite === true ? 0 : 1
+          const bf = (b as VaultEntrySummary & { favorite?: boolean }).favorite === true ? 0 : 1
+          return af - bf || a.title.localeCompare(b.title)
         })
       }
       return { results: filtered, total: filtered.length }
@@ -932,11 +938,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_recent',
     description: 'List the most recently created or updated entries (newest first), as secret-free '
       + 'summaries. Useful to pick up where you left off or surface what changed.',
-    parameters: { limit: { type: 'number', description: 'Max results (default 10).' } },
+    parameters: {
+      limit: { type: 'number', description: 'Max results (default 10).' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only entries of this kind.' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.entries) }] },
     async execute(args) {
       const s = await guardStore()
-      return { entries: s.recent(validateLimit(args.limit, 'vault_recent')) }
+      const entries = s.recent(validateLimit(args.limit, 'vault_recent'))
+      const filtered = args.kind === undefined ? entries : entries.filter(e => (e.kind ?? 'login') === args.kind)
+      return { entries: filtered }
     },
   }))
 
@@ -946,7 +957,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, ${v.trashCount} trashed (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true }, duplicates: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, ${v.trashCount} trashed, ${v.duplicates} dup groups (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
       return s.stats()
@@ -2018,11 +2029,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
       mask: { type: 'boolean', description: 'Return masked values (secrets replaced with ***) instead of the real values.' },
+      prefix: { type: 'string', description: 'Optional key prefix, e.g. "APP_" → APP_GITHUB_TOKEN.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { lines: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.lines.join('\n') }] },
     async execute(args) {
       const s = await guardStore()
-      const raw = await envLines(s, args.kind, args.ids)
+      const raw = await envLines(s, args.kind, args.ids, typeof args.prefix === 'string' ? args.prefix : '')
       const lines = args.mask === true
         ? raw.map(line => line.replace(/=(.*)$/, (m, v: string) => '=' + (v.length > 8 ? v.slice(0, 4) + '***' : '***')))
         : raw
@@ -2035,12 +2047,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_export_env',
     description: 'Write env-flagged entries (tags contain "env") to a .env file at the given path '
       + 'as KEY=VALUE lines (values shell-quoted). Returns the path and how many lines were written.',
-    parameters: { path: { type: 'string', required: true, description: 'Absolute path of the .env file to write.' } },
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the .env file to write.' },
+      prefix: { type: 'string', description: 'Optional key prefix, e.g. "APP_" → APP_GITHUB_TOKEN.' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, lines: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `wrote ${v.lines} lines to ${v.path}` }] },
     async execute(args) {
       assertWritable('vault_export_env')
       const s = await guardStore()
-      const lines = await envLines(s)
+      const lines = await envLines(s, undefined, undefined, typeof args.prefix === 'string' ? args.prefix : '')
       await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
       await writeFile(args.path, lines.join('\n') + (lines.length > 0 ? '\n' : ''), { mode: 0o600 })
       return { path: args.path, lines: lines.length }
@@ -2978,10 +2993,10 @@ function totpWith(input: string, nowMs: number, period: number, digits: number):
 /** Accept tags as an array or a comma/semicolon-separated string. */
 
 /** Compute env lines for env-flagged entries (optionally kind-filtered). */
-async function envLines(store: VaultStore, kind?: string, ids?: string[]): Promise<string[]> {
+async function envLines(store: VaultStore, kind?: string, ids?: string[], keyPrefix = ''): Promise<string[]> {
   const lines: string[] = []
   const seen = new Set<string>()
-  const keyOf = (title: string, field: string): string => title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
+  const keyOf = (title: string, field: string): string => keyPrefix + title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
   for (const entry of store.list()) {
     if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
     if (ids !== undefined && ids.length > 0 && !ids.includes(entry.id)) continue

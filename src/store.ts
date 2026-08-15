@@ -554,7 +554,7 @@ export class VaultStore {
 
   /** Vault overview statistics (1Password-style): counts by kind, TOTP,
    * high-sensitivity, expired entries. No secrets. */
-  stats(): { total: number; byKind: Record<string, number>; byTag: Record<string, number>; withTotp: number; withPrivateKey: number; highSensitivity: number; expired: number; recent7d: number; trashCount: number } {
+  stats(): { total: number; byKind: Record<string, number>; byTag: Record<string, number>; withTotp: number; withPrivateKey: number; highSensitivity: number; expired: number; recent7d: number; trashCount: number; duplicates: number } {
     const byKind: Record<string, number> = {}
     const byTag: Record<string, number> = {}
     let withTotp = 0
@@ -564,6 +564,12 @@ export class VaultStore {
     let recent7d = 0
     const now = Date.now()
     const weekAgo = now - 7 * 86_400_000
+    const byTitle = new Map<string, number>()
+    for (const entry of this.list()) {
+      byTitle.set(entry.title.toLowerCase(), (byTitle.get(entry.title.toLowerCase()) ?? 0) + 1)
+    }
+    let duplicates = 0
+    for (const count of byTitle.values()) if (count > 1) duplicates++
     for (const entry of this.list()) {
       const kind = entry.kind ?? 'login'
       byKind[kind] = (byKind[kind] ?? 0) + 1
@@ -574,7 +580,7 @@ export class VaultStore {
       if (entry.expiresAt !== undefined && entry.expiresAt < now) expired++
       if (entry.createdAt >= weekAgo) recent7d++
     }
-    return { total: this.list().length, byKind, byTag, withTotp, withPrivateKey, highSensitivity, expired, recent7d, trashCount: this.listTrash().length }
+    return { total: this.list().length, byKind, byTag, withTotp, withPrivateKey, highSensitivity, expired, recent7d, trashCount: this.listTrash().length, duplicates }
   }
 
   /** Merge `fromId` into `toId`: non-empty fields of `from` fill gaps in `to`,
