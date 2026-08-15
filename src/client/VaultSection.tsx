@@ -97,6 +97,7 @@ export interface VaultSectionInjected {
   importEnpass: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importBitwarden: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   import1pif: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importBitwardenEncrypted: (path: string, password: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importKeePassXml: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   searchSystem: (query: string, source?: string, limit?: number) => Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
@@ -220,7 +221,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, keychainImport, searchSystem } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importBitwardenEncrypted, keychainImport, searchSystem } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -456,6 +457,25 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setMessage(null)
     try {
       const r = await importBitwarden(path.trim(), false)
+      setMessage(r.note)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Import a Bitwarden password-protected JSON export (asks for the export passphrase). */
+  async function runImportBitwardenEncrypted(): Promise<void> {
+    const path = window.prompt(t('importBitwardenEncryptedPrompt'))
+    if (path === null || path.trim() === '') return
+    const password = window.prompt(t('importBitwardenEncryptedPasswordPrompt'))
+    if (password === null) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await importBitwardenEncrypted(path.trim(), password, false)
       setMessage(r.note)
       void refresh()
     } catch {
@@ -1211,6 +1231,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <span className={css.dupNames}>{t('importBitwardenDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>{t('importBitwarden')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>{t('preview')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('importBitwardenEncryptedDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runImportBitwardenEncrypted()} disabled={busy || readonly || locked}>{t('importBitwardenEncrypted')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('import1pifDesc')}</span>

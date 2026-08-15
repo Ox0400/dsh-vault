@@ -90,6 +90,7 @@ export function apply(ctx: ClientContext): void {
     importEnpass: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importEnpass', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     importBitwarden: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importBitwarden', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     import1pif: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('import1pif', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
+    importBitwardenEncrypted: (path, password, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importBitwardenEncrypted', { path, password, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     importKeePassXml: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importKeePassXml', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     searchSystem: (query, source, limit) => invoke<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>('searchSystem', { query, source: source ?? 'all', limit: limit ?? 15 }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),

@@ -1,0 +1,9 @@
+{
+  "encrypted": true,
+  "passwordProtected": true,
+  "salt": "test-salt-for-export",
+  "kdfType": 0,
+  "kdfIterations": 1000,
+  "encKeyValidation_DO_NOT_EDIT": "2.6x6VrVYBqFGVuvc92z442A==|wKZEai9mNqCKplBAlvGf87YH637RDr6lBcb0G5ayj34=|0wm5viN3InBhFBUlOTwv/m+U2eRI74gzBfNG0kzvBgY=",
+  "data": "2.wyudgYc0d0xHmf4mHbSHhg==|8erQs24ZVtbNK0a4jOsSXCwQKBvrhhFl6FlNxe1accRjY/8NuF0W/VKClOgvAfmfzh2i7m1+fbQAQO84RcK31L+bxkowe5KNEZv7pNMOKEEti4AotNvITL6XQXe3kpg6UAPdmq1rwxn3T6pXgfvqicAYxWAs599D3HYicQckg19Z1ksX/ly84LiY1MRP0Jn5PX+Pgy48YQJ9o2dUj9V1tExJXy5oRQdt2IjgcrP6OI5+uu5TDS9Xz+dAiF921HtPxIX1E9ghIt80/ArkozXJqDPeJ99JL5Ix6+17jn9J/bPFfnS7A5SQcGvoZOXVkZQ8BFPmb7v+NPmR3s8HtFyhfUqevne+GBTYpiJwIFAo/CY=|3JBj1P90jKFc2Qhv5HlAfu57Da3R5xffYK/ygJRTzjs="
+}

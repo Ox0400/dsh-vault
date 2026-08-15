@@ -21,6 +21,8 @@
 
 import { readZip, zipEntry } from './zip.ts'
 import { extractEntries as kdbxExtractEntries } from './kdbx.ts'
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, pbkdf2Sync } from 'node:crypto'
+import { argon2 } from './argon2.ts'
 
 export interface ImportedCredential {
   title: string
@@ -502,4 +504,96 @@ function parseCsvRows(input: string): string[][] {
   // Drop trailing empty rows.
   while (rows.length > 0 && rows[rows.length - 1]!.every(c => c === '')) rows.pop()
   return rows
+}
+
+/** ── Bitwarden password-protected (encrypted) JSON export ────────────────── */
+
+interface BitwardenEncryptedExport {
+  encrypted?: boolean
+  passwordProtected?: boolean
+  salt?: string
+  kdfType?: number
+  kdfIterations?: number
+  kdfMemory?: number
+  kdfParallelism?: number
+  encKeyValidation_DO_NOT_EDIT?: string
+  data?: string
+}
+
+/** HKDF-SHA256 expand (info "enc"/"mac") → 32-byte key (RFC 5869). */
+function hkdfExpandSha256(ikm: Buffer, info: string, length = 32): Buffer {
+  const out = hkdfSync('sha256', ikm, Buffer.alloc(0), Buffer.from(info, 'utf8'), length)
+  return Buffer.from(out)
+}
+
+/** Decrypt one `2.|iv|ciphertext|mac` payload. */
+function decryptBitwardenPayload(blob: string, encKey: Buffer, macKey: Buffer): Buffer {
+  const parts = blob.split('|')
+  if (parts.length !== 3 || !parts[0]!.startsWith('2.')) {
+    throw new Error('bitwarden: unsupported encrypted payload format (expected "2.iv|ciphertext|mac")')
+  }
+  const iv = Buffer.from(parts[0]!.slice(2), 'base64')
+  const ciphertext = Buffer.from(parts[1]!, 'base64')
+  const mac = Buffer.from(parts[2]!, 'base64')
+  const expected = createHmac('sha256', macKey).update(iv).update(ciphertext).digest()
+  if (!mac.equals(expected)) throw new Error('bitwarden: encrypted export MAC mismatch (wrong password?)')
+  const decipher = createDecipheriv('aes-256-cbc', encKey, iv)
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()])
+}
+
+/**
+ * Decrypt a Bitwarden password-protected JSON export (File > Export >
+ * "Encrypted .json"). Derives enc/mac keys from the passphrase per the
+ * official export scheme (PBKDF2-SHA256 or Argon2id + HKDF-SHA256 expand),
+ * validates encKeyValidation_DO_NOT_EDIT, then returns the plaintext vault
+ * JSON. Reference: Bitwarden encrypted-export docs and the open-source
+ * bwJsonDecryptor / GurpreetKang/BitwardenDecrypt.
+ */
+export function decryptBitwardenExport(input: string, password: string): string {
+  let data: BitwardenEncryptedExport
+  try {
+    data = JSON.parse(input) as BitwardenEncryptedExport
+  } catch {
+    throw new Error('bitwarden: not valid JSON')
+  }
+  if (data.encrypted !== true || data.passwordProtected !== true) {
+    throw new Error('bitwarden: not a password-protected export (expected encrypted:true, passwordProtected:true)')
+  }
+  if (!data.salt || !data.encKeyValidation_DO_NOT_EDIT || !data.data) {
+    throw new Error('bitwarden: encrypted export is missing required fields')
+  }
+  const salt = Buffer.from(data.salt, 'utf8')
+  let masterKey: Buffer
+  if (data.kdfType === 0) {
+    masterKey = pbkdf2Sync(Buffer.from(password, 'utf8'), salt, data.kdfIterations ?? 600000, 32, 'sha256')
+  } else if (data.kdfType === 1) {
+    // Argon2id with the SHA-256 of the salt (Bitwarden salts the Argon2 input).
+    const saltHash = createHashSha256(salt)
+    masterKey = argon2({
+      password: Buffer.from(password, 'utf8'),
+      salt: saltHash,
+      parallelism: data.kdfParallelism ?? 4,
+      iterations: data.kdfIterations ?? 3,
+      memoryKiB: (data.kdfMemory ?? 64) * 1024,
+      hashLength: 32,
+      type: 2, // Argon2id
+      version: 0x13,
+    })
+  } else {
+    throw new Error(`bitwarden: unknown KDF type ${data.kdfType}`)
+  }
+  const encKey = hkdfExpandSha256(masterKey, 'enc')
+  const macKey = hkdfExpandSha256(masterKey, 'mac')
+  // Validate the key before decrypting the vault.
+  const validation = decryptBitwardenPayload(data.encKeyValidation_DO_NOT_EDIT, encKey, macKey)
+  if (validation.toString('utf8') !== 'ENC_KEY_VALIDATION_2') {
+    throw new Error('bitwarden: wrong password (encKeyValidation mismatch)')
+  }
+  const plain = decryptBitwardenPayload(data.data, encKey, macKey)
+  return plain.toString('utf8')
+}
+
+/** SHA-256 one-shot. */
+function createHashSha256(data: Buffer): Buffer {
+  return createHash('sha256').update(data).digest()
 }

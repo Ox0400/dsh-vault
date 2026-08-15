@@ -134,6 +134,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_1password',
       'vault_import_1pif',
       'vault_import_bitwarden',
+      'vault_import_bitwarden_encrypted',
       'vault_import_browser',
       'vault_import_chrome',
       'vault_import_csv',

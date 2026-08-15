@@ -35,7 +35,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importChrome', 'importEnpass', 'importFirefox', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
@@ -291,5 +291,23 @@ test('VaultGateway import1password dryRun previews without writing', async () =>
     const preview = await gateway.import1password(pux, false, true)
     expect(preview.added).toBe(2)
     expect((await gateway.list()).entries).toHaveLength(0)
+  })
+})
+
+test('VaultGateway importBitwardenEncrypted decrypts and imports', async () => {
+  const json = join(__dirname, 'fixtures', 'bitwarden-encrypted.json')
+  await withGateway(async gateway => {
+    const r = await gateway.importBitwardenEncrypted(json, 'ExportPass123')
+    expect(r.added).toBe(1)
+    const entries = (await gateway.list()).entries
+    expect(entries[0]!.title).toBe('Enc Site')
+    expect(entries[0]!.username).toBe('enc-user')
+  })
+})
+
+test('VaultGateway importBitwardenEncrypted rejects a wrong passphrase', async () => {
+  const json = join(__dirname, 'fixtures', 'bitwarden-encrypted.json')
+  await withGateway(async gateway => {
+    await expect(gateway.importBitwardenEncrypted(json, 'nope')).rejects.toThrow(/wrong password|MAC mismatch/)
   })
 })

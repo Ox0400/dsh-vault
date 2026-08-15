@@ -34,7 +34,7 @@ import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } fro
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx } from './kdbx.ts'
-import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml } from './imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -3139,6 +3139,54 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_bitwarden_encrypted: decrypt + import ────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_bitwarden_encrypted',
+    description: 'Import a Bitwarden password-protected JSON export (File > Export > "Encrypted .json"). '
+      + 'Derives the enc/mac keys from the passphrase per the official Bitwarden export scheme '
+      + '(PBKDF2-SHA256 or Argon2id + HKDF-SHA256 expand), verifies encKeyValidation, decrypts the '
+      + 'vault, then imports it as a normal Bitwarden JSON. Supports dryRun preview.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the encrypted Bitwarden .json export.' },
+      password: { type: 'string', required: true, description: 'The export passphrase (the one chosen when creating the encrypted export).' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+      dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_bitwarden_encrypted')
+      const s = await guardStore()
+      const raw = await readFile(args.path, 'utf8')
+      const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      const plain = decryptBitwardenExport(cleaned, args.password)
+      const creds = readBitwardenJson(plain)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.title.trim()
+        if (!title) { skipped++; continue }
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = {
+          ...(c.username.length > 0 ? { username: c.username } : {}),
+          ...(c.password.length > 0 ? { password: c.password } : {}),
+          ...(c.url.length > 0 ? { url: c.url } : {}),
+          ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+          ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+          ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+          ...(c.favorite === true ? { favorite: true } : {}),
+        }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `Bitwarden encrypted import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
   // ── vault_export_bitwarden: Bitwarden-compatible JSON export ───────────────
   ctx.tools.register(defineTool({
     name: 'vault_export_bitwarden',
@@ -3781,7 +3829,8 @@ export class VaultGateway extends TypertRemoteService {
     if (src === 'chrome' || src === 'all') {
       try {
         const dbPath = defaultChromeLoginData('chrome', 'Default')
-        for (const c of readChromeLogins(dbPath)) {
+        const localState = defaultChromeLocalState('chrome')
+        for (const c of readChromeLogins(dbPath, localState)) {
           let name = c.origin
           try { name = new URL(c.origin).hostname } catch { /* keep origin */ }
           if (name.toLowerCase().includes(needle)) {
@@ -3831,7 +3880,8 @@ export class VaultGateway extends TypertRemoteService {
   async importChrome(overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const dbPath = defaultChromeLoginData('chrome', 'Default')
-    const creds = readChromeLogins(dbPath)
+    const localState = defaultChromeLocalState('chrome')
+    const creds = readChromeLogins(dbPath, localState)
     let added = 0, skipped = 0, updated = 0
     for (const c of creds) {
       let title = c.origin
@@ -4027,6 +4077,38 @@ export class VaultGateway extends TypertRemoteService {
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `Bitwarden import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Import a Bitwarden password-protected JSON export (decrypts it first). */
+  @Remote('importBitwardenEncrypted')
+  async importBitwardenEncrypted(path: string, password: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const raw = await readFile(path, 'utf8')
+    const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+    const plain = decryptBitwardenExport(cleaned, password)
+    const creds = readBitwardenJson(plain)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (!title) { skipped++; continue }
+      const existing = store.list().find(e => e.title === title)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = {
+        ...(c.username.length > 0 ? { username: c.username } : {}),
+        ...(c.password.length > 0 ? { password: c.password } : {}),
+        ...(c.url.length > 0 ? { url: c.url } : {}),
+        ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+        ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+        ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        ...(c.favorite === true ? { favorite: true } : {}),
+      }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `Bitwarden encrypted import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
   /** Preview or import macOS keychain entries (preview never prompts). */

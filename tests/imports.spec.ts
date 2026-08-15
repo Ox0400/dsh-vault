@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml } from '../src/imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from '../src/imports.ts'
 import { readZip } from '../src/zip.ts'
 import { deflateRawSync } from 'node:zlib'
 
@@ -308,5 +308,29 @@ describe('1Password 8 CSV import', () => {
     const bank = creds.find(c => c.title === 'OP8 Bank')
     expect(bank!.tags).toContain('banking')
     expect(bank!.favorite).toBe(true)
+  })
+})
+
+describe('Bitwarden encrypted export', () => {
+  const FIXTURE = join(__dirname, 'fixtures', 'bitwarden-encrypted.json')
+
+  it('decrypts a password-protected export (PBKDF2 + HKDF + AES-CBC + HMAC)', () => {
+    const plain = decryptBitwardenExport(readFileSync(FIXTURE, 'utf8'), 'ExportPass123')
+    const parsed = JSON.parse(plain) as { items?: Array<{ name?: string }> }
+    expect(parsed.items).toHaveLength(1)
+    expect(parsed.items![0]!.name).toBe('Enc Site')
+    // The decrypted vault feeds the standard Bitwarden JSON importer.
+    const creds = readBitwardenJson(plain)
+    expect(creds[0]!.username).toBe('enc-user')
+    expect(creds[0]!.password).toBe('enc-pass-1')
+    expect(creds[0]!.otp).toBe('JBSWY3DPEHPK3PXP')
+  })
+
+  it('rejects a wrong password (MAC/validation mismatch)', () => {
+    expect(() => decryptBitwardenExport(readFileSync(FIXTURE, 'utf8'), 'wrong')).toThrow(/wrong password|MAC mismatch/)
+  })
+
+  it('rejects unencrypted exports', () => {
+    expect(() => decryptBitwardenExport('{"encrypted":false,"items":[]}', 'x')).toThrow(/not a password-protected export/)
   })
 })
