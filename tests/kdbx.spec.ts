@@ -95,3 +95,18 @@ describe('KDBX 3.1 (legacy KeePass 2.x)', () => {
     expect(() => readKdbx(readFileSync(FIXTURE_KDBX3), 'wrong')).toThrow(/stream start bytes mismatch|bad decrypt/)
   })
 })
+
+describe('KDBX4 ChaCha20 payload cipher', () => {
+  const FIXTURE = join(__dirname, 'fixtures', 'kdbx4-chacha20-payload.kdbx')
+
+  it('decrypts a kdbxweb database encrypted with the ChaCha20 payload cipher', () => {
+    const entries = readKdbx(readFileSync(FIXTURE), 'ChaChaCipherPass')
+    expect(entries).toEqual([
+      { title: 'chacha-payload-site', username: 'cc-user', password: 'cc-payload-pass', url: 'https://cc-payload.example', notes: '' },
+    ])
+  })
+
+  it('rejects a wrong password', () => {
+    expect(() => readKdbx(readFileSync(FIXTURE), 'wrong')).toThrow()
+  })
+})

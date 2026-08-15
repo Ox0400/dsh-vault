@@ -28,6 +28,7 @@ export interface KdbxCredential {
 }
 
 const AES_CIPHER_ID = Buffer.from('31c1f2e6bf714350be5805216afc5aff', 'hex')
+const CHACHA20_CIPHER_ID = Buffer.from('d6038a2b8b6f4cb5a524339a31dbb59a', 'hex')
 const AES_KDF_UUID = Buffer.from('c9d9f39a628a4460bf740d08c18a4fea', 'hex')
 const ARGON2_UUID = Buffer.from('ef636ddf8c29444b91f7a9a403e30a0c', 'hex')
 
@@ -267,7 +268,9 @@ function readKdbx4(data: Buffer, version: number, password: string, keyfileData?
   const encryptionIv = fields[7]
   const kdf = fields[0x0b]
   if (!cipherId || !masterSeed || !encryptionIv || !kdf) throw new Error('kdbx: missing required header fields')
-  if (!cipherId.equals(AES_CIPHER_ID)) throw new Error('kdbx: only AES-256 cipher is supported')
+  if (!cipherId.equals(AES_CIPHER_ID) && !cipherId.equals(CHACHA20_CIPHER_ID)) {
+    throw new Error('kdbx: unsupported payload cipher (only AES-256-CBC and ChaCha20 are supported)')
+  }
   const kdfParams = parseVariantDictionary(kdf)
   const kdfUuid = kdfParams.$UUID as Buffer | undefined
   if (!kdfUuid) throw new Error('kdbx: KDF parameters missing $UUID')
@@ -352,10 +355,17 @@ function readKdbx4(data: Buffer, version: number, password: string, keyfileData?
   }
   const payload = encrypted.subarray(0, outLen)
 
-  // Decrypt AES-256-CBC.
-  const decipher = createDecipheriv('aes-256-cbc', masterKey as Buffer<ArrayBuffer>, encryptionIv as Buffer<ArrayBuffer>)
-  decipher.setAutoPadding(true)
-  const decryptedRaw = Buffer.concat([decipher.update(payload), decipher.final()])
+  // Decrypt the payload: AES-256-CBC (PKCS7-padded) or ChaCha20 stream.
+  let decryptedRaw: Buffer
+  if (cipherId.equals(CHACHA20_CIPHER_ID)) {
+    // ChaCha20 payload cipher: key = masterKey (32 bytes), nonce =
+    // encryptionIv (12 bytes), counter 0 — a plain stream XOR.
+    decryptedRaw = chacha20Xor(payload, masterKey, encryptionIv, 0)
+  } else {
+    const decipher = createDecipheriv('aes-256-cbc', masterKey as Buffer<ArrayBuffer>, encryptionIv as Buffer<ArrayBuffer>)
+    decipher.setAutoPadding(true)
+    decryptedRaw = Buffer.concat([decipher.update(payload), decipher.final()])
+  }
 
   // Decompress (compression flag 1 = gzip).
   let decrypted: Buffer
@@ -398,7 +408,7 @@ function readKdbx3(data: Buffer, version: number, password: string, keyfileData?
   if (!cipherId || !masterSeed || !encryptionIv || !transformSeed || !transformRounds || !protectedStreamKey || !streamStartBytes) {
     throw new Error('kdbx: missing required header fields')
   }
-  if (!cipherId.equals(AES_CIPHER_ID)) throw new Error('kdbx: only AES-256 cipher is supported')
+  if (!cipherId.equals(AES_CIPHER_ID)) throw new Error('kdbx: KDBX3 only supports the AES-256 cipher')
 
   // key_composite = SHA256(SHA256(password) || SHA256(keyfile)).
   const pwHash = createHash('sha256').update(Buffer.from(password, 'utf8')).digest()

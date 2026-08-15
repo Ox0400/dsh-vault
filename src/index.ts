@@ -30,7 +30,7 @@ import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
-import { readChromeLogins } from './chrome.ts'
+import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx } from './kdbx.ts'
@@ -2651,7 +2651,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const matches: Array<{ source: string; name: string; username: string }> = []
       if (source === 'chrome' || source === 'all') {
         try {
-          const dbPath = join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+          const dbPath = defaultChromeLoginData('chrome', 'Default')
           const creds = readChromeLogins(dbPath)
           for (const c of creds) {
             let name = c.origin
@@ -2714,9 +2714,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_import_kdbx: import from a KeePass KDBX4 database ───────────────
   ctx.tools.register(defineTool({
     name: 'vault_import_kdbx',
-    description: 'Import entries from a KeePass KDBX 4.x database (AES-KDF or Argon2 KDF, AES-256-CBC, '
-      + 'ChaCha20/Salsa20 protected fields) using the open-source KDBX4 spec and RFC 9106. Password and '
-      + 'optional keyfile supported.',
+    description: 'Import entries from a KeePass KDBX database: KDBX 3.1 and 4.x, AES-KDF or Argon2 KDF, '
+      + 'AES-256-CBC or ChaCha20 payload cipher, ChaCha20/Salsa20 protected fields, using the open-source '
+      + 'KDBX spec and RFC 9106. Password and optional keyfile supported.',
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the .kdbx file.' },
       password: { type: 'string', description: 'Database password (empty allowed).' },
@@ -2969,6 +2969,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'are skipped unless overwrite). Use vault_import_chrome_update to refresh incrementally.',
     parameters: {
       path: { type: 'string', description: 'Optional absolute path to the Login Data file; defaults to the current Chrome profile.' },
+      localStatePath: { type: 'string', description: 'Windows only: absolute path to the browser Local State file (holds the DPAPI-wrapped key).' },
       profile: { type: 'string', description: 'Chrome profile directory name (default "Default"), e.g. "Profile 1". Ignored when path is set.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same origin+username (default false = incremental).' },
     },
@@ -2977,8 +2978,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       assertWritable('vault_import_chrome')
       const s = await guardStore()
       const profile = typeof args.profile === 'string' && args.profile.trim().length > 0 ? args.profile.trim() : 'Default'
-      const dbPath = args.path ?? join(homedir(), 'Library/Application Support/Google/Chrome', profile, 'Login Data')
-      const creds = readChromeLogins(dbPath)
+      const dbPath = args.path ?? defaultChromeLoginData('chrome', profile)
+      const creds = readChromeLogins(dbPath, args.localStatePath)
       let added = 0
       let skipped = 0
       let updated = 0
@@ -3749,7 +3750,7 @@ export class VaultGateway extends TypertRemoteService {
     const matches: Array<{ source: string; name: string; username: string }> = []
     if (src === 'chrome' || src === 'all') {
       try {
-        const dbPath = join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+        const dbPath = defaultChromeLoginData('chrome', 'Default')
         for (const c of readChromeLogins(dbPath)) {
           let name = c.origin
           try { name = new URL(c.origin).hostname } catch { /* keep origin */ }
@@ -3796,7 +3797,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('importChrome')
   async importChrome(overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
-    const dbPath = join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+    const dbPath = defaultChromeLoginData('chrome', 'Default')
     const creds = readChromeLogins(dbPath)
     let added = 0, skipped = 0, updated = 0
     for (const c of creds) {
