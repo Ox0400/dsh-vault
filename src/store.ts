@@ -17,7 +17,7 @@
  */
 
 import { chmod, mkdir, readFile, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
@@ -732,6 +732,7 @@ export class VaultStore {
       : [...this.entries.values()].filter(e => onlyIds.has(e.id))
     const payload = {
       format: EXPORT_FORMAT_VERSION,
+      vaultName: basename(this.path).replace(/\.json$/, ''),
       exportedAt: now,
       kdf: exportKdf,
       entries: entries.map(entry => ({

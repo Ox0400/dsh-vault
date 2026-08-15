@@ -81,6 +81,8 @@ export function apply(ctx: ClientContext): void {
     renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),
     generatorHistory: () => invoke<Array<{ password: string; at: number }>>('generatorHistory'),
     backups: (limit) => invoke<Array<{ path: string; at: number }>>('backups', { limit: limit ?? 5 }),
+    importChrome: (overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importChrome', { overwrite: overwrite ?? false }),
+    keychainImport: (options) => invoke<{ added: number; skipped: number; updated: number; note: string }>('keychainImport', { ...(options ?? {}) }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),
     generatePassword: (options) => invoke<{ password: string }>('generatePassword', { ...(options ?? {}) }),

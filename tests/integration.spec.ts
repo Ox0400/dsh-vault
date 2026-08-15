@@ -132,7 +132,9 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import',
       'vault_import_bitwarden',
       'vault_import_browser',
+      'vault_import_chrome',
       'vault_import_csv',
+      'vault_import_keychain',
       'vault_import_wallet',
       'vault_integrity',
       'vault_last_modified',
@@ -1505,7 +1507,7 @@ test('vault_import_wallet imports pass files', async () => {
   await withContext(async ctx => {
     const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
     const { writeFile } = await import('node:fs/promises')
-    await writeFile(join(dir, 'site.gpg'), 'pw123\nlogin: user1\nurl: https://example.com\n')
+    await writeFile(join(dir, 'site.txt'), 'pw123\nlogin: user1\nurl: https://example.com\n')
     const r = await call(ctx, 'vault_import_wallet', { dir }) as { added: number }
     assert.equal(r.added, 1)
     const search = await call(ctx, 'vault_search', { query: 'site' }) as { results: Array<{ id: string }> }
@@ -2778,4 +2780,49 @@ test('vault_backup_status reports oldestBackupAt', async () => {
     assert.ok(r.backups >= 1)
     assert.ok(r.oldestBackupAt !== undefined && r.oldestBackupAt > 0)
   })
+})
+
+test('vault_import_wallet skips gpg-encrypted files', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-gpg-'))
+    await writeFile(join(dir, 'plain.txt'), 'pw-plain\nlogin: u1\n')
+    await writeFile(join(dir, 'secret.gpg'), '\u0001\u0002\u0003binary-gpg-data')
+    const r = await call(ctx, 'vault_import_wallet', { dir }) as { added: number; skipped: number }
+    assert.equal(r.added, 1, 'plaintext imported')
+    assert.ok(r.skipped >= 1, 'gpg skipped')
+    const found = await call(ctx, 'vault_search', { query: 'plain' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { username?: string; password?: string } }
+    assert.equal(full.entry.username, 'u1')
+    assert.equal(full.entry.password, 'pw-plain')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_fill supports a fields whitelist', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'FillFields', host: 'x.example', username: 'u', password: 'pw-secret' })
+    const r = await call(ctx, 'vault_fill', { target: 'x.example', fields: ['username'] }) as { found: boolean; entry: { username?: string; password?: string } }
+    assert.equal(r.found, true)
+    assert.equal(r.entry.username, 'u')
+    assert.ok(!('password' in r.entry), 'password not in whitelist output')
+  })
+})
+
+test('vault_export document carries the source vault name', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-vn-'))
+    process.env.DSH_VAULT_EXPORT_PW9 = 'export-pw-9'
+    await call(ctx, 'vault_add', { title: 'Vn1', password: 'pw' })
+    const exported = await call(ctx, 'vault_export', { path: join(dir, 'e.json') }) as { note: string }
+    const blob = JSON.parse(await readFile(join(dir, 'e.json'), 'utf8'))
+    assert.equal(blob.vaultName, 'vault', 'source vault name recorded')
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW9
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW9' })
 })

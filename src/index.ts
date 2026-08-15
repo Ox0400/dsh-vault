@@ -23,11 +23,14 @@ import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
+import { readChromeLogins } from './chrome.ts'
+import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -2027,6 +2030,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       for (const ent of entries) {
         if (!ent.isFile()) continue
+        if (/\.gpg$/i.test(ent.name)) { skipped++; continue } // gpg-encrypted: decrypt with gpg first
         const name = ent.name.replace(/\.gpg$/i, '')
         if (s.list().some(e => e.title === name)) { skipped++; continue }
         const content = await readFile(join(args.dir, ent.name), 'utf8')
@@ -2363,6 +2367,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'Use instead of vault_search+vault_get when you know what you are connecting to.',
     parameters: {
       target: { type: 'string', required: true, description: 'Host, URL, username, or title to match.' },
+      fields: { type: 'array', items: { type: 'string' }, description: 'Only return these fields (e.g. ["username","password"]). Default returns the full entry.' },
     },
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, entry: { type: 'json' } } },
@@ -2393,7 +2398,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const score = scoreOf(entry)
         if (score > bestScore) { best = entry; bestScore = score }
       }
-      return best === undefined ? { found: false } : { found: true, entry: stripTimestamps(best) }
+      if (best === undefined) return { found: false }
+      const full = stripTimestamps(best)
+      if (Array.isArray(args.fields) && args.fields.length > 0) {
+        const picked: Record<string, unknown> = {}
+        for (const f of args.fields) {
+          const v = (full as unknown as Record<string, unknown>)[f]
+          if (v !== undefined) picked[f] = v
+        }
+        return { found: true, entry: picked as unknown as JsonValue }
+      }
+      return { found: true, entry: full }
     },
   }))
 
@@ -2572,6 +2587,80 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_chrome: import passwords from Chrome's Login Data ─────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_chrome',
+    description: 'Import passwords from the Chrome (or Chromium/Brave) password manager. Reads the '
+      + 'Login Data SQLite database, decrypts v10/v11 entries using the macOS keychain "Chrome Safe '
+      + 'Storage" key (key stays in memory only), and imports them incrementally (same origin+username '
+      + 'are skipped unless overwrite). Use vault_import_chrome_update to refresh incrementally.',
+    parameters: {
+      path: { type: 'string', description: 'Optional absolute path to the Login Data file; defaults to the current Chrome profile.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same origin+username (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_chrome')
+      const s = await guardStore()
+      const dbPath = args.path ?? join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+      const creds = readChromeLogins(dbPath)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        let title = c.origin
+        try { title = new URL(c.origin).hostname || c.origin } catch { /* keep origin as title */ }
+        const existing = s.list().find(e => e.title === title && e.username === c.username)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `Chrome import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
+  // ── vault_import_keychain: import generic passwords from the macOS keychain ─
+  ctx.tools.register(defineTool({
+    name: 'vault_import_keychain',
+    description: 'Import generic passwords from the macOS login keychain via the security CLI. '
+      + 'System entries (com.apple.*, iCloud, Wi-Fi, …) are filtered out; fetched entries are cached '
+      + 'for the session so the same one is never re-requested. The FIRST fetch of each entry can '
+      + 'prompt the macOS keychain authorization — choose "Always Allow" there to consent once for '
+      + 'this process. Use preview to list what would be imported without fetching any passwords.',
+    parameters: {
+      limit: { type: 'integer', description: 'Max entries to fetch (default 10, 1–200).' },
+      minLength: { type: 'integer', description: 'Skip passwords shorter than this (default 4).' },
+      overwrite: { type: 'boolean', description: 'Update existing entries (default false = incremental).' },
+      preview: { type: 'boolean', description: 'Only list the matching entries (no password fetches, no dialogs).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_keychain')
+      const s = await guardStore()
+      const limit = args.limit === undefined ? 10 : args.limit
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('vault_import_keychain: limit must be an integer 1–200')
+      if (args.preview === true) {
+        const entries = listKeychainEntries(limit)
+        return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching entry/ies — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
+      }
+      const minLength = args.minLength ?? 4
+      const creds = readKeychainPasswords(limit, minLength)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.service
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = { username: c.account, password: c.password, notes: 'imported from macOS keychain' }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `Keychain import: ${added} added, ${updated} updated, ${skipped} skipped` }
+    },
+  }))
+
   // ── vault_import_bitwarden: import a Bitwarden JSON export ─────────────────
   ctx.tools.register(defineTool({
     name: 'vault_import_bitwarden',
@@ -2604,6 +2693,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const title = (item.name ?? '').trim()
         if (!title) { skipped++; continue }
         const patch: VaultEntryPatch = {}
+        if (item.type === 2) patch.kind = 'custom'
         const login = item.login
         if (login?.username !== undefined) patch.username = login.username
         if (login?.password !== undefined) patch.password = login.password
@@ -3244,6 +3334,46 @@ export class VaultGateway extends TypertRemoteService {
     custom.push({ name, kind, fields })
     await writeFile(tplPath, JSON.stringify(custom, null, 2), { mode: 0o600 })
     return { saved: true }
+  }
+
+  /** Import Chrome passwords (Login Data) into the vault. */
+  @Remote('importChrome')
+  async importChrome(overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const dbPath = join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+    const creds = readChromeLogins(dbPath)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      let title = c.origin
+      try { title = new URL(c.origin).hostname || c.origin } catch { /* keep origin */ }
+      const existing = store.list().find(e => e.title === title && e.username === c.username)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `Chrome import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Preview or import macOS keychain entries (preview never prompts). */
+  @Remote('keychainImport')
+  async keychainImport(options?: { limit?: number; overwrite?: boolean; preview?: boolean }): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const limit = options?.limit ?? 10
+    if (options?.preview === true) {
+      const entries = listKeychainEntries(limit)
+      return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
+    }
+    const creds = readKeychainPasswords(limit)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const existing = store.list().find(e => e.title === c.service)
+      if (existing && options?.overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = { username: c.account, password: c.password, notes: 'imported from macOS keychain' }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title: c.service, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `keychain import: ${added} added, ${updated} updated, ${skipped} skipped` }
   }
 
   /** Estimate a password's strength for the editor's live meter. */

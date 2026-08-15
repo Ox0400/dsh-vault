@@ -88,6 +88,8 @@ export interface VaultSectionInjected {
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
   backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
+  importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
@@ -205,7 +207,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, importChrome, keychainImport } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -321,6 +323,27 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Import from Chrome / Keychain with a confirmation about keychain prompts. */
+  async function runSystemImport(source: 'chrome' | 'keychain', preview: boolean): Promise<void> {
+    if (source === 'keychain' && !preview) {
+      const ok = window.confirm(t('keychainPromptWarn'))
+      if (!ok) return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = source === 'chrome'
+        ? await importChrome(false)
+        : await keychainImport({ limit: 10, preview })
+      setMessage(r.note)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Rename a tag across all entries (Bitwarden-style tag merge). */
   async function renameTagAll(from: string): Promise<void> {
     const to = window.prompt(`${t('tagRenamePrompt')} ${from}`)
@@ -354,9 +377,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await lock()
       setLocked(r.locked)
       if (r.locked) {
-        // The vault is locked: clear the visible list so stale secrets are
-        // not left on screen.
+        // The vault is locked: clear the visible list and health data so
+        // stale secrets and stats are not left on screen.
         setState({ status: 'ready', entries: [] })
+        setReport(null)
+        setVaultStats(null)
+        setAudit([])
+        setDupList([])
+        setTagList([])
+        setBreach(null)
         setMessage(t('lockedMsg'))
       } else {
         setMessage(t('error'))
@@ -967,6 +996,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           ))}
         </div>
       )}
+
+      <div className={css.reportBox}>
+        <p className={css.reportTitle}>{t('systemImport')}</p>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('importChromeDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('chrome', false)} disabled={busy || readonly || locked}>{t('importChrome')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('importKeychainDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>{t('keychainPreview')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importKeychain')}</button>
+        </div>
+      </div>
 
       {backupList.length > 0 && (
         <div className={css.reportBox}>
