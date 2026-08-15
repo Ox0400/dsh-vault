@@ -4504,7 +4504,8 @@ export class VaultGateway extends TypertRemoteService {
 
   /** List recent encrypted backups (timestamped files) for the UI. */
   @Remote('backups')
-  async backups(limit = 5): Promise<Array<{ path: string; at: number }>> {
+  async backups(limit: number): Promise<Array<{ path: string; at: number }>> {
+    const max = limit === undefined ? 5 : limit
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
     const found: Array<{ path: string; at: number }> = []
     try {
@@ -4514,7 +4515,7 @@ export class VaultGateway extends TypertRemoteService {
         if (m) found.push({ path: join(dir, entry), at: Number(m[1]) })
       }
     } catch { /* no dir yet */ }
-    return found.sort((a, b) => b.at - a.at).slice(0, limit)
+    return found.sort((a, b) => b.at - a.at).slice(0, max)
   }
 
   /** Restore the active vault from one of its encrypted backups. A safety
