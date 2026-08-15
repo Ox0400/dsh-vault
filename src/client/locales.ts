@@ -250,6 +250,7 @@ export const en = {
   kindApiKey: 'API key',
   kindSecret: 'Secret',
   kindOauth: 'OAuth',
+  kindCookie: 'Session cookies',
   kindCustom: 'Custom',
 } as const
 
@@ -505,5 +506,6 @@ export const zh: Record<VaultLocaleKey, string> = {
   kindApiKey: 'API 密钥',
   kindSecret: 'Secret',
   kindOauth: 'OAuth',
+  kindCookie: '会话 Cookies',
   kindCustom: '自定义',
 }

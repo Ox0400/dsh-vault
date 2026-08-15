@@ -211,6 +211,7 @@ const KIND_KEYS: Record<string, VaultLocaleKey> = {
   'api-key': 'kindApiKey',
   secret: 'kindSecret',
   oauth: 'kindOauth',
+  cookie: 'kindCookie',
   custom: 'kindCustom',
 }
 
@@ -1143,6 +1144,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       case 'api-key': return '🔑'
       case 'oauth': return '🔐'
       case 'secret': return '🤫'
+      case 'cookie': return '🍪'
       case 'custom': return '🧩'
       default: return '👤'
     }
