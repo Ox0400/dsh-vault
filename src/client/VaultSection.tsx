@@ -86,7 +86,8 @@ export interface VaultSectionInjected {
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
-  generatePassword: () => Promise<{ password: string }>
+  generatePassword: (options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }) => Promise<{ password: string }>
+  strength: (password: string) => Promise<{ score: number; verdict: string; feedback: string; bits: number }>
   generateUsername: () => Promise<{ username: string }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
@@ -160,6 +161,11 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
 ]
 
 const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
+const VERDICT_KEYS_SHORT: Record<string, VaultLocaleKey> = { weak: 'verdictPoor', fair: 'verdictFair', strong: 'verdictGood', 'very strong': 'verdictGood' }
+const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
+  uppercase: 'genOptUppercase', lowercase: 'genOptLowercase', digits: 'genOptDigits',
+  symbols: 'genOptSymbols', excludeAmbiguous: 'genOptExcludeAmbiguous',
+}
 
 /** Number of entries matching the current kind/tag filters (for pagination). */
 function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string): number {
@@ -191,7 +197,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, generateUsername } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -205,6 +211,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false })
+  const [showGenOpts, setShowGenOpts] = useState(false)
+  const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string } | null>(null)
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -227,6 +236,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [breach, setBreach] = useState<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
+
+  // Live password strength meter (debounced) for the editor's password field.
+  useEffect(() => {
+    const pw = form.password ?? ''
+    if (pw.length === 0) { setPwStrength(null); return }
+    const timer = window.setTimeout(() => {
+      void strength(pw).then(
+        r => setPwStrength({ score: r.score, verdict: r.verdict }),
+        () => setPwStrength(null),
+      )
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [form.password, strength])
 
   /** Switch the active vault and reload everything. */
   async function switchVaultTo(name: string): Promise<void> {
@@ -1123,12 +1145,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       onChange={event => setForm(previous => ({ ...previous, [field.key]: event.target.value }))}
                     />
                     {field.key === 'password' && (
-                      <button
-                        type="button"
-                        className={css.revealButton}
-                        title={t('genPwHint')}
-                        onClick={() => { void generatePassword().then(r => setForm(previous => ({ ...previous, password: r.password }))) }}
-                      >{t('genPw')}</button>
+                      <>
+                        <button
+                          type="button"
+                          className={css.revealButton}
+                          title={t('genPwHint')}
+                          onClick={() => { void generatePassword(genOpts).then(r => setForm(previous => ({ ...previous, password: r.password }))) }}
+                        >{t('genPw')}</button>
+                        <button
+                          type="button"
+                          className={css.revealButton}
+                          title={t('genOptsHint')}
+                          onClick={() => setShowGenOpts(v => !v)}
+                        >⚙</button>
+                      </>
                     )}
                     <button
                       type="button"
@@ -1198,6 +1228,33 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 )}
               </label>
             ))}
+            {pwStrength !== null && (
+              <div className={css.pwMeter}>
+                <div className={`${css.pwBar} ${pwStrength.score >= 60 ? css.pwStrong : pwStrength.score >= 40 ? css.pwFair : css.pwWeak}`} style={{ width: `${pwStrength.score}%` }} />
+                <span className={css.pwLabel}>{t('strengthLabel')}: {pwStrength.score}/100 ({t(VERDICT_KEYS_SHORT[pwStrength.verdict] ?? 'verdictGood')})</span>
+              </div>
+            )}
+            {showGenOpts && (
+              <div className={css.genOpts}>
+                <label className={css.genOptRow}>
+                  <span>{t('genLength')}</span>
+                  <input
+                    type="number" min={6} max={64} value={genOpts.length}
+                    onChange={event => setGenOpts(previous => ({ ...previous, length: Math.max(6, Math.min(64, Number(event.target.value) || 24)) }))}
+                  />
+                </label>
+                {(['uppercase', 'lowercase', 'digits', 'symbols', 'excludeAmbiguous'] as const).map(key => (
+                  <label key={key} className={css.genOptRow}>
+                    <span>{t(GEN_OPT_KEYS[key] ?? 'genOptUppercase')}</span>
+                    <input
+                      type="checkbox"
+                      checked={genOpts[key]}
+                      onChange={event => setGenOpts(previous => ({ ...previous, [key]: event.target.checked }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
             <label className={css.field}>
               <span>{t('fieldTags')}</span>
               <input

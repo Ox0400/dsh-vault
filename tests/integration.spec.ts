@@ -2317,3 +2317,20 @@ test('vault_clipboard supports masked output and reports auto-clear', async () =
     assert.ok(!masked.value.includes('super-secret-pw'), 'no plaintext leak')
   })
 })
+
+test('vault_generate_password pin mode yields digits only', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_generate_password', { pin: true, length: 8 }) as { password: string }
+    assert.equal(r.password.length, 8)
+    assert.ok(/^\d+$/.test(r.password), 'digits only')
+    assert.ok(!/[01lIO]/.test(r.password), 'ambiguous digits excluded')
+  })
+})
+
+test('vault_strength reports entropy bits', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_strength', { password: 'Xk9!mQ2#zT7$vR4' }) as { score: number; verdict: string; bits: number }
+    assert.ok(r.bits > 60, `bits ${r.bits} > 60`)
+    assert.ok(r.score >= 60)
+  })
+})

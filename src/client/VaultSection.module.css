@@ -543,3 +543,38 @@
   margin-right: 4px;
   vertical-align: -2px;
 }
+
+
+.genOpts {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+.genOptRow {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: space-between;
+}
+.genOptRow input[type="number"] {
+  width: 64px;
+}
+.pwMeter {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+}
+.pwBar {
+  border-radius: 999px;
+  height: 6px;
+  transition: width 0.2s ease;
+}
+.pwWeak { background: #cf3d3d; }
+.pwFair { background: #c98a1b; }
+.pwStrong { background: #2e9e5b; }
+.pwLabel { color: var(--dsh-color-text-2, #666); }

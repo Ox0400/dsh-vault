@@ -609,6 +609,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       prefix: { type: 'string', description: 'Fixed prefix prepended to the random core (site requirements).' },
       suffix: { type: 'string', description: 'Fixed suffix appended to the random core (site requirements).' },
       passphrase: { type: 'boolean', description: 'Generate a memorable passphrase instead of a random password (ignores length/classes/group).' },
+      pin: { type: 'boolean', description: 'Generate a numeric PIN (digits only, default length 6, ambiguous digits excluded).' },
       words: { type: 'integer', description: 'Number of words for passphrase mode (default 4, 2–12).' },
       separator: { type: 'string', description: 'Separator between passphrase words (default "-").' },
       wordDigits: { type: 'boolean', description: 'Append two random digits in passphrase mode (default true).' },
@@ -626,6 +627,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       render: (_args, value) => [{ type: 'text', text: value.password }],
     },
     async execute(args) {
+      if (args.pin === true) {
+        const password = generatePassword({
+          length: args.length ?? 6,
+          lowercase: false,
+          uppercase: false,
+          digits: true,
+          symbols: false,
+          excludeAmbiguous: true,
+        })
+        return { password, length: password.length, strength: estimateStrength(password) }
+      }
       if (args.passphrase === true) {
         const password = generatePassphrase({
           ...(args.words !== undefined ? { words: args.words } : {}),
@@ -2243,8 +2255,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'and a verdict: weak / fair / strong / very strong. Use before choosing or storing a password.',
     parameters: { password: { type: 'string', required: true, description: 'The password to evaluate.' } },
     output: {
-      schema: { type: 'object', additionalProperties: false, properties: { score: { type: 'integer', required: true }, verdict: { type: 'string', required: true }, feedback: { type: 'string', required: true } } },
-      render: (_a, v) => [{ type: 'text', text: `${v.verdict} (${v.score}/100) — ${v.feedback}` }],
+      schema: { type: 'object', additionalProperties: false, properties: { score: { type: 'integer', required: true }, verdict: { type: 'string', required: true }, feedback: { type: 'string', required: true }, bits: { type: 'integer', required: true } } },
+      render: (_a, v) => [{ type: 'text', text: `${v.verdict} (${v.score}/100, ~${v.bits} bits) — ${v.feedback}` }],
     },
     async execute(args) {
       const r = estimateStrength(args.password)
@@ -2794,9 +2806,15 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Generate a strong random password for the editor's password field. */
   @Remote('generatePassword')
-  async generatePassword(): Promise<{ password: string }> {
+  async generatePassword(options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }): Promise<{ password: string }> {
     const { generatePassword } = await import('./password.ts')
-    return { password: generatePassword({ length: 24 }) }
+    return { password: generatePassword({ length: options?.length ?? 24, lowercase: options?.lowercase ?? true, uppercase: options?.uppercase ?? true, digits: options?.digits ?? true, symbols: options?.symbols ?? true, excludeAmbiguous: options?.excludeAmbiguous ?? false }) }
+  }
+
+  /** Estimate a password's strength for the editor's live meter. */
+  @Remote('strength')
+  async strength(password: string): Promise<{ score: number; verdict: string; feedback: string; bits: number }> {
+    return estimateStrength(password)
   }
 
   /** Generate a random username suggestion for the editor. */
@@ -3229,7 +3247,7 @@ function pickDefinedFromRecord(record: Record<string, unknown>): Record<string, 
 
 /** Zero-dependency password strength estimator: score 0–100 from length,
  * character-class coverage, and penalties for common weak patterns. */
-function estimateStrength(password: string): { score: number; verdict: string; feedback: string } {
+function estimateStrength(password: string): { score: number; verdict: string; feedback: string; bits: number } {
   let score = 0
   const length = password.length
   // Length is the dominant factor.
@@ -3254,7 +3272,14 @@ function estimateStrength(password: string): { score: number; verdict: string; f
   if (password.length > 0 && new Set(password).size <= Math.max(3, Math.floor(length / 2))) feedback.push('low diversity')
   score = Math.max(0, Math.min(100, Math.round(score)))
   const verdict = score >= 80 ? 'very strong' : score >= 60 ? 'strong' : score >= 40 ? 'fair' : 'weak'
-  return { score, verdict, feedback: feedback.length > 0 ? feedback.join('; ') : 'no obvious weaknesses' }
+  // Entropy estimate in bits: log2(pool size) per character.
+  let pool = 0
+  if (/[a-z]/.test(password)) pool += 26
+  if (/[A-Z]/.test(password)) pool += 26
+  if (/[0-9]/.test(password)) pool += 10
+  if (/[^A-Za-z0-9]/.test(password)) pool += 33
+  const bits = password.length > 0 && pool > 0 ? Math.round(password.length * Math.log2(pool)) : 0
+  return { score, verdict, feedback: feedback.length > 0 ? feedback.join('; ') : 'no obvious weaknesses', bits }
 }
 
 
