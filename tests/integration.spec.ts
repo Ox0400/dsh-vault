@@ -159,6 +159,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_search',
       'vault_search_advanced',
       'vault_search_history',
+      'vault_search_system',
       'vault_set_icon',
       'vault_stats',
       'vault_strength',

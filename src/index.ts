@@ -2587,6 +2587,53 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_search_system: search Chrome / Keychain without exposing secrets ─
+  ctx.tools.register(defineTool({
+    name: 'vault_search_system',
+    description: 'Search system credential stores (Chrome Login Data and the macOS keychain) for a '
+      + 'keyword, returning matching sites/services and usernames WITHOUT any passwords. Use this to '
+      + 'discover whether a credential exists in Chrome or the keychain before importing it.',
+    parameters: {
+      query: { type: 'string', required: true, description: 'Keyword to match against site/service names (case-insensitive).' },
+      source: { type: 'string', enum: ['chrome', 'keychain', 'all'], description: 'Which store to search (default all).' },
+      limit: { type: 'integer', description: 'Max matches (default 20, 1–100).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { matches: { type: 'array', required: true, items: { type: 'json' } }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `${(v.matches as unknown[]).length} match(es)` }] },
+    async execute(args) {
+      const needle = args.query.trim().toLowerCase()
+      const limit = args.limit === undefined ? 20 : args.limit
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('vault_search_system: limit must be an integer 1–100')
+      const source = args.source ?? 'all'
+      const matches: Array<{ source: string; name: string; username: string }> = []
+      if (source === 'chrome' || source === 'all') {
+        try {
+          const dbPath = join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+          const creds = readChromeLogins(dbPath)
+          for (const c of creds) {
+            let name = c.origin
+            try { name = new URL(c.origin).hostname } catch { /* keep origin */ }
+            if (name.toLowerCase().includes(needle)) {
+              matches.push({ source: 'chrome', name, username: c.username })
+              if (matches.length >= limit) break
+            }
+          }
+        } catch { /* Chrome unavailable — skip */ }
+      }
+      if (source === 'keychain' || source === 'all') {
+        try {
+          const entries = listKeychainEntries(limit * 2)
+          for (const e of entries) {
+            if (e.service.toLowerCase().includes(needle) || e.account.toLowerCase().includes(needle)) {
+              matches.push({ source: 'keychain', name: e.service, username: e.account })
+              if (matches.length >= limit) break
+            }
+          }
+        } catch { /* keychain unavailable — skip */ }
+      }
+      return { matches: matches.slice(0, limit), note: 'searched system credential stores (no passwords exposed)' }
+    },
+  }))
+
   // ── vault_import_chrome: import passwords from Chrome's Login Data ─────────
   ctx.tools.register(defineTool({
     name: 'vault_import_chrome',
@@ -2596,13 +2643,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'are skipped unless overwrite). Use vault_import_chrome_update to refresh incrementally.',
     parameters: {
       path: { type: 'string', description: 'Optional absolute path to the Login Data file; defaults to the current Chrome profile.' },
+      profile: { type: 'string', description: 'Chrome profile directory name (default "Default"), e.g. "Profile 1". Ignored when path is set.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same origin+username (default false = incremental).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_chrome')
       const s = await guardStore()
-      const dbPath = args.path ?? join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+      const profile = typeof args.profile === 'string' && args.profile.trim().length > 0 ? args.profile.trim() : 'Default'
+      const dbPath = args.path ?? join(homedir(), 'Library/Application Support/Google/Chrome', profile, 'Login Data')
       const creds = readChromeLogins(dbPath)
       let added = 0
       let skipped = 0
@@ -2633,6 +2682,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       minLength: { type: 'integer', description: 'Skip passwords shorter than this (default 4).' },
       overwrite: { type: 'boolean', description: 'Update existing entries (default false = incremental).' },
       preview: { type: 'boolean', description: 'Only list the matching entries (no password fetches, no dialogs).' },
+      service: { type: 'string', description: 'Only import entries whose service name contains this (case-insensitive).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2640,12 +2690,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const limit = args.limit === undefined ? 10 : args.limit
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('vault_import_keychain: limit must be an integer 1–200')
+      const serviceFilter = typeof args.service === 'string' ? args.service.trim().toLowerCase() : ''
+      const filterEntries = (entries: Array<{ service: string; account: string }>): Array<{ service: string; account: string }> =>
+        serviceFilter.length === 0 ? entries : entries.filter(e => e.service.toLowerCase().includes(serviceFilter))
       if (args.preview === true) {
-        const entries = listKeychainEntries(limit)
+        const entries = filterEntries(listKeychainEntries(limit * 2)).slice(0, limit)
         return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching entry/ies — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
       }
       const minLength = args.minLength ?? 4
-      const creds = readKeychainPasswords(limit, minLength)
+      const allCreds = readKeychainPasswords(limit * 2, minLength)
+      const creds = serviceFilter.length === 0 ? allCreds.slice(0, limit) : allCreds.filter(c => c.service.toLowerCase().includes(serviceFilter)).slice(0, limit)
       let added = 0
       let skipped = 0
       let updated = 0
@@ -3334,6 +3388,39 @@ export class VaultGateway extends TypertRemoteService {
     custom.push({ name, kind, fields })
     await writeFile(tplPath, JSON.stringify(custom, null, 2), { mode: 0o600 })
     return { saved: true }
+  }
+
+  /** Search Chrome/Keychain for a keyword without exposing secrets. */
+  @Remote('searchSystem')
+  async searchSystem(query: string, source?: string, limit?: number): Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }> {
+    const needle = query.trim().toLowerCase()
+    const max = limit ?? 20
+    const src = source ?? 'all'
+    const matches: Array<{ source: string; name: string; username: string }> = []
+    if (src === 'chrome' || src === 'all') {
+      try {
+        const dbPath = join(homedir(), 'Library/Application Support/Google/Chrome/Default/Login Data')
+        for (const c of readChromeLogins(dbPath)) {
+          let name = c.origin
+          try { name = new URL(c.origin).hostname } catch { /* keep origin */ }
+          if (name.toLowerCase().includes(needle)) {
+            matches.push({ source: 'chrome', name, username: c.username })
+            if (matches.length >= max) break
+          }
+        }
+      } catch { /* skip */ }
+    }
+    if (src === 'keychain' || src === 'all') {
+      try {
+        for (const e of listKeychainEntries(max * 2)) {
+          if (e.service.toLowerCase().includes(needle) || e.account.toLowerCase().includes(needle)) {
+            matches.push({ source: 'keychain', name: e.service, username: e.account })
+            if (matches.length >= max) break
+          }
+        }
+      } catch { /* skip */ }
+    }
+    return { matches: matches.slice(0, max), note: 'system search (no passwords exposed)' }
   }
 
   /** Import Chrome passwords (Login Data) into the vault. */

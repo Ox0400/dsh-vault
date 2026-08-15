@@ -16,3 +16,14 @@ test('chrome: decryptChromeV10 matches the reference AES-128-CBC scheme', () => 
   // Non-v10 blob returns ''.
   assert.equal(decryptChromeV10(Buffer.from('abc'), key), '')
 })
+
+test('chrome: decrypt scheme round-trips with the reference CBC parameters', () => {
+  const { pbkdf2Sync, createCipheriv } = require('node:crypto')
+  const key = pbkdf2Sync('Ceq3uF+05s+hSD2wpGjnnQ==', 'saltysalt', 1003, 16, 'sha1')
+  const iv = Buffer.alloc(16, 0x20)
+  const cipher = createCipheriv('aes-128-cbc', key, iv)
+  const ct = Buffer.concat([cipher.update(Buffer.from('roundtrip-pw')), cipher.final()])
+  const blob = Buffer.concat([Buffer.from('v10', 'latin1'), ct])
+  const { decryptChromeV10 } = require('../src/chrome.ts')
+  assert.equal(decryptChromeV10(blob, key), 'roundtrip-pw')
+})

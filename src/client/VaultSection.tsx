@@ -89,7 +89,8 @@ export interface VaultSectionInjected {
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
   backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  searchSystem: (query: string, source?: string, limit?: number) => Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
@@ -207,7 +208,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, importChrome, keychainImport } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, importChrome, keychainImport, searchSystem } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -221,6 +222,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
   const [backupList, setBackupList] = useState<Array<{ path: string; at: number }>>([])
+  const [sysQuery, setSysQuery] = useState('')
+  const [sysMatches, setSysMatches] = useState<Array<{ source: string; name: string; username: string }>>([])
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
@@ -337,6 +340,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         : await keychainImport({ limit: 10, preview })
       setMessage(r.note)
       void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Search Chrome/Keychain for the typed keyword (no secrets shown). */
+  async function searchSystemStores(): Promise<void> {
+    if (sysQuery.trim().length === 0) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await searchSystem(sysQuery.trim(), 'all', 15)
+      setSysMatches(r.matches)
     } catch {
       setMessage(t('error'))
     } finally {
@@ -996,6 +1014,28 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           ))}
         </div>
       )}
+
+      <div className={css.reportBox}>
+        <p className={css.reportTitle}>{t('systemSearch')}</p>
+        <div className={css.dupGroup}>
+          <input
+            className={css.searchBox}
+            type="search"
+            placeholder={t('sysSearchPlaceholder')}
+            value={sysQuery}
+            onChange={event => setSysQuery(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter') void searchSystemStores() }}
+          />
+          <button type="button" className={css.dupMerge} onClick={() => void searchSystemStores()} disabled={busy}>{t('sysSearchGo')}</button>
+        </div>
+        {sysMatches.length > 0 && (
+          <div>
+            {sysMatches.map((m, i) => (
+              <p key={i} className={css.reportSub}>[{m.source}] {m.name} · {m.username}</p>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className={css.reportBox}>
         <p className={css.reportTitle}>{t('systemImport')}</p>
