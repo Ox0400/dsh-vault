@@ -224,7 +224,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
-  const [sortBy, setSortBy] = useState<'alpha' | 'recent'>('alpha')
+  const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'favorite' | 'smart'>('alpha')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -771,11 +771,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <option key={tag} value={tag}>{tag}</option>
           ))}
         </select>
-        <button
-          type="button"
+        <select
           className={css.sortButton}
-          onClick={() => setSortBy(sortBy === 'alpha' ? 'recent' : 'alpha')}
-        >{sortBy === 'alpha' ? t('sortAlpha') : t('sortRecent')}</button>
+          value={sortBy}
+          onChange={event => setSortBy(event.target.value as 'alpha' | 'recent' | 'favorite' | 'smart')}
+          aria-label={t('sortBy')}
+        >
+          <option value="alpha">{t('sortAlpha')}</option>
+          <option value="recent">{t('sortRecent')}</option>
+          <option value="favorite">{t('sortFavorite')}</option>
+          <option value="smart">{t('sortSmart')}</option>
+        </select>
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly}>
           + {t('add')}
         </button>

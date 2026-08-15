@@ -2546,3 +2546,51 @@ test('vault_backup accepts a note', async () => {
     assert.equal(r.note, 'before upgrade')
   })
 })
+
+test('vault_list reports entry counts per vault', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'ListCount', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'ListCount2', password: 'pw' })
+    const r = await call(ctx, 'vault_list', {}) as { vaults: Array<{ name: string; entries?: number; active: boolean }> }
+    // The module-level currentVaultName singleton may be polluted by earlier
+    // vault_switch tests, so locate the path-named vault directly.
+    const def = r.vaults.find(v => v.name === 'vault')
+    assert.ok(def !== undefined, `vaults: ${JSON.stringify(r.vaults)}`)
+    assert.equal(def.entries, 2, 'vault shows its entry count')
+  })
+})
+
+test('vault_import sniff honors dryRun', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-sniffdry-'))
+    const file = join(dir, 'bw.json')
+    await writeFile(file, JSON.stringify({ encrypted: false, folders: [], items: [{ name: 'DrySniff', login: { username: 'u', password: 'pw' } }] }))
+    const before = await call(ctx, 'vault_count', {}) as { count: number }
+    const r = await call(ctx, 'vault_import', { path: file, dryRun: true }) as { imported: number; note?: string }
+    assert.equal(r.imported, 1)
+    assert.ok((r.note ?? '').includes('dry run'), 'dry run noted')
+    const after = await call(ctx, 'vault_count', {}) as { count: number }
+    assert.equal(after.count, before.count, 'dryRun wrote nothing')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_export_bitwarden emits an empty login object for bare entries', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bwb-'))
+    await call(ctx, 'vault_add', { title: 'BareEntry' })
+    const file = join(dir, 'b.json')
+    await call(ctx, 'vault_export_bitwarden', { path: file })
+    const doc = JSON.parse(await readFile(file, 'utf8'))
+    const item = doc.items.find(i => i.name === 'BareEntry')
+    assert.ok(item.login !== null, 'login is not null')
+    assert.deepEqual(item.login, {}, 'empty login object')
+    await rm(dir, { recursive: true, force: true })
+  })
+})

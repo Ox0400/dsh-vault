@@ -23,7 +23,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
@@ -2276,9 +2276,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             if (Object.keys(fields).length > 0) patch.fields = fields
             const existing = s.list().find(e => e.title === title)
             if (existing && args.overwrite !== true) { skipped++; continue }
-            if (existing) { await s.update(existing.id, patch); updated++ } else { await s.add({ title, ...patch }); added++ }
+            if (existing) { if (args.dryRun !== true) await s.update(existing.id, patch); updated++ }
+            else { if (args.dryRun !== true) await s.add({ title, ...patch }); added++ }
           }
-          return { imported: added + updated, note: `sniffed Bitwarden JSON: added ${added}, updated ${updated}, skipped ${skipped}` }
+          return { imported: added + updated, note: `sniffed Bitwarden JSON: added ${added}, updated ${updated}, skipped ${skipped}${args.dryRun === true ? ' (dry run)' : ''}` }
         }
       } catch { /* not JSON or not Bitwarden — fall through to encrypted import */ }
       const exportPassword = resolveExportPassword(config)
@@ -2609,7 +2610,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           name: e.title,
           notes: e.notes ?? null,
           favorite: e.favorite === true,
-          login: Object.keys(login).length > 0 ? login : null,
+          login: Object.keys(login).length > 0 ? login : {},
           fields: fields.length > 0 ? fields : null,
           collectionIds: null,
         })
@@ -2782,8 +2783,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           names.push(m[1]!)
         }
       } catch { /* dir may not exist yet */ }
-      const active = currentVaultName ?? config.name ?? 'default'
-      return { vaults: names.sort().map(name => ({ name, active: name === active })) }
+      const active = currentVaultName ?? config.name
+        ?? (config.path !== undefined ? basename(config.path).replace(/\.json$/, '') : undefined)
+        ?? 'default'
+      // Report each vault's entry count by opening it (same master password),
+      // so a roster of junk/test vaults is easy to spot.
+      const vaults = []
+      for (const name of names.sort()) {
+        try {
+          const store = await sharedVaultStore(masterPassword, { name, path: join(dir, `${name}.json`) })
+          vaults.push({ name, active: name === active, entries: store.list().length + store.listTrash().length })
+        } catch {
+          vaults.push({ name, active: name === active, entries: -1 })
+        }
+      }
+      return { vaults }
     },
   }))
 
