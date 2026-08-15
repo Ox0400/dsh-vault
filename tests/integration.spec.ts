@@ -2496,3 +2496,47 @@ test('vault_changes respects a limit', async () => {
     assert.equal(r.changes.length, 2)
   })
 })
+
+test('vault_import_browser handles LastPass CSV column order', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-lp-'))
+    const file = join(dir, 'lp.csv')
+    await writeFile(file, 'url,username,password,extra,name,grouping,fav\nhttps://lp.example,u1,pw1,note here,LP1,\n')
+    const r = await call(ctx, 'vault_import_browser', { path: file }) as { added: number }
+    assert.equal(r.added, 1)
+    const found = await call(ctx, 'vault_search', { query: 'LP1' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { username: string; password: string; url: string } }
+    assert.equal(full.entry.username, 'u1')
+    assert.equal(full.entry.password, 'pw1')
+    assert.equal(full.entry.url, 'https://lp.example')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_import auto-sniffs Bitwarden JSON', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-sniff-'))
+    const file = join(dir, 'bw.json')
+    await writeFile(file, JSON.stringify({ encrypted: false, folders: [], items: [{ name: 'Sniff1', login: { username: 'u', password: 'pw' } }] }))
+    const r = await call(ctx, 'vault_import', { path: file }) as { imported: number; note?: string }
+    assert.equal(r.imported, 1)
+    assert.ok((r.note ?? '').includes('Bitwarden'), 'sniffed format')
+    const found = await call(ctx, 'vault_search', { query: 'Sniff1' }) as { results: Array<{ id: string }> }
+    assert.equal(found.results.length, 1)
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_backup accepts a note', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'BackupNote', password: 'pw' })
+    const r = await call(ctx, 'vault_backup', { note: 'before upgrade' }) as { path: string; note?: string }
+    assert.equal(r.note, 'before upgrade')
+  })
+})

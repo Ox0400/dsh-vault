@@ -1734,13 +1734,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (rows.length === 0) return { added: 0, skipped: 0, updated: 0 }
       // Header may be name,url,username,password or url,name,username,password.
       const header = rows[0]!.map(h => h.trim().toLowerCase())
-      const idx = {
+      let idx = {
         name: header.indexOf('name'),
         url: header.indexOf('url'),
         username: header.indexOf('username'),
         password: header.indexOf('password'),
         otpauth: header.indexOf('otpauth'),
         notes: header.indexOf('notes'),
+      }
+      // LastPass export order: url,username,password,extra,name,grouping,fav
+      if (idx.name < 0 && header.length >= 5 && header[4] === 'name') {
+        idx = { name: 4, url: 0, username: 1, password: 2, otpauth: -1, notes: header.indexOf('extra') }
       }
       if (idx.name < 0 || idx.password < 0) return { added: 0, skipped: rows.length - 1, updated: 0 }
       let added = 0
@@ -2231,10 +2235,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       overwrite: { type: 'boolean', description: 'Replace existing entries with the same id instead of merging (default false).' },
       dryRun: { type: 'boolean', description: 'Preview how many entries would be imported without writing anything (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { imported: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.imported} entries` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { imported: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `imported ${v.imported} entries` }] },
     async execute(args) {
       assertWritable('vault_import')
-      const exportPassword = resolveExportPassword(config)
       const s = await guardStore()
       if (args.path === undefined && args.blob === undefined) {
         throw new Error('vault_import: provide either path or blob')
@@ -2243,8 +2246,44 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         throw new Error('vault_import: blob exceeds 64 MiB — write it to a file and pass path instead')
       }
       const blob = args.path !== undefined ? await readFile(args.path, 'utf8') : args.blob!
+      // Auto-sniff: an unencrypted Bitwarden JSON export (encrypted:false +
+      // items[]) routes to the Bitwarden importer; anything else is treated as
+      // the portable encrypted dsh-vault document.
+      try {
+        const probe = JSON.parse(blob)
+        if (probe && probe.encrypted === false && Array.isArray(probe.items)) {
+          let added = 0
+          let skipped = 0
+          let updated = 0
+          for (const item of probe.items) {
+            const title = (item.name ?? '').trim()
+            if (!title) { skipped++; continue }
+            const patch: VaultEntryPatch = {}
+            const login = item.login
+            if (login?.username !== undefined) patch.username = login.username
+            if (login?.password !== undefined) patch.password = login.password
+            if (login?.totp !== undefined) patch.otpSecret = login.totp
+            const uri = login?.uris?.find((u: { uri?: string }) => u.uri)?.uri
+            if (uri !== undefined) patch.url = uri
+            if (item.notes) patch.notes = item.notes
+            const fields: Record<string, string> = {}
+            for (const f of item.fields ?? []) {
+              if (f.name !== undefined && f.value !== undefined) fields[f.name] = f.value
+            }
+            for (const key of ['host', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'privateKey']) {
+              if (fields[key] !== undefined) { (patch as unknown as Record<string, unknown>)[key] = fields[key]; delete fields[key] }
+            }
+            if (Object.keys(fields).length > 0) patch.fields = fields
+            const existing = s.list().find(e => e.title === title)
+            if (existing && args.overwrite !== true) { skipped++; continue }
+            if (existing) { await s.update(existing.id, patch); updated++ } else { await s.add({ title, ...patch }); added++ }
+          }
+          return { imported: added + updated, note: `sniffed Bitwarden JSON: added ${added}, updated ${updated}, skipped ${skipped}` }
+        }
+      } catch { /* not JSON or not Bitwarden — fall through to encrypted import */ }
+      const exportPassword = resolveExportPassword(config)
       const count = await s.importEncrypted(blob, exportPassword, args.overwrite === true, args.dryRun === true)
-      return { imported: count }
+      return { imported: count, note: 'imported encrypted dsh-vault document' }
     },
   }))
 
@@ -2415,6 +2454,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'optionally filtered by kind. Writes to <vault dir>/vault-export-<ts>.csv and returns the path.',
     parameters: {
       path: { type: 'string', description: 'Optional absolute output path; defaults to <vault dir>/vault-export-<ts>.csv.' },
+      delimiter: { type: 'string', description: 'CSV delimiter (default ",").' },
       kind: { type: 'string', description: 'Only export entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       includeSecrets: { type: 'boolean', description: 'Include secret columns (password/apiKey/secret/tokens). Default false — the CSV is secret-free for safe handling.' },
       favoriteOnly: { type: 'boolean', description: 'Only export pinned (favorite) entries.' },
@@ -2438,7 +2478,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
         return `"${str.replace(/"/g, '""')}"`
       }
-      const lines = [fields.join(',')]
+      const delim = args.delimiter ?? ','
+      const lines = [fields.join(delim)]
       const MIN_LEN = 12
       const now = Date.now()
       for (const e of entries) {
@@ -2449,7 +2490,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ;(rec as Record<string, unknown>).no2fa = pw.length > 0 && (kind === 'login' || kind === 'ssh') && rec.otpSecret === undefined ? 'true' : 'false'
         ;(rec as Record<string, unknown>).httpSite = typeof rec.url === 'string' && /^http:\/\//i.test(rec.url) ? 'true' : 'false'
         ;(rec as Record<string, unknown>).expired = typeof rec.expiresAt === 'number' && rec.expiresAt < now ? 'true' : 'false'
-        lines.push(fields.map(f => esc(rec[f])).join(','))
+        lines.push(fields.map(f => esc(rec[f])).join(delim))
       }
       const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
@@ -2586,8 +2627,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Create a timestamped backup of the vault file (a copy of the on-disk encrypted '
       + 'document, not a plaintext export). Old backups beyond maxBackups (default 10) are pruned '
       + 'automatically (newest kept). Returns the backup path and retention stats.',
-    parameters: { maxBackups: { type: 'integer', description: 'Keep at most this many backups (default 10, min 1).' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, kept: { type: 'integer', required: true }, pruned: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path} (kept ${v.kept}, pruned ${v.pruned})` }] },
+    parameters: {
+      maxBackups: { type: 'integer', description: 'Keep at most this many backups (default 10, min 1).' },
+      note: { type: 'string', description: 'Optional note returned with the backup (e.g. why it was taken).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, kept: { type: 'integer', required: true }, pruned: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path} (kept ${v.kept}, pruned ${v.pruned})${v.note !== undefined ? ' — ' + v.note : ''}` }] },
     async execute(args) {
       const s = await guardStore()
       const source = resolveVaultPath(config)
@@ -2616,7 +2660,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         try { await unlink(stale); pruned++ } catch { /* best-effort */ }
       }
       void s
-      return { path: backup, kept: Math.min(backups.length + 1, maxBackups), pruned }
+      return { path: backup, kept: Math.min(backups.length + 1, maxBackups), pruned, ...(typeof args.note === 'string' && args.note.length > 0 ? { note: args.note } : {}) }
     },
   }))
 
