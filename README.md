@@ -88,7 +88,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_session_import` | Save session cookies from pasted JSON (devtools export shape) or a raw `Cookie` header string — the no-browser alternative |
 | `vault_session_import_file` | Import a Netscape cookie-jar file (curl `-b` / wget / browser-extension export; the same format `vault_session_export` writes) |
 | `vault_session_list` | List saved login sessions with cookie counts (no values) |
-| `vault_session_export` | Export a saved session as a `Cookie` header value, a Netscape cookie-jar file (curl `-b`), or raw JSON for automation |
+| `vault_session_export` | Export a saved session as a `Cookie` header value, a Netscape cookie-jar file (curl `-b`), raw JSON (Playwright `addCookies` shape), or a ready-to-run Playwright snippet |
 | `vault_session_close` | Close an open browser login session (collected cookies stay in the vault) |
 | `vault_session_prune` | Remove expired cookies from a saved session (session cookies are kept); `preview: true` reports without writing |
 | `vault_copy` | Copy an entry (secrets included) into another named vault |

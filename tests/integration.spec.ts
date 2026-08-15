@@ -2477,6 +2477,26 @@ test('vault_copy copies an entry into another vault', async () => {
   })
 })
 
+test('vault_copy carries cookies on a cookie session entry', async () => {
+  await withContext(async ctx => {
+    const target = `cookiealt-${Date.now()}`
+    const { unlink } = await import('node:fs/promises')
+    const { homedir } = await import('node:os')
+    const { join: j } = await import('node:path')
+    await unlink(j(homedir(), '.dsh', 'vault', `${target}.json`)).catch(() => {})
+    const cookies = [{ name: 'sid', value: 'abc', domain: '.example.com', path: '/', expires: -1, httpOnly: true, secure: false }]
+    const imported = await call(ctx, 'vault_session_import', { title: 'CookieSrc', cookies: JSON.stringify(cookies) }) as { id: string }
+    const r = await call(ctx, 'vault_copy', { id: imported.id, to: target }) as { copied: boolean; reason?: string }
+    assert.equal(r.copied, true, `reason: ${r.reason}`)
+    await call(ctx, 'vault_switch', { name: target })
+    const found = await call(ctx, 'vault_search', { query: 'CookieSrc' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { kind?: string; cookies?: Array<{ name: string; value: string }> } }
+    assert.equal(full.entry.kind, 'cookie')
+    assert.equal((full.entry.cookies ?? []).length, 1)
+    assert.equal(full.entry.cookies![0]!.value, 'abc')
+  })
+})
+
 test('vault_export_csv includes health marker columns', async () => {
   await withContext(async ctx => {
     const { mkdtemp, readFile, rm } = await import('node:fs/promises')
@@ -2987,5 +3007,21 @@ test('vault_session_prune tool removes expired cookies and lists expired counts'
     const after = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ expiredCount?: number; cookieCount?: number }> }
     expect(after.sessions[0]!.expiredCount).toBe(0)
     expect(after.sessions[0]!.cookieCount).toBe(1)
+  })
+})
+
+test('vault_session_export playwright format produces an addCookies snippet', async () => {
+  await withContext(async ctx => {
+    const cookies = [
+      { name: 'sid', value: 'abc', domain: '.example.com', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' },
+    ]
+    const imported = await call(ctx, 'vault_session_import', { title: 'PW', cookies: JSON.stringify(cookies) }) as { id: string }
+    const r = await call(ctx, 'vault_session_export', { id: imported.id, format: 'playwright' }) as { text: string }
+    assert.ok(r.text.includes('await context.addCookies'), 'snippet mentions addCookies')
+    assert.ok(r.text.includes('sameSite: "Lax"'), 'sameSite preserved')
+    assert.ok(r.text.includes('httpOnly: true'), 'httpOnly preserved')
+    assert.ok(r.text.includes('name: "sid"'), 'cookie name present')
+    assert.ok(r.text.includes('domain: ".example.com"'), 'cookie domain present')
+    assert.ok(r.text.includes('expires: -1'), 'session cookie expiry')
   })
 })

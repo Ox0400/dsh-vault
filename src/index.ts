@@ -1496,6 +1496,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(entry.favorite === true ? { favorite: true } : {}),
         ...(entry.rotationDays !== undefined ? { rotationDays: entry.rotationDays } : {}),
         ...(entry.fields !== undefined ? { fields: entry.fields } : {}),
+        ...(entry.cookies !== undefined ? { cookies: entry.cookies } : {}),
       }
       if (existing) {
         await target.update(existing.id, patch)
@@ -3211,11 +3212,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_session_export',
     description: 'Export a saved browser login session (kind "cookie") for automation: as a `Cookie` '
-      + 'request-header value (format "header") or a Netscape cookie-jar file (format "netscape", '
-      + 'compatible with curl -b / wget). Returns the text plus the per-cookie details.',
+      + 'request-header value (format "header"), a Netscape cookie-jar file (format "netscape", '
+      + 'compatible with curl -b / wget), raw JSON (format "json", the Playwright addCookies shape), '
+      + 'or a ready-to-run Playwright snippet (format "playwright"). Returns the text plus the '
+      + 'per-cookie details.',
     parameters: {
       id: { type: 'string', required: true, description: 'Entry id of the saved session (see vault_session_list).' },
-      format: { type: 'string', enum: ['header', 'netscape', 'json'], description: 'Export format (default header).' },
+      format: { type: 'string', enum: ['header', 'netscape', 'json', 'playwright'], description: 'Export format (default header).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { text: { type: 'string', required: true }, cookieCount: { type: 'integer', required: true }, domains: { type: 'array', items: { type: 'string' } }, expiresAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: `${v.cookieCount} cookies —\n${v.text}` }] },
     async execute(args) {
@@ -3228,9 +3231,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const format = args.format ?? 'header'
       const domains = [...new Set(entry.cookies.map(c => c.domain))]
       const expiries = entry.cookies.map(c => c.expires).filter(e => e >= 0)
-      const text = format === 'netscape' ? netscapeJar(entry.cookies)
-        : format === 'json' ? JSON.stringify(entry.cookies, null, 2)
-        : cookieHeader(entry.cookies)
+      let text: string
+      if (format === 'netscape') text = netscapeJar(entry.cookies)
+      else if (format === 'json') text = JSON.stringify(entry.cookies, null, 2)
+      else if (format === 'playwright') text = playwrightSnippet(entry.cookies)
+      else text = cookieHeader(entry.cookies)
       return {
         text,
         cookieCount: entry.cookies.length,
@@ -4757,7 +4762,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Export a saved cookie entry as a Cookie header string (values included —
    * the UI copy button). */
   @Remote('sessionExport')
-  async sessionExport(id: string, format?: 'header' | 'netscape' | 'json'): Promise<{ text: string; cookieCount: number; domains: string[] }> {
+  async sessionExport(id: string, format?: 'header' | 'netscape' | 'json' | 'playwright'): Promise<{ text: string; cookieCount: number; domains: string[] }> {
     const store = await this.guardedStore()
     const entry = store.get(id)
     if (!entry) throw new Error('sessionExport: entry not found')
@@ -4767,6 +4772,7 @@ export class VaultGateway extends TypertRemoteService {
     const fmt = format ?? 'header'
     const text = fmt === 'netscape' ? netscapeJar(entry.cookies)
       : fmt === 'json' ? JSON.stringify(entry.cookies, null, 2)
+      : fmt === 'playwright' ? playwrightSnippet(entry.cookies)
       : cookieHeader(entry.cookies)
     return { text, cookieCount: entry.cookies.length, domains: [...new Set(entry.cookies.map(c => c.domain))] }
   }
@@ -5063,6 +5069,25 @@ function hostFromUrl(url: string): string {
     const match = /^https?:\/\/([^/]+)/i.exec(url)
     return match !== null ? match[1]!.replace(/:\d+$/, '') : ''
   }
+}
+
+/** Build a ready-to-run Playwright snippet that injects the cookies into a
+ * browser context (automation convenience): `await context.addCookies([...])`. */
+function playwrightSnippet(cookies: CookieData[]): string {
+  const rows = cookies.map((c) => {
+    const parts: string[] = [
+      `name: ${JSON.stringify(c.name)}`,
+      `value: ${JSON.stringify(c.value)}`,
+      `domain: ${JSON.stringify(c.domain)}`,
+      `path: ${JSON.stringify(c.path || '/')}`,
+      `expires: ${c.expires}`,
+      `httpOnly: ${c.httpOnly}`,
+      `secure: ${c.secure}`,
+    ]
+    if (c.sameSite !== undefined) parts.push(`sameSite: ${JSON.stringify(c.sameSite)}`)
+    return `  { ${parts.join(', ')} }`
+  })
+  return `// Playwright session cookies (dsh-vault export)\n// Usage: await context.addCookies(COOKIES);\nconst COOKIES = [\n${rows.join(',\n')},\n];`
 }
 
 /** Parse pasted session cookies: a JSON array of cookie objects (devtools

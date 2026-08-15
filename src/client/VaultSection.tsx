@@ -120,7 +120,7 @@ export interface VaultSectionInjected {
   sessionListOpen: () => Promise<Array<{ sessionId: string; url: string; openedAt: number }>>
   sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; updatedAt?: number }>>
   sessionSave: (options: { title: string; cookies: unknown[]; url?: string; overwrite?: boolean }) => Promise<{ saved: number; id: string }>
-  sessionExport: (id: string, format?: 'header' | 'netscape' | 'json') => Promise<{ text: string; cookieCount: number; domains: string[] }>
+  sessionExport: (id: string, format?: 'header' | 'netscape' | 'json' | 'playwright') => Promise<{ text: string; cookieCount: number; domains: string[] }>
   sessionGet: (id: string) => Promise<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>
   sessionPrune: (id: string, preview?: boolean) => Promise<{ pruned: number; remaining: number; note: string }>
 }
@@ -740,7 +740,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Copy a saved session as a Cookie header (or jar) to the clipboard. */
-  async function runSessionExport(id: string, format: 'header' | 'netscape'): Promise<void> {
+  async function runSessionExport(id: string, format: 'header' | 'netscape' | 'playwright'): Promise<void> {
     setBusy(true)
     setMessage(null)
     try {
@@ -1566,6 +1566,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 disabled={busy}
                 title={t('sessionExportJar')}
               >{t('sessionExportJar')}</button>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void runSessionExport(s.id, 'playwright')}
+                disabled={busy}
+                title={t('sessionExportPlaywright')}
+              >{t('sessionExportPlaywright')}</button>
               <button
                 type="button"
                 className={css.dupMerge}
