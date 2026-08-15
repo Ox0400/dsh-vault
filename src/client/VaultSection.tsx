@@ -1103,6 +1103,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     {Object.entries(entry).filter(([k]) => !['id', 'title', 'favorite'].includes(k) && entry[k as keyof VaultSummaryWire] !== undefined).map(([k, v]) => (
                       <span key={k} className={css.detailItem}>
                         <strong>{k}</strong>: {formatDetail(k, v)}
+                        <button
+                          type="button"
+                          className={css.revealButton}
+                          title={t('copyFieldHint')}
+                          onClick={() => void copyValue(entry.id, Array.isArray(v) ? v.join(', ') : String(v))}
+                        >⧉</button>
                       </span>
                     ))}
                   </div>

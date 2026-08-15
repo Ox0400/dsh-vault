@@ -1018,7 +1018,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true }, duplicates: { type: 'integer', required: true }, score: { type: 'integer', required: true }, verdict: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, score ${v.score}/${v.verdict}, ${v.trashCount} trashed, ${v.duplicates} dup groups (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true }, duplicates: { type: 'integer', required: true }, score: { type: 'integer', required: true }, verdict: { type: 'string', required: true }, favoriteCount: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, score ${v.score}/${v.verdict}, ${v.trashCount} trashed, ${v.duplicates} dup groups (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
       const stats = s.stats()
@@ -2288,6 +2288,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             const uri = login?.uris?.find((u: { uri?: string }) => u.uri)?.uri
             if (uri !== undefined) patch.url = uri
             if (item.notes) patch.notes = item.notes
+            if (item.favorite === true) patch.favorite = true
             const fields: Record<string, string> = {}
             for (const f of item.fields ?? []) {
               if (f.name !== undefined && f.value !== undefined) fields[f.name] = f.value
@@ -2494,14 +2495,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey']
       const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color']
       const healthFields = ['weakPassword', 'no2fa', 'httpSite', 'expired']
+      const stampFields = ['createdAt', 'updatedAt']
       const fields = args.includeSecrets === true
-        ? ['title', 'kind', 'username', ...secretFields, ...metaFields, ...healthFields]
-        : ['title', 'kind', 'username', ...metaFields, ...healthFields]
+        ? ['title', 'kind', 'username', ...secretFields, ...metaFields, ...healthFields, ...stampFields]
+        : ['title', 'kind', 'username', ...metaFields, ...healthFields, ...stampFields]
+      const delim = args.delimiter ?? ','
+      // Standard CSV quoting: wrap only when needed, and only escape quotes in
+      // the comma mode (TSV and other delimiters never escape double quotes).
       const esc = (v: unknown): string => {
         const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
-        return `"${str.replace(/"/g, '""')}"`
+        const needsQuote = str.includes(delim) || str.includes('"') || str.includes('\n') || str.includes('\r')
+        if (!needsQuote) return str
+        return `"${str.replace(/"/g, delim === ',' ? '""' : '"')}"`
       }
-      const delim = args.delimiter ?? ','
       const lines = [fields.join(delim)]
       const MIN_LEN = 12
       const now = Date.now()

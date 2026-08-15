@@ -70,6 +70,26 @@ async function call(ctx: Context, name: string, args: Record<string, unknown>): 
   return result.value as Record<string, unknown>
 }
 
+
+/** Parse a simple CSV line into columns (quoted fields supported). */
+function parseCsvLine(line: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let inQ = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!
+    if (inQ) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++ }
+      else if (c === '"') inQ = false
+      else cur += c
+    } else if (c === '"') inQ = true
+    else if (c === ',') { out.push(cur); cur = '' }
+    else cur += c
+  }
+  out.push(cur)
+  return out
+}
+
 test('dsh-vault registers all tools in the registry', async () => {
   await withContext(async ctx => {
     const names = ctx.tools.schemas().map(entry => entry.name).sort()
@@ -2265,10 +2285,13 @@ test('vault_export_csv includeSecrets adds a weakPassword column', async () => {
     const content = await readFile(file, 'utf8')
     assert.ok(content.includes('weakPassword'), 'column present')
     const rows = content.trim().split('\n')
-    const weakRow = rows.find(r => r.includes('CsvWeakA'))!
-    assert.ok(weakRow.includes('"true"'), 'weak flagged true')
-    const okRow = rows.find(r => r.includes('CsvWeakB'))!
-    assert.ok(okRow.includes('"false"'), 'strong flagged false')
+    const header = parseCsvLine(rows[0]!)
+    const weakCol = header.indexOf('weakPassword')
+    assert.ok(weakCol >= 0, 'weakPassword column present')
+    const weakRow = parseCsvLine(rows.find(r => r.includes('CsvWeakA'))!)
+    assert.equal(weakRow[weakCol], 'true', 'weak flagged true')
+    const okRow = parseCsvLine(rows.find(r => r.includes('CsvWeakB'))!)
+    assert.equal(okRow[weakCol], 'false', 'strong flagged false')
     await rm(dir, { recursive: true, force: true })
   })
 })
@@ -2446,10 +2469,13 @@ test('vault_export_csv includes health marker columns', async () => {
     const content = await readFile(file, 'utf8')
     assert.ok(content.includes('no2fa') && content.includes('httpSite') && content.includes('expired'), 'health columns present')
     const rows = content.trim().split('\n')
-    const weakRow = rows.find(r => r.includes('HWeak'))!
-    assert.ok(weakRow.includes('"true"'), 'weak flag true')
-    const httpRow = rows.find(r => r.includes('HHttp'))!
-    assert.ok(httpRow.includes('"true"'), 'http flag true')
+    const header = parseCsvLine(rows[0]!)
+    const weakCol = header.indexOf('weakPassword')
+    const httpCol = header.indexOf('httpSite')
+    const weakRow = parseCsvLine(rows.find(r => r.includes('HWeak'))!)
+    assert.equal(weakRow[weakCol], 'true', 'weak flag true')
+    const httpRow = parseCsvLine(rows.find(r => r.includes('HHttp'))!)
+    assert.equal(httpRow[httpCol], 'true', 'http flag true')
     await rm(dir, { recursive: true, force: true })
   })
 })
@@ -2593,5 +2619,50 @@ test('vault_export_bitwarden emits an empty login object for bare entries', asyn
     assert.ok(item.login !== null, 'login is not null')
     assert.deepEqual(item.login, {}, 'empty login object')
     await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_export_csv TSV delimiter does not corrupt quoted fields', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-tsv-'))
+    await call(ctx, 'vault_add', { title: 'Tsv1', username: 'u"1', password: 'pw' })
+    const file = join(dir, 'out.tsv')
+    await call(ctx, 'vault_export_csv', { path: file, delimiter: '\t' })
+    const content = await readFile(file, 'utf8')
+    assert.ok(content.includes('"u"1"'), 'double quote NOT doubled in TSV mode')
+    assert.ok(!content.includes('u""1'), 'no doubled quote')
+    const file2 = join(dir, 'out.csv')
+    await call(ctx, 'vault_export_csv', { path: file2 })
+    const csv = await readFile(file2, 'utf8')
+    assert.ok(csv.includes('u""1'), 'double quote doubled in CSV mode')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_export_csv includes createdAt/updatedAt columns', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-stamp-'))
+    await call(ctx, 'vault_add', { title: 'Stamp1', password: 'pw' })
+    const file = join(dir, 'out.csv')
+    await call(ctx, 'vault_export_csv', { path: file })
+    const content = await readFile(file, 'utf8')
+    assert.ok(content.includes('createdAt') && content.includes('updatedAt'))
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_stats reports favoriteCount', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'FavCnt' }) as { id: string }
+    await call(ctx, 'vault_pin', { id: a.id })
+    await call(ctx, 'vault_add', { title: 'NotFav' })
+    const stats = await call(ctx, 'vault_stats', {}) as { favoriteCount: number }
+    assert.equal(stats.favoriteCount, 1)
   })
 })
