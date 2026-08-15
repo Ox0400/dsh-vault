@@ -35,6 +35,26 @@ import {
 /** JSON-safe value usable inside an entry's arbitrary `fields` map. */
 export type FieldValue = string | number | boolean | null | FieldValue[] | { [key: string]: FieldValue }
 
+/** One browser cookie collected from a login session (Playwright shape). */
+export interface CookieData {
+  /** Cookie name. */
+  name: string
+  /** Cookie value. */
+  value: string
+  /** Cookie domain (e.g. `.example.com`). */
+  domain: string
+  /** Cookie path (default `/`). */
+  path: string
+  /** Expiry epoch SECONDS; `-1` means a session cookie. */
+  expires: number
+  /** HttpOnly flag. */
+  httpOnly: boolean
+  /** Secure flag. */
+  secure: boolean
+  /** SameSite policy, when the browser reported one. */
+  sameSite?: 'Strict' | 'Lax' | 'None'
+}
+
 /** Entry categories: general login vs. developer credentials. */
 export type VaultEntryKind =
   /** Web/account login (username, email, phone, password). */
@@ -47,6 +67,8 @@ export type VaultEntryKind =
   | 'secret'
   /** OAuth token pair (accessToken, refreshToken, expiresAt). */
   | 'oauth'
+  /** Browser session cookies collected after a login (cookies + url). */
+  | 'cookie'
   /** Generic key/value record via `fields`. */
   | 'custom'
 
@@ -107,6 +129,9 @@ export interface VaultEntry {
   notes?: string
   /** Searchable tags. */
   tags?: string[]
+  /** Browser session cookies (kind `cookie`): the cookies collected after a
+   * login, stored as structured CookieData rows. */
+  cookies?: CookieData[]
   /** Arbitrary additional key/value fields (e.g. region, username hint). */
   fields?: Record<string, FieldValue>
   /** Creation epoch millis. */
@@ -119,7 +144,7 @@ export interface VaultEntry {
 export type VaultEntrySummary = Pick<
   VaultEntry,
   'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags' | 'icon' | 'color'
-> & { updatedAt?: number; createdAt?: number }
+> & { updatedAt?: number; createdAt?: number; cookieCount?: number }
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
 export type VaultEntryPatch = Partial<Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt'>>
@@ -1008,6 +1033,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
     ...(entry.port !== undefined ? { port: entry.port } : {}),
     ...(entry.url !== undefined ? { url: entry.url } : {}),
     ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
+    ...(Array.isArray(entry.cookies) ? { cookieCount: entry.cookies.length } : {}),
   }
 }
 
@@ -1020,7 +1046,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
  * argument can never corrupt an entry. Empty strings are allowed (they mean
  * "clear this field"); absent fields are skipped. */
 function validatePatchTypes(patch: Record<string, unknown>): void {
-  const kindSet = new Set(['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'])
+  const kindSet = new Set(['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'custom'])
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined || value === '') continue
     switch (key) {
@@ -1057,6 +1083,14 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
       case 'tags':
         if (!Array.isArray(value) || value.some(t => typeof t !== 'string')) {
           throw new Error('vault: tags must be an array of strings')
+        }
+        break
+      case 'cookies':
+        if (!Array.isArray(value) || value.some(c => typeof c !== 'object' || c === null
+          || typeof (c as { name?: unknown }).name !== 'string'
+          || typeof (c as { value?: unknown }).value !== 'string'
+          || typeof (c as { domain?: unknown }).domain !== 'string')) {
+          throw new Error('vault: cookies must be an array of { name, value, domain, … }')
         }
         break
       case 'fields':

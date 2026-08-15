@@ -26,12 +26,13 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
+import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore, type CookieData } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
+import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx } from './kdbx.ts'
 import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
@@ -963,6 +964,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             case 'oauth':
               if (!e.accessToken) issues.push('oauth: missing accessToken')
               break
+            case 'cookie':
+              if (!Array.isArray(e.cookies) || e.cookies.length === 0) issues.push('cookie: no cookies stored')
+              else if (e.cookies.some(c => c.value.length === 0)) issues.push('cookie: empty cookie value')
+              break
           }
           perEntry.push({ id: e.id, title: e.title, ok: issues.length === 0, issues })
         }
@@ -996,6 +1001,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           break
         case 'oauth':
           if (!entry.accessToken) issues.push('oauth: missing accessToken')
+          break
+        case 'cookie':
+          if (!Array.isArray(entry.cookies) || entry.cookies.length === 0) issues.push('cookie: no cookies stored')
+          else if (entry.cookies.some(c => c.value.length === 0)) issues.push('cookie: empty cookie value')
           break
       }
       return { ok: issues.length === 0, issues }
@@ -2720,7 +2729,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_import_kdbx',
     description: 'Import entries from a KeePass KDBX database: KDBX 3.1 and 4.x, AES-KDF or Argon2 KDF, '
       + 'AES-256-CBC or ChaCha20 payload cipher, ChaCha20/Salsa20 protected fields, using the open-source '
-      + 'KDBX spec and RFC 9106. Password and optional keyfile supported.',
+      + 'KDBX spec and RFC 9106. Password and optional keyfile supported. NOTE: Argon2 is a pure-JS '
+      + 'implementation — large memory settings (e.g. 64 MiB+) may take several seconds to derive the key.',
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the .kdbx file.' },
       password: { type: 'string', description: 'Database password (empty allowed).' },
@@ -3025,20 +3035,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  // ── vault_import_keychain: import generic passwords from the macOS keychain ─
+  // ── vault_import_keychain: import internet/generic passwords from the macOS keychain ─
   ctx.tools.register(defineTool({
     name: 'vault_import_keychain',
-    description: 'Import generic passwords from the macOS login keychain via the security CLI. '
-      + 'System entries (com.apple.*, iCloud, Wi-Fi, …) are filtered out; fetched entries are cached '
-      + 'for the session so the same one is never re-requested. The FIRST fetch of each entry can '
-      + 'prompt the macOS keychain authorization — choose "Always Allow" there to consent once for '
-      + 'this process. Use preview to list what would be imported without fetching any passwords.',
+    description: 'Import passwords from the macOS login keychain via the security CLI. '
+      + 'By default only internet-password entries (class "inet" — the ones that actually back website '
+      + 'logins, with a server/account/protocol) are read; pass classes=["genp"] to read generic '
+      + 'passwords (Wi-Fi, app secrets, …) instead. System entries (com.apple.*, iCloud, Wi-Fi, …) are '
+      + 'filtered out; fetched entries are cached for the session so the same one is never re-requested. '
+      + 'The FIRST fetch of each entry can prompt the macOS keychain authorization — choose "Always '
+      + 'Allow" there to consent once for this process. Use preview to list what would be imported '
+      + 'without fetching any passwords.',
     parameters: {
       limit: { type: 'integer', description: 'Max entries to fetch (default 10, 1–200).' },
       minLength: { type: 'integer', description: 'Skip passwords shorter than this (default 4).' },
       overwrite: { type: 'boolean', description: 'Update existing entries (default false = incremental).' },
       preview: { type: 'boolean', description: 'Only list the matching entries (no password fetches, no dialogs).' },
       service: { type: 'string', description: 'Only import entries whose service name contains this (case-insensitive).' },
+      classes: { type: 'array', items: { type: 'string' }, description: 'Entry classes to read (default ["inet"]; pass ["genp"] for generic passwords, or both).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -3046,28 +3060,203 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const limit = args.limit === undefined ? 10 : args.limit
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('vault_import_keychain: limit must be an integer 1–200')
+      const rawClasses = Array.isArray(args.classes) ? args.classes.filter((c): c is string => typeof c === 'string') : []
+      const classes = rawClasses.length === 0
+        ? ['inet']
+        : rawClasses.filter(c => c === 'inet' || c === 'genp')
+      if (classes.length === 0) throw new Error('vault_import_keychain: classes must be "inet" and/or "genp"')
       const serviceFilter = typeof args.service === 'string' ? args.service.trim().toLowerCase() : ''
-      const filterEntries = (entries: Array<{ service: string; account: string }>): Array<{ service: string; account: string }> =>
+      const filterEntries = <T extends { service: string }>(entries: T[]): T[] =>
         serviceFilter.length === 0 ? entries : entries.filter(e => e.service.toLowerCase().includes(serviceFilter))
       if (args.preview === true) {
-        const entries = filterEntries(listKeychainEntries(limit * 2)).slice(0, limit)
-        return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching entry/ies — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
+        const entries = filterEntries(listKeychainEntries(limit * 2, classes as Array<'inet' | 'genp'>)).slice(0, limit)
+        return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching entry/ies (${classes.join('+')}) — run without preview to import. WARNING: macOS will prompt for authorization once per entry; in the FIRST dialog choose "Always Allow" so this session is not asked again.` }
       }
       const minLength = args.minLength ?? 4
-      const allCreds = readKeychainPasswords(limit * 2, minLength)
+      const allCreds = readKeychainPasswords(limit * 2, minLength, classes as Array<'inet' | 'genp'>)
       const creds = serviceFilter.length === 0 ? allCreds.slice(0, limit) : allCreds.filter(c => c.service.toLowerCase().includes(serviceFilter)).slice(0, limit)
       let added = 0
       let skipped = 0
       let updated = 0
       for (const c of creds) {
-        const title = c.service
+        const title = c.class === 'inet' ? `${c.service} (${c.account})` : c.service
         const existing = s.list().find(e => e.title === title)
         if (existing && args.overwrite !== true) { skipped++; continue }
-        const patch: VaultEntryPatch = { username: c.account, password: c.password, notes: 'imported from macOS keychain' }
+        const patch: VaultEntryPatch = {
+          username: c.account,
+          password: c.password,
+          ...(c.class === 'inet' ? { host: c.service } : {}),
+          ...(c.class === 'inet' && c.protocol !== undefined ? { url: `https://${c.service}` } : {}),
+          notes: `imported from macOS keychain (${c.class})`,
+        }
         if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
-      return { added, skipped, updated, note: `Keychain import: ${added} added, ${updated} updated, ${skipped} skipped` }
+      return { added, skipped, updated, note: `Keychain import (${classes.join('+')}): ${added} added, ${updated} updated, ${skipped} skipped` }
+    },
+  }))
+
+  // ── vault_session_open: open a headed browser login session ──────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_session_open',
+    description: 'Open a real browser window at the given URL so the user can log in manually '
+      + '(password, 2FA, captcha, …). The session stays open until vault_session_collect or '
+      + 'vault_session_close is called. After the user finishes logging in, call '
+      + 'vault_session_collect with the returned sessionId to save the session cookies into the vault '
+      + '— including HttpOnly session cookies, which a page script can never read. '
+      + 'This is the portable way to capture login state for sites that block embedding. '
+      + 'Requires playwright-core and a Chromium build (the standard Playwright cache or a system browser).',
+    parameters: {
+      url: { type: 'string', required: true, description: 'Site to open, e.g. "https://example.com/login" (https:// is added when missing).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { sessionId: { type: 'string', required: true }, url: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `login session opened at ${v.url} — sessionId ${v.sessionId}. Have the user log in, then call vault_session_collect.` }] },
+    async execute(args) {
+      assertWritable('vault_session_open')
+      const session = await openSession(args.url)
+      return { sessionId: session.id, url: session.url, note: `Browser window opened at ${session.url}. Ask the user to log in, then collect the session cookies.` }
+    },
+  }))
+
+  // ── vault_session_collect: save a browser session's cookies into the vault ─
+  ctx.tools.register(defineTool({
+    name: 'vault_session_collect',
+    description: 'Collect every cookie of a browser login session (opened with vault_session_open) and '
+      + 'save them into the vault as a "cookie" entry under the given title. The browser window stays '
+      + 'open (call vault_session_close when done, or open another). Returns how many cookies were saved.',
+    parameters: {
+      sessionId: { type: 'string', required: true, description: 'Session id returned by vault_session_open.' },
+      title: { type: 'string', required: true, description: 'Vault entry title, e.g. "GitHub session".' },
+      url: { type: 'string', description: 'Site URL stored on the entry (defaults to the session URL).' },
+      overwrite: { type: 'boolean', description: 'Replace an existing entry with the same title (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { saved: { type: 'integer', required: true }, id: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `saved ${v.saved} cookies as "${v.note}"` }] },
+    async execute(args) {
+      assertWritable('vault_session_collect')
+      const s = await guardStore()
+      const cookies = await collectSessionCookies(args.sessionId)
+      const title = args.title.trim()
+      if (title.length === 0) throw new Error('vault_session_collect: title is required')
+      const url = typeof args.url === 'string' && args.url.trim().length > 0 ? args.url.trim() : undefined
+      const existing = s.list().find(e => e.title === title)
+      const patch: VaultEntryPatch = {
+        kind: 'cookie',
+        ...(url !== undefined ? { url } : {}),
+        cookies,
+        notes: `collected from browser login session (${cookies.length} cookies, ${new Date().toISOString()})`,
+      }
+      if (existing && args.overwrite !== true) throw new Error(`vault_session_collect: entry "${title}" already exists — pass overwrite: true to replace it`)
+      let id: string
+      if (existing) { await s.update(existing.id, patch); id = existing.id }
+      else { const entry = await s.add({ title, ...patch }); id = entry.id }
+      return { saved: cookies.length, id, note: title }
+    },
+  }))
+
+  // ── vault_session_close: close an open browser login session ──────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_session_close',
+    description: 'Close a browser login session opened with vault_session_open (closes the window). '
+      + 'Collected cookies are already stored in the vault and are unaffected. Safe to call more than once.',
+    parameters: {
+      sessionId: { type: 'string', required: true, description: 'Session id returned by vault_session_open.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { closed: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.closed ? 'session closed' : 'session already closed' }] },
+    async execute(args) {
+      const before = openSessionCount()
+      await closeSession(args.sessionId)
+      return { closed: before > openSessionCount() }
+    },
+  }))
+
+  // ── vault_session_list: list saved cookie entries ─────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_session_list',
+    description: 'List saved browser login sessions (entries of kind "cookie") with their cookie counts — '
+      + 'no cookie values are returned. Use vault_session_export to get a Cookie header or Netscape jar '
+      + 'for a saved session (for curl/requests automation), or vault_get to read the full entry.',
+    parameters: {
+      query: { type: 'string', description: 'Optional text filter on title/url/domain.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { sessions: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} session(s): ${(v.sessions as Array<{ title: string; cookieCount?: number }>).map(s => `${s.title} (${s.cookieCount ?? 0} cookies)`).join(', ')}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const needle = typeof args.query === 'string' ? args.query.trim().toLowerCase() : ''
+      const sessions = s.list()
+        .filter(e => e.kind === 'cookie')
+        .filter(e => needle.length === 0 || e.title.toLowerCase().includes(needle) || (e.url ?? '').toLowerCase().includes(needle))
+        .map(e => ({ id: e.id, title: e.title, ...(e.url !== undefined ? { url: e.url } : {}), cookieCount: e.cookies?.length ?? 0, updatedAt: e.updatedAt }))
+      return { sessions, count: sessions.length }
+    },
+  }))
+
+  // ── vault_session_export: export a saved session as Cookie header / Netscape jar ─
+  ctx.tools.register(defineTool({
+    name: 'vault_session_export',
+    description: 'Export a saved browser login session (kind "cookie") for automation: as a `Cookie` '
+      + 'request-header value (format "header") or a Netscape cookie-jar file (format "netscape", '
+      + 'compatible with curl -b / wget). Returns the text plus the per-cookie details.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id of the saved session (see vault_session_list).' },
+      format: { type: 'string', enum: ['header', 'netscape', 'json'], description: 'Export format (default header).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { text: { type: 'string', required: true }, cookieCount: { type: 'integer', required: true }, domains: { type: 'array', items: { type: 'string' } }, expiresAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: `${v.cookieCount} cookies —\n${v.text}` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) throw new Error('vault_session_export: entry not found')
+      if ((entry.kind ?? 'login') !== 'cookie' || !Array.isArray(entry.cookies)) {
+        throw new Error('vault_session_export: entry is not a saved cookie session')
+      }
+      const format = args.format ?? 'header'
+      const domains = [...new Set(entry.cookies.map(c => c.domain))]
+      const expiries = entry.cookies.map(c => c.expires).filter(e => e >= 0)
+      const text = format === 'netscape' ? netscapeJar(entry.cookies)
+        : format === 'json' ? JSON.stringify(entry.cookies, null, 2)
+        : cookieHeader(entry.cookies)
+      return {
+        text,
+        cookieCount: entry.cookies.length,
+        domains,
+        ...(expiries.length > 0 ? { expiresAt: Math.max(...expiries) * 1000 } : {}),
+      }
+    },
+  }))
+
+  // ── vault_session_import: save cookies pasted as JSON/header text ─────────
+  ctx.tools.register(defineTool({
+    name: 'vault_session_import',
+    description: 'Save browser session cookies directly from pasted text: a JSON array of '
+      + '{name, value, domain, path?, expires?, httpOnly?, secure?, sameSite?} objects (the shape '
+      + 'browser devtools export), or a raw `Cookie` header string ("name=value; name2=value2"). '
+      + 'This is the no-browser alternative to vault_session_open + vault_session_collect: paste the '
+      + 'cookies from an existing logged-in browser session. Saves them as a "cookie" entry.',
+    parameters: {
+      title: { type: 'string', required: true, description: 'Vault entry title, e.g. "GitHub session".' },
+      cookies: { type: 'string', required: true, description: 'JSON array of cookie objects or a Cookie header string.' },
+      url: { type: 'string', description: 'Site URL stored on the entry.' },
+      overwrite: { type: 'boolean', description: 'Replace an existing entry with the same title (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { saved: { type: 'integer', required: true }, id: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `saved ${v.saved} cookies` }] },
+    async execute(args) {
+      assertWritable('vault_session_import')
+      const s = await guardStore()
+      const title = args.title.trim()
+      if (title.length === 0) throw new Error('vault_session_import: title is required')
+      const cookies = parsePastedCookies(args.cookies)
+      if (cookies.length === 0) throw new Error('vault_session_import: no cookies parsed from the input')
+      const url = typeof args.url === 'string' && args.url.trim().length > 0 ? args.url.trim() : undefined
+      const existing = s.list().find(e => e.title === title)
+      const patch: VaultEntryPatch = {
+        kind: 'cookie',
+        ...(url !== undefined ? { url } : {}),
+        cookies,
+        notes: `imported from pasted text (${cookies.length} cookies, ${new Date().toISOString()})`,
+      }
+      if (existing && args.overwrite !== true) throw new Error(`vault_session_import: entry "${title}" already exists — pass overwrite: true to replace it`)
+      let id: string
+      if (existing) { await s.update(existing.id, patch); id = existing.id }
+      else { const entry = await s.add({ title, ...patch }); id = entry.id }
+      return { saved: cookies.length, id, note: title }
     },
   }))
 
@@ -3637,8 +3826,8 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('backup')
   async backup(maxBackups?: number): Promise<{ path: string; kept: number; pruned: number }> {
     const max = maxBackups ?? this.backupRetention
-    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
-    const source = this.vaultPath ?? defaultVaultPath(this.vaultName)
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
+    const source = this.vaultPath ?? defaultVaultPath(this.activeName)
     const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
     const raw = await readFile(source, 'utf8')
     await mkdir(dir, { recursive: true, mode: 0o700 })
@@ -3658,7 +3847,7 @@ export class VaultGateway extends TypertRemoteService {
 
   @Remote('backupStatus')
   async backupStatus(): Promise<{ daysSinceBackup: number; backups: number }> {
-    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
     const backups: number[] = []
     try {
       const entries = await readdir(dir)
@@ -4111,28 +4300,39 @@ export class VaultGateway extends TypertRemoteService {
     return { added, skipped, updated, note: `Bitwarden encrypted import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
-  /** Preview or import macOS keychain entries (preview never prompts). */
+  /** Preview or import macOS keychain entries (preview never prompts).
+   * Internet passwords (class "inet") are read by default; pass
+   * `classes: ["genp"]` for generic passwords. */
   @Remote('keychainImport')
-  async keychainImport(options?: { limit?: number; overwrite?: boolean; preview?: boolean }): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async keychainImport(options?: { limit?: number; overwrite?: boolean; preview?: boolean; classes?: Array<'inet' | 'genp'> }): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const limit = options?.limit ?? 10
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
       throw new Error('keychainImport: limit must be an integer 1–200')
     }
+    const raw = Array.isArray(options?.classes) ? (options!.classes as string[]).filter(c => c === 'inet' || c === 'genp') : []
+    const classes = raw.length === 0 ? ['inet'] : raw
     if (options?.preview === true) {
-      const entries = listKeychainEntries(limit)
-      return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
+      const entries = listKeychainEntries(limit, classes as Array<'inet' | 'genp'>)
+      return { added: 0, skipped: 0, updated: 0, note: `keychain preview: ${entries.length} matching (${classes.join('+')}) — run without preview to import (first fetch may prompt for authorization; choose "Always Allow")` }
     }
-    const creds = readKeychainPasswords(limit)
+    const creds = readKeychainPasswords(limit, 4, classes as Array<'inet' | 'genp'>)
     let added = 0, skipped = 0, updated = 0
     for (const c of creds) {
-      const existing = store.list().find(e => e.title === c.service)
+      const title = c.class === 'inet' ? `${c.service} (${c.account})` : c.service
+      const existing = store.list().find(e => e.title === title)
       if (existing && options?.overwrite !== true) { skipped++; continue }
-      const patch: VaultEntryPatch = { username: c.account, password: c.password, notes: 'imported from macOS keychain' }
+      const patch: VaultEntryPatch = {
+        username: c.account,
+        password: c.password,
+        ...(c.class === 'inet' ? { host: c.service } : {}),
+        ...(c.class === 'inet' && c.protocol !== undefined ? { url: `https://${c.service}` } : {}),
+        notes: `imported from macOS keychain (${c.class})`,
+      }
       if (existing) { await store.update(existing.id, patch); updated++ }
-      else { await store.add({ title: c.service, ...patch }); added++ }
+      else { await store.add({ title, ...patch }); added++ }
     }
-    return { added, skipped, updated, note: `keychain import: ${added} added, ${updated} updated, ${skipped} skipped` }
+    return { added, skipped, updated, note: `keychain import (${classes.join('+')}): ${added} added, ${updated} updated, ${skipped} skipped` }
   }
 
   /** Estimate a password's strength for the editor's live meter. */
@@ -4351,6 +4551,107 @@ export class VaultGateway extends TypertRemoteService {
       code: totp(input, nowMs),
       ...(label !== undefined ? { label } : {}),
       secondsRemaining: 30 - (Math.floor(nowMs / 1000) % 30),
+    }
+  }
+
+  /** Open a headed browser login session; returns the session handle. */
+  @Remote('sessionOpen')
+  async sessionOpen(url: string): Promise<{ sessionId: string; url: string }> {
+    this.assertWritable('sessionOpen')
+    const session = await openSession(url)
+    return { sessionId: session.id, url: session.url }
+  }
+
+  /** Collect the cookies of an open browser session (no vault write here —
+   * the UI saves them via sessionSave). */
+  @Remote('sessionCollect')
+  async sessionCollect(sessionId: string): Promise<{ cookies: CookieData[]; count: number }> {
+    const cookies = await collectSessionCookies(sessionId)
+    return { cookies, count: cookies.length }
+  }
+
+  /** Close a browser login session. */
+  @Remote('sessionClose')
+  async sessionClose(sessionId: string): Promise<{ closed: boolean }> {
+    const before = openSessionCount()
+    await closeSession(sessionId)
+    return { closed: before > openSessionCount() }
+  }
+
+  /** List open browser sessions (no secrets). */
+  @Remote('sessionListOpen')
+  async sessionListOpen(): Promise<Array<{ sessionId: string; url: string; openedAt: number }>> {
+    return listSessions().map(s => ({ sessionId: s.id, url: s.url, openedAt: s.openedAt }))
+  }
+
+  /** List saved cookie entries (no values). */
+  @Remote('sessionListSaved')
+  async sessionListSaved(): Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>> {
+    const store = await this.guardedStore()
+    return store.list()
+      .filter(e => e.kind === 'cookie')
+      .map(e => ({
+        id: e.id,
+        title: e.title,
+        ...(e.url !== undefined ? { url: e.url } : {}),
+        cookieCount: e.cookies?.length ?? 0,
+        ...(e.updatedAt !== undefined ? { updatedAt: e.updatedAt } : {}),
+      }))
+  }
+
+  /** Save cookies (from a collected session or pasted text) as a cookie entry. */
+  @Remote('sessionSave')
+  async sessionSave(options: { title: string; cookies: CookieData[]; url?: string; overwrite?: boolean }): Promise<{ saved: number; id: string }> {
+    this.assertWritable('sessionSave')
+    const store = await this.guardedStore()
+    const title = options.title.trim()
+    if (title.length === 0) throw new Error('sessionSave: title is required')
+    if (!Array.isArray(options.cookies) || options.cookies.length === 0) throw new Error('sessionSave: no cookies to save')
+    const existing = store.list().find(e => e.title === title)
+    if (existing && options.overwrite !== true) throw new Error(`sessionSave: entry "${title}" already exists — pass overwrite: true to replace it`)
+    const patch: VaultEntryPatch = {
+      kind: 'cookie',
+      ...(typeof options.url === 'string' && options.url.trim().length > 0 ? { url: options.url.trim() } : {}),
+      cookies: options.cookies,
+      notes: `saved ${options.cookies.length} session cookies (${new Date().toISOString()})`,
+    }
+    if (existing) { await store.update(existing.id, patch); return { saved: options.cookies.length, id: existing.id } }
+    const entry = await store.add({ title, ...patch })
+    return { saved: options.cookies.length, id: entry.id }
+  }
+
+  /** Export a saved cookie entry as a Cookie header string (values included —
+   * the UI copy button). */
+  @Remote('sessionExport')
+  async sessionExport(id: string, format?: 'header' | 'netscape' | 'json'): Promise<{ text: string; cookieCount: number; domains: string[] }> {
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) throw new Error('sessionExport: entry not found')
+    if ((entry.kind ?? 'login') !== 'cookie' || !Array.isArray(entry.cookies)) {
+      throw new Error('sessionExport: entry is not a saved cookie session')
+    }
+    const fmt = format ?? 'header'
+    const text = fmt === 'netscape' ? netscapeJar(entry.cookies)
+      : fmt === 'json' ? JSON.stringify(entry.cookies, null, 2)
+      : cookieHeader(entry.cookies)
+    return { text, cookieCount: entry.cookies.length, domains: [...new Set(entry.cookies.map(c => c.domain))] }
+  }
+
+  /** Read the full cookie entry (values) for the UI detail view. */
+  @Remote('sessionGet')
+  async sessionGet(id: string): Promise<{ id: string; title: string; url?: string; cookies: CookieData[]; notes?: string }> {
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) throw new Error('sessionGet: entry not found')
+    if ((entry.kind ?? 'login') !== 'cookie' || !Array.isArray(entry.cookies)) {
+      throw new Error('sessionGet: entry is not a saved cookie session')
+    }
+    return {
+      id: entry.id,
+      title: entry.title,
+      ...(entry.url !== undefined ? { url: entry.url } : {}),
+      cookies: entry.cookies,
+      ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
     }
   }
 }
@@ -4597,6 +4898,50 @@ function validateLimit(value: number | undefined, tool: string): number {
 /** Add a `dryRun` flag to an import tool's parameters. */
 function withDryRun<T extends Record<string, unknown>>(params: T, description = 'Preview what would be imported without writing anything (default false).'): T {
   return { ...params, dryRun: { type: 'boolean' as const, description } }
+}
+
+/** Parse pasted session cookies: a JSON array of cookie objects (devtools
+ * export shape) or a raw `Cookie` header string ("a=1; b=2"). Returns a
+ * normalized CookieData list, or throws when nothing usable is found. */
+function parsePastedCookies(text: string): CookieData[] {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) throw new Error('vault_session_import: input is empty')
+  const out: CookieData[] = []
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      throw new Error('vault_session_import: invalid JSON — expected an array of cookie objects or a Cookie header string')
+    }
+    const rows = Array.isArray(parsed) ? parsed : (typeof parsed === 'object' && parsed !== null ? [parsed] : [])
+    for (const row of rows) {
+      if (typeof row !== 'object' || row === null) continue
+      const r = row as Record<string, unknown>
+      if (typeof r.name !== 'string' || typeof r.value !== 'string' || typeof r.domain !== 'string') continue
+      out.push({
+        name: r.name,
+        value: r.value,
+        domain: r.domain,
+        path: typeof r.path === 'string' ? r.path : '/',
+        expires: typeof r.expires === 'number' ? r.expires : -1,
+        httpOnly: r.httpOnly === true,
+        secure: r.secure === true,
+        ...(r.sameSite === 'Strict' || r.sameSite === 'Lax' || r.sameSite === 'None' ? { sameSite: r.sameSite } : {}),
+      })
+    }
+  } else {
+    // Cookie header: "name=value; name2=value2"
+    for (const pair of trimmed.split(';')) {
+      const eq = pair.indexOf('=')
+      if (eq <= 0) continue
+      const name = pair.slice(0, eq).trim()
+      const value = pair.slice(eq + 1).trim()
+      if (name.length === 0) continue
+      out.push({ name, value, domain: '', path: '/', expires: -1, httpOnly: false, secure: false })
+    }
+  }
+  return out
 }
 
 /** A summary view of an entry without timestamps or secrets (used by update output). */

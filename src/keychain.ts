@@ -2,8 +2,14 @@
  * macOS Keychain importer for dsh-vault.
  *
  * Uses the `security` CLI: `dump-keychain` enumerates generic-password
- * entries (service + account, no secrets), then `find-generic-password -w`
- * fetches each password. System entries (com.apple.*, etc.) are filtered out.
+ * (`genp`) and internet-password (`inet`) entries (no secrets), then
+ * `find-generic-password -w` / `find-internet-password -w` fetches each
+ * password. System entries (com.apple.*, etc.) are filtered out.
+ *
+ * Internet-password entries are the ones that actually back website logins
+ * (they carry a server, account and protocol); generic-password entries are
+ * mostly app-internal secrets (Wi-Fi, system services, …), so by default the
+ * importer prefers `inet` entries and only falls back to `genp` when asked.
  *
  * To avoid repeatedly prompting for the keychain password: fetched entries are
  * cached for the session (same entry never re-fetched), the default batch is
@@ -16,14 +22,31 @@
 
 import { execFileSync } from 'node:child_process'
 
-export interface KeychainCredential {
+export type KeychainEntryClass = 'genp' | 'inet'
+
+export interface KeychainEntry {
+  /** `genp` (generic password) or `inet` (internet password). */
+  class: KeychainEntryClass
+  /** Generic password: the service name. Internet password: the server host. */
   service: string
+  /** Account / username. */
   account: string
+  /** Internet-password only: protocol code such as `htps`, `http`, `smtp`. */
+  protocol?: string
+  /** Internet-password only: TCP port, when the entry carries one. */
+  port?: string
+}
+
+export interface KeychainCredential extends KeychainEntry {
   password: string
 }
 
-/** Session cache: keychainPath\0service\0account → password. Re-fetching the
- * same entry is what caused repeated authorization dialogs. */
+/** Session cache: keychainPath\0class\0service\0account → password. macOS
+ * authorizes per (program, entry), so re-fetching the same entry in this
+ * process would trigger another dialog; the cache avoids that. There is NO
+ * one-shot CLI export: `security dump-keychain -d` prompts once PER entry too
+ * (and worse, blocks the whole dump), so the only mitigations are this cache,
+ * small batches, and the preview mode. */
 const fetchCache = new Map<string, string>()
 
 /** Number of entries currently cached (diagnostics/tests). */
@@ -36,18 +59,35 @@ export function clearKeychainCache(): void {
   fetchCache.clear()
 }
 
-const SYSTEM_PREFIXES = ['com.apple.', 'com.apple', 'AirPlay', 'Microsoft', 'iCloud', 'CloudKit', 'Wi-Fi', 'Bluetooth']
+const SYSTEM_PREFIXES = ['com.apple.', 'com.apple', 'AirPlay', 'Microsoft', 'iCloud', 'CloudKit', 'Wi-Fi', 'Bluetooth', 'AirDrop', 'App Store', 'iTunes', 'FaceTime', 'Messages', 'iMessage']
 
-/** Parse a `security dump-keychain` listing into (service, account) pairs. */
-export function parseDump(dump: string): Array<{ service: string; account: string }> {
+/** Parse a `security dump-keychain` listing into typed (class, service,
+ * account, …) pairs. Both `genp` and `inet` classes are understood. */
+export function parseDump(dump: string): KeychainEntry[] {
   const blocks = dump.split(/\n(?=keychain:)/)
-  const out: Array<{ service: string; account: string }> = []
+  const out: KeychainEntry[] = []
   for (const block of blocks) {
-    if (!block.includes('class: "genp"')) continue
-    const svce = /"svce"<blob>="([^"]*)"/.exec(block)?.[1]
-    const acct = /"acct"<blob>="([^"]*)"/.exec(block)?.[1]
-    if (!svce || !acct) continue
-    out.push({ service: svce, account: acct })
+    const cls = /class: "(genp|inet)"/.exec(block)?.[1] as KeychainEntryClass | undefined
+    if (cls !== 'genp' && cls !== 'inet') continue
+    if (cls === 'genp') {
+      const svce = /"svce"<blob>="([^"]*)"/.exec(block)?.[1]
+      const acct = /"acct"<blob>="([^"]*)"/.exec(block)?.[1]
+      if (!svce || !acct) continue
+      out.push({ class: 'genp', service: svce, account: acct })
+    } else {
+      const srvr = /"srvr"<blob>="([^"]*)"/.exec(block)?.[1]
+      const acct = /"acct"<blob>="([^"]*)"/.exec(block)?.[1]
+      const ptcl = /"ptcl"<uint32>="([^"]*)"/.exec(block)?.[1]
+      const port = /"port"<uint32>=0x([0-9a-fA-F]+)/.exec(block)?.[1]
+      if (!srvr || !acct) continue
+      out.push({
+        class: 'inet',
+        service: srvr,
+        account: acct,
+        ...(ptcl !== undefined ? { protocol: ptcl } : {}),
+        ...(port !== undefined ? { port: String(parseInt(port, 16)) } : {}),
+      })
+    }
   }
   return out
 }
@@ -57,41 +97,63 @@ export function isUserCredential(service: string, account: string): boolean {
   if (service.length === 0 || account.length === 0) return false
   if (SYSTEM_PREFIXES.some(p => service.startsWith(p) || account.startsWith(p))) return false
   if (/^[0-9a-f]{40}$/i.test(account) && !service.includes('.')) return false // hash-like system ids
+  if (service === 'login' || service === 'login.keychain') return false
   return true
 }
 
+/** Fetch one entry's password without hitting the per-entry dialog twice. */
+function fetchPassword(entry: KeychainEntry): string | undefined {
+  const cacheKey = `${entry.class}\u0000${entry.service}\u0000${entry.account}`
+  const cached = fetchCache.get(cacheKey)
+  if (cached !== undefined) return cached
+  try {
+    const args = entry.class === 'inet'
+      ? ['find-internet-password', '-s', entry.service, '-a', entry.account, '-w']
+      : ['find-generic-password', '-s', entry.service, '-a', entry.account, '-w']
+    const password = execFileSync('security', args, {
+      encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024,
+    }).replace(/\s+$/, '')
+    fetchCache.set(cacheKey, password)
+    return password
+  } catch {
+    return undefined // unreadable entry — skip
+  }
+}
+
 /**
- * Enumerate and fetch generic-password entries from the login keychain.
+ * Enumerate and fetch entries from the login keychain.
  * @param limit - max entries to fetch (the CLI is called once per entry).
  * @param minLength - skip passwords shorter than this.
+ * @param classes - which entry classes to read; internet passwords (`inet`)
+ *   back website logins and are the useful kind, so they are the default.
  */
-export function readKeychainPasswords(limit = 50, minLength = 4): KeychainCredential[] {
+export function readKeychainPasswords(
+  limit = 50,
+  minLength = 4,
+  classes: KeychainEntryClass[] = ['inet'],
+): KeychainCredential[] {
   const dump = execFileSync('security', ['dump-keychain'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  const pairs = parseDump(dump).filter(p => isUserCredential(p.service, p.account))
+  const entries = parseDump(dump)
+    .filter(e => classes.includes(e.class))
+    .filter(e => isUserCredential(e.service, e.account))
   const out: KeychainCredential[] = []
-  for (const pair of pairs) {
+  for (const entry of entries) {
     if (out.length >= limit) break
-    const cacheKey = `${pair.service}\u0000${pair.account}`
-    const cached = fetchCache.get(cacheKey)
-    if (cached !== undefined) {
-      if (cached.length >= minLength) out.push({ service: pair.service, account: pair.account, password: cached })
-      continue
-    }
-    try {
-      const password = execFileSync(
-        'security', ['find-generic-password', '-s', pair.service, '-a', pair.account, '-w'],
-        { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 },
-      ).replace(/\s+$/, '')
-      fetchCache.set(cacheKey, password)
-      if (password.length < minLength) continue
-      out.push({ service: pair.service, account: pair.account, password })
-    } catch { /* unreadable entry — skip */ }
+    const password = fetchPassword(entry)
+    if (password === undefined || password.length < minLength) continue
+    out.push({ ...entry, password })
   }
   return out
 }
 
 /** Enumerate matching entries WITHOUT fetching passwords (no dialogs). */
-export function listKeychainEntries(limit = 100): Array<{ service: string; account: string }> {
+export function listKeychainEntries(
+  limit = 100,
+  classes: KeychainEntryClass[] = ['inet'],
+): KeychainEntry[] {
   const dump = execFileSync('security', ['dump-keychain'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  return parseDump(dump).filter(p => isUserCredential(p.service, p.account)).slice(0, limit)
+  return parseDump(dump)
+    .filter(e => classes.includes(e.class))
+    .filter(e => isUserCredential(e.service, e.account))
+    .slice(0, limit)
 }

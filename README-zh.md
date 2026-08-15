@@ -78,9 +78,15 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_import_1password` / `vault_import_1pif` | 1Password 1PUX（ZIP）与旧版 1PIF 文本导出 |
 | `vault_import_enpass` | Enpass JSON 导出（文件夹→标签、类型化字段、TOTP） |
 | `vault_import_keepass_xml` | KeePass 2.x XML 导出（明文或 ****** 掩码值） |
-| `vault_import_chrome` / `vault_import_keychain` | 从 Chrome Login Data（macOS 钥匙串 / Linux 钥匙环或 peanuts / Windows DPAPI）或 macOS 钥匙串导入密码（会话缓存 + 预览,避免授权弹窗轰炸）；所有文件导入均支持 dryRun 预览 |
+| `vault_import_chrome` / `vault_import_keychain` | 从 Chrome Login Data（macOS 钥匙串 / Linux 钥匙环或 peanuts / Windows DPAPI）或 macOS 钥匙串导入密码（默认只读互联网密码 `inet`——真正用于网站登录的条目,`classes: ["genp"]` 可改读通用密码；会话缓存 + 预览,避免授权弹窗轰炸）；所有文件导入均支持 dryRun 预览 |
 | `vault_import_firefox` | Firefox 配置导入（logins.json + key4.db,NSS 3DES / PBES2-AES,支持主密码） |
 | `vault_search_system` | 在 Chrome / 钥匙串中搜索站点与用户名——绝不暴露密码 |
+| `vault_session_open` | 在真实浏览器窗口中打开指定网址,供用户手动登录（密码、二次验证、验证码）——对禁止嵌入的网站也能捕获登录态 |
+| `vault_session_collect` | 收集已打开浏览器会话的全部 cookie（含 HttpOnly）,保存为 `cookie` 条目 |
+| `vault_session_import` | 从粘贴的 JSON cookie 数组（开发者工具导出格式）或原始 `Cookie` 头字符串保存会话 cookie——无需浏览器的替代方案 |
+| `vault_session_list` | 列出已保存的登录会话与 cookie 数量（不含值） |
+| `vault_session_export` | 将会话导出为 `Cookie` 请求头、Netscape cookie-jar 文件（curl `-b`）或原始 JSON,供自动化任务使用 |
+| `vault_session_close` | 关闭已打开的浏览器登录会话（已收集的 cookie 仍保留在保险库中） |
 | `vault_copy` | 复制条目（含密钥）到另一个命名保险库 |
 | `vault_templates` | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格） |
 

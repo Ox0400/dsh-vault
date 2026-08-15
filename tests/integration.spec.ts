@@ -170,6 +170,12 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_search_advanced',
       'vault_search_history',
       'vault_search_system',
+      'vault_session_close',
+      'vault_session_collect',
+      'vault_session_export',
+      'vault_session_import',
+      'vault_session_list',
+      'vault_session_open',
       'vault_set_icon',
       'vault_stats',
       'vault_strength',
@@ -2836,4 +2842,54 @@ test('vault_export document carries the source vault name', async () => {
     await rm(dir, { recursive: true, force: true })
     delete process.env.DSH_VAULT_EXPORT_PW9
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW9' })
+})
+
+test('vault_session_import → vault_session_list → vault_session_export round trip', async () => {
+  await withContext(async ctx => {
+    const cookies = [
+      { name: 'sid', value: 'abc123', domain: 'example.com', path: '/', expires: -1, httpOnly: true, secure: false },
+      { name: 'theme', value: 'dark', domain: '.example.com', path: '/', expires: 1767225600, httpOnly: false, secure: true, sameSite: 'Lax' },
+    ]
+    const imported = await call(ctx, 'vault_session_import', { title: 'GH session', cookies: JSON.stringify(cookies), url: 'https://github.com/login' }) as { saved: number; id: string }
+    assert.equal(imported.saved, 2)
+
+    const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ id: string; title: string; cookieCount?: number }> }
+    assert.equal(listed.sessions.length, 1)
+    assert.equal(listed.sessions[0]!.title, 'GH session')
+    assert.equal(listed.sessions[0]!.cookieCount, 2)
+
+    const header = await call(ctx, 'vault_session_export', { id: imported.id, format: 'header' }) as { text: string }
+    assert.equal(header.text, 'sid=abc123; theme=dark')
+
+    const jar = await call(ctx, 'vault_session_export', { id: imported.id, format: 'netscape' }) as { text: string }
+    assert.ok(jar.text.includes('.example.com\tTRUE\t/\tTRUE\t1767225600\ttheme\tdark'))
+
+    // The cookie entry is searchable and its cookies survive a reload.
+    const full = await call(ctx, 'vault_get', { id: imported.id }) as { found: boolean; entry: { kind?: string; cookies?: unknown[] } }
+    assert.equal(full.found, true)
+    assert.equal(full.entry.kind, 'cookie')
+    assert.equal((full.entry.cookies ?? []).length, 2)
+  })
+})
+
+test('vault_session_import accepts a raw Cookie header string', async () => {
+  await withContext(async ctx => {
+    const imported = await call(ctx, 'vault_session_import', { title: 'Header session', cookies: 'a=1; b=2; c=' }) as { saved: number }
+    // a and b parse; c has an empty value and is still a valid cookie pair.
+    assert.equal(imported.saved, 3)
+    const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ cookieCount?: number }> }
+    assert.equal(listed.sessions[0]!.cookieCount, 3)
+  })
+})
+
+test('vault_session_import rejects duplicates and empty input', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_session_import', { title: 'S', cookies: '[{"name":"a","value":"1","domain":"x.io"}]' })
+    const run = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean }> =>
+      ctx.tools.execute({ signal, callId: CallId(`dsh-vault-sess-${++callCounter}`), name, arguments: args })
+    const dup = await run('vault_session_import', { title: 'S', cookies: '[{"name":"a","value":"1","domain":"x.io"}]' })
+    assert.equal(dup.isError, true, 'duplicate title rejected')
+    const empty = await run('vault_session_import', { title: 'E', cookies: 'not-cookies' })
+    assert.equal(empty.isError, true, 'garbage input rejected')
+  })
 })

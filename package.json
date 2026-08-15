@@ -44,7 +44,9 @@
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {},
+  "dependencies": {
+    "playwright-core": "^1.61.1"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0",
     "@deepseek-ai/dsh-atomic-write": ">=0.1.0-rc.6",

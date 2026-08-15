@@ -4,7 +4,7 @@
  * are shown only inside the edit form or a copy action, never in the list.
  */
 
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime, InjectFace, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VaultLocaleKey } from './locales.ts'
 import css from './VaultSection.module.css'
@@ -113,6 +113,14 @@ export interface VaultSectionInjected {
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
+  sessionOpen: (url: string) => Promise<{ sessionId: string; url: string }>
+  sessionCollect: (sessionId: string) => Promise<{ cookies: unknown[]; count: number }>
+  sessionClose: (sessionId: string) => Promise<{ closed: boolean }>
+  sessionListOpen: () => Promise<Array<{ sessionId: string; url: string; openedAt: number }>>
+  sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>
+  sessionSave: (options: { title: string; cookies: unknown[]; url?: string; overwrite?: boolean }) => Promise<{ saved: number; id: string }>
+  sessionExport: (id: string, format?: 'header' | 'netscape' | 'json') => Promise<{ text: string; cookieCount: number; domains: string[] }>
+  sessionGet: (id: string) => Promise<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>
 }
 
 /** Type-level alias so consumers can reference the wire shapes without values. */
@@ -183,7 +191,7 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
 const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
 const TAB_KEYS: Record<string, VaultLocaleKey> = {
   entries: 'tabEntries', security: 'tabSecurity', transfer: 'tabTransfer',
-  backup: 'tabBackup', permissions: 'tabPermissions', trash: 'tabTrash',
+  backup: 'tabBackup', permissions: 'tabPermissions', sessions: 'tabSessions', trash: 'tabTrash',
 }
 const VERDICT_KEYS_SHORT: Record<string, VaultLocaleKey> = { weak: 'verdictPoor', fair: 'verdictFair', strong: 'verdictGood', 'very strong': 'verdictGood' }
 const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
@@ -221,7 +229,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importBitwardenEncrypted, keychainImport, searchSystem } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -235,6 +243,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
   const [backupList, setBackupList] = useState<Array<{ path: string; at: number }>>([])
+  const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
+  const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>([])
+  const [sessionUrl, setSessionUrl] = useState('')
+  const [sessionTitle, setSessionTitle] = useState('')
+  const [sessionDetail, setSessionDetail] = useState<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string } | null>(null)
+  const [sessionPaste, setSessionPaste] = useState('')
+  const [sessionPasteTitle, setSessionPasteTitle] = useState('')
   const [sysQuery, setSysQuery] = useState('')
   const [sysMatches, setSysMatches] = useState<Array<{ source: string; name: string; username: string }>>([])
   const [nowTick, setNowTick] = useState(Date.now())
@@ -250,7 +265,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'favorite' | 'smart'>('alpha')
-  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'trash'>('entries')
+  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
@@ -330,6 +345,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await switchVault(name)
       await listVaults().then(setVaults)
       setQuery('')
+      void backups(20).then(setBackupList).catch(() => {})
+      void backupStatus().then(bk => setBackupInfo(bk)).catch(() => {})
       void refresh()
       status().then(value => setLocked(value.locked)).catch(() => {})
     } catch {
@@ -604,7 +621,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
-  /** Run an encrypted backup now and refresh the backup-age badge. */
+  /** Run an encrypted backup now and refresh the backup-age badge + list. */
   async function backupNow(): Promise<void> {
     setBusy(true)
     setMessage(null)
@@ -612,6 +629,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const result = await backup()
       setBackupInfo({ daysSinceBackup: 0, backups: result.kept })
       setMessage(`${t('backupDone')} (${result.kept} kept, ${result.pruned} pruned)`)
+      void backups(20).then(setBackupList).catch(() => {})
       void refresh()
     } catch {
       setMessage(t('error'))
@@ -629,6 +647,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const result = await restoreBackup(b.path)
       setMessage(result.note)
       setBackupInfo(null)
+      void backups(20).then(setBackupList).catch(() => {})
       void refresh()
       if (result.safetyBackup !== '') setMessage(`${result.note} — ${t('backupSafetyHint')} ${result.safetyBackup}`)
     } catch {
@@ -636,6 +655,154 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Reload the sessions lists (open windows + saved sessions). */
+  const refreshSessions = useCallback((): void => {
+    void sessionListOpen().then(setOpenSessions).catch(() => {})
+    void sessionListSaved().then(setSavedSessions).catch(() => {})
+  }, [sessionListOpen, sessionListSaved])
+
+  /** Open a browser window for manual login, then show the collect hint. */
+  async function runSessionOpen(): Promise<void> {
+    if (readonly) { setMessage(t('sessionReadOnly')); return }
+    const url = sessionUrl.trim()
+    if (url.length === 0) { setMessage(t('sessionUrlPrompt')); return }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await sessionOpen(url)
+      setMessage(t('sessionNoteOpen').replace('{url}', result.url))
+      refreshSessions()
+    } catch {
+      setMessage(t('sessionOpenFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Collect cookies from an open window and save them under a title. */
+  async function runSessionCollect(sessionId: string, fallbackUrl: string): Promise<void> {
+    if (readonly) { setMessage(t('sessionReadOnly')); return }
+    let title = sessionTitle.trim()
+    if (title.length === 0) {
+      const asked = window.prompt(`${t('sessionSaveTitle')} ${t('sessionNamePlaceholder')}`)
+      if (asked === null) return
+      title = asked.trim()
+      if (title.length === 0) return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const collected = await sessionCollect(sessionId)
+      if (collected.count === 0) { setMessage(t('sessionNoteCollect').replace('{n}', '0')); return }
+      const saved = await sessionSave({ title, cookies: collected.cookies, url: fallbackUrl, overwrite: true })
+      setMessage(t('sessionSaved').replace('{n}', String(saved.saved)))
+      setSessionTitle('')
+      refreshSessions()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Close a browser window. */
+  async function runSessionClose(sessionId: string): Promise<void> {
+    setBusy(true)
+    try {
+      await sessionClose(sessionId)
+      refreshSessions()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Copy a saved session as a Cookie header (or jar) to the clipboard. */
+  async function runSessionExport(id: string, format: 'header' | 'netscape'): Promise<void> {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const exported = await sessionExport(id, format)
+      await navigator.clipboard.writeText(exported.text)
+      setCopiedId(id)
+      window.setTimeout(() => setCopiedId(current => current === id ? null : current), 1600)
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Show the cookie detail of a saved session. */
+  async function runSessionDetail(id: string): Promise<void> {
+    setBusy(true)
+    try {
+      const detail = await sessionGet(id)
+      setSessionDetail(detail)
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Save cookies pasted as JSON / header text. */
+  async function runSessionImport(): Promise<void> {
+    if (readonly) { setMessage(t('sessionReadOnly')); return }
+    const title = sessionPasteTitle.trim()
+    const raw = sessionPaste.trim()
+    if (title.length === 0 || raw.length === 0) { setMessage(t('sessionImportPastePrompt')); return }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const parsed = parsePastedCookiesClient(raw)
+      if (parsed.length === 0) { setMessage(t('sessionImportPastePrompt')); return }
+      const saved = await sessionSave({ title, cookies: parsed, overwrite: true })
+      setMessage(t('sessionSaved').replace('{n}', String(saved.saved)))
+      setSessionPaste('')
+      setSessionPasteTitle('')
+      refreshSessions()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Client-side cookie parser (mirrors the host parsePastedCookies). */
+  function parsePastedCookiesClient(text: string): unknown[] {
+    const trimmed = text.trim()
+    if (trimmed.length === 0) return []
+    const out: unknown[] = []
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        const rows = Array.isArray(parsed) ? parsed : [parsed]
+        for (const row of rows) {
+          if (typeof row !== 'object' || row === null) continue
+          const r = row as Record<string, unknown>
+          if (typeof r.name !== 'string' || typeof r.value !== 'string' || typeof r.domain !== 'string') continue
+          out.push({
+            name: r.name, value: r.value, domain: r.domain,
+            path: typeof r.path === 'string' ? r.path : '/',
+            expires: typeof r.expires === 'number' ? r.expires : -1,
+            httpOnly: r.httpOnly === true, secure: r.secure === true,
+            ...(r.sameSite === 'Strict' || r.sameSite === 'Lax' || r.sameSite === 'None' ? { sameSite: r.sameSite } : {}),
+          })
+        }
+      } catch { return [] }
+    } else {
+      for (const pair of trimmed.split(';')) {
+        const eq = pair.indexOf('=')
+        if (eq <= 0) continue
+        const name = pair.slice(0, eq).trim()
+        const value = pair.slice(eq + 1).trim()
+        if (name.length === 0) continue
+        out.push({ name, value, domain: '', path: '/', expires: -1, httpOnly: false, secure: false })
+      }
+    }
+    return out
   }
 
   useEffect(() => {
@@ -650,8 +817,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     )
     void listVaults().then(setVaults).catch(() => {})
     void templates().then(setTplList).catch(() => {})
+    refreshSessions()
     return () => { current = false }
-  }, [config, status, listVaults, templates])
+  }, [config, status, listVaults, templates, refreshSessions])
 
   const refresh = useMemo(() => async () => {
     setState({ status: 'loading' })
@@ -991,7 +1159,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
 
       <nav className={css.tabs} aria-label={t('sectionTabs')}>
-        {(['entries', 'security', 'transfer', 'backup', 'permissions', 'trash'] as const).map(tab => (
+        {(['entries', 'security', 'transfer', 'backup', 'permissions', 'sessions', 'trash'] as const).map(tab => (
           <button
             key={tab}
             type="button"
@@ -1281,6 +1449,142 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {backupList.length === 0 && (
         <p className={css.empty}>{t('noBackups')}</p>
       )}
+      </div>)}
+
+      {activeTab === 'sessions' && (<div className={css.tabPane}>
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('tabSessions')}</p>
+          <p className={css.reportSub}>{t('sessionsIntro')}</p>
+          <label className={css.field}>
+            <span>{t('sessionUrlPrompt')}</span>
+            <input
+              type="text"
+              value={sessionUrl}
+              onChange={event => setSessionUrl(event.target.value)}
+              placeholder={t('sessionUrlPlaceholder')}
+              disabled={busy || readonly}
+            />
+          </label>
+          <button type="button" className={css.backupButton} onClick={() => void runSessionOpen()} disabled={busy || readonly || locked}>
+            {t('sessionOpen')}
+          </button>
+          <p className={css.reportSub}>{t('sessionOpenHint')}</p>
+        </div>
+
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('sessionOpenList')} ({openSessions.length})</p>
+          {openSessions.length === 0 && (<p className={css.empty}>{t('sessionNoOpen')}</p>)}
+          {openSessions.map(s => (
+            <div key={s.sessionId} className={css.dupGroup}>
+              <span className={css.dupNames}>{s.url} — {t('sessionNamePlaceholder')}</span>
+              <label className={css.field}>
+                <input
+                  type="text"
+                  value={sessionTitle}
+                  onChange={event => setSessionTitle(event.target.value)}
+                  placeholder={t('sessionNamePlaceholder')}
+                  disabled={busy || readonly}
+                />
+              </label>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void runSessionCollect(s.sessionId, s.url)}
+                disabled={busy || readonly || locked}
+                title={t('sessionCollect')}
+              >{t('sessionCollect')}</button>
+              <button
+                type="button"
+                className={css.dangerButton}
+                onClick={() => void runSessionClose(s.sessionId)}
+                disabled={busy}
+                title={t('sessionClose')}
+              >{t('sessionClose')}</button>
+            </div>
+          ))}
+        </div>
+
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('sessionSavedList')} ({savedSessions.length})</p>
+          {savedSessions.length === 0 && (<p className={css.empty}>{t('sessionEmpty')}</p>)}
+          {savedSessions.map(s => (
+            <div key={s.id} className={css.dupGroup}>
+              <span className={css.dupNames}>{s.title} — {s.cookieCount} {t('sessionCookie')}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void runSessionExport(s.id, 'header')}
+                disabled={busy}
+                title={t('sessionExport')}
+              >{copiedId === s.id ? t('sessionCopied') : t('sessionExport')}</button>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void runSessionExport(s.id, 'netscape')}
+                disabled={busy}
+                title={t('sessionExportJar')}
+              >{t('sessionExportJar')}</button>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void runSessionDetail(s.id)}
+                disabled={busy}
+                title={t('sessionView')}
+              >{t('sessionView')}</button>
+              <button
+                type="button"
+                className={css.dangerButton}
+                onClick={() => void remove(s.id)}
+                disabled={busy || readonly || locked}
+                title={t('sessionDelete')}
+              >{t('sessionDelete')}</button>
+            </div>
+          ))}
+        </div>
+
+        {sessionDetail !== null && (
+          <div className={css.reportBox}>
+            <p className={css.reportTitle}>{t('sessionDetailTitle')} — {sessionDetail.title}</p>
+            <p className={css.reportSub}>{sessionDetail.notes ?? ''}</p>
+            {sessionDetail.cookies.map((c, index) => {
+              const cookie = c as { name?: string; value?: string; domain?: string; path?: string; expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: string }
+              const expiry = typeof cookie.expires === 'number' && cookie.expires >= 0
+                ? new Date(cookie.expires * 1000).toLocaleString() : t('sessionSessionCookie')
+              return (
+                <div key={`${index}-${cookie.name}`} className={css.auditRow}>
+                  <span className={css.dupNames}>{cookie.name} = {cookie.value}</span>
+                  <span className={css.reportSub}>{t('sessionDomain')}: {cookie.domain}{cookie.httpOnly === true ? ' · HttpOnly' : ''}{cookie.secure === true ? ' · Secure' : ''} · {t('sessionExpires')}: {expiry}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('sessionImportPaste')}</p>
+          <label className={css.field}>
+            <span>{t('sessionImportPasteTitle')}</span>
+            <input
+              type="text"
+              value={sessionPasteTitle}
+              onChange={event => setSessionPasteTitle(event.target.value)}
+              placeholder={t('sessionNamePlaceholder')}
+              disabled={busy || readonly}
+            />
+          </label>
+          <label className={css.field}>
+            <span>{t('sessionImportPastePrompt')}</span>
+            <textarea
+              value={sessionPaste}
+              onChange={event => setSessionPaste(event.target.value)}
+              rows={4}
+              disabled={busy || readonly}
+            />
+          </label>
+          <button type="button" className={css.backupButton} onClick={() => void runSessionImport()} disabled={busy || readonly || locked}>
+            {t('sessionImport')}
+          </button>
+        </div>
       </div>)}
 
       {activeTab === 'permissions' && (<div className={css.tabPane}>

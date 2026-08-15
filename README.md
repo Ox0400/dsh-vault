@@ -80,9 +80,15 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_import_1password` / `vault_import_1pif` | 1Password 1PUX (ZIP) and legacy 1PIF text exports |
 | `vault_import_enpass` | Enpass JSON export (folders → tags, typed fields, TOTP) |
 | `vault_import_keepass_xml` | KeePass 2.x XML export (plaintext or `********` masked values) |
-| `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (macOS keychain / Linux keyring or `peanuts` / Windows DPAPI) or the macOS Keychain (session cache + preview, no prompt spam); every file import supports `dryRun` preview |
+| `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (macOS keychain / Linux keyring or `peanuts` / Windows DPAPI) or the macOS Keychain (internet passwords `inet` by default — the ones that actually back website logins — or generic `genp` via `classes`; session cache + preview, no prompt spam); every file import supports `dryRun` preview |
 | `vault_import_firefox` | Firefox profile import (logins.json + key4.db, NSS 3DES / PBES2-AES, primary-password aware) |
 | `vault_search_system` | Search Chrome / Keychain for sites & usernames — never exposes passwords |
+| `vault_session_open` | Open a real headed browser window at a URL so the user can log in manually (password, 2FA, captcha) — the portable way to capture login state for sites that block embedding |
+| `vault_session_collect` | Collect every cookie of an open browser session (incl. HttpOnly) and save it as a `cookie` entry |
+| `vault_session_import` | Save session cookies from pasted JSON (devtools export shape) or a raw `Cookie` header string — the no-browser alternative |
+| `vault_session_list` | List saved login sessions with cookie counts (no values) |
+| `vault_session_export` | Export a saved session as a `Cookie` header value, a Netscape cookie-jar file (curl `-b`), or raw JSON for automation |
+| `vault_session_close` | Close an open browser login session (collected cookies stay in the vault) |
 | `vault_copy` | Copy an entry (secrets included) into another named vault |
 | `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
 

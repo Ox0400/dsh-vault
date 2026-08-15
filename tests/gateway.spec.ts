@@ -37,7 +37,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
-      'saveTemplate', 'search', 'searchSystem', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
+      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
 })
@@ -166,6 +166,49 @@ test('VaultGateway backup/backups/restoreBackup round trip', async () => {
 test('VaultGateway restoreBackup rejects non-backup paths', async () => {
   await withGateway(async gateway => {
     await expect(gateway.restoreBackup('/tmp/not-a-backup.json')).rejects.toThrow(/not a vault backup/)
+  })
+})
+
+test('VaultGateway backup/backups follow the ACTIVE vault after switchVault', async () => {
+  await withGateway(async gateway => {
+    // With an explicit vaultPath the directory never changes; to exercise the
+    // named-vault path resolution we need the gateway WITHOUT a path. Point
+    // DSH_HOME at a temp dir so named vaults land there, not in the real home.
+    const ctx = new Context()
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-gw-active-'))
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = dir
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(VaultGateway, { masterPassword: 'gw-test', name: 'alpha' })
+      const gw = ctx.get('vault') as VaultGateway
+      await gw.add({ title: 'A', username: 'a', password: 'x' })
+      const bk = await gw.backup()
+      expect(bk.path).toMatch(/\/vault\/vault-backup-\d+.*\.json$/)
+      expect((await gw.backups(5)).length).toBe(1)
+      // Switch to a second named vault: the same backup directory is used,
+      // but the backup snapshots beta's vault file.
+      await gw.switchVault('beta')
+      await gw.add({ title: 'B', username: 'b', password: 'y' })
+      const bk2 = await gw.backup()
+      expect(bk2.path).toMatch(/\/vault\/vault-backup-\d+.*\.json$/)
+      expect(bk2.path).not.toBe(bk.path)
+      const betaList = await gw.backups(5)
+      expect(betaList.some(b => b.path === bk2.path)).toBe(true)
+      // Restoring beta's own backup works.
+      const restored = await gw.restoreBackup(bk2.path)
+      expect(restored.entries).toBe(1)
+      expect((await gw.list()).entries[0]!.title).toBe('B')
+    } finally {
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+      resetVaultSwitch()
+      ctx.registry.delete(VaultGateway)
+      ctx.registry.delete(ToolRuntime)
+      ctx.registry.delete(SystemPrompt)
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -448,3 +491,58 @@ test('gateway searchSystem returns matches without passwords', async () => {
     for (const m of r.matches) expect(m.username).not.toContain(':')
   })
 }, 20000)
+
+test('gateway sessionSave / sessionListSaved / sessionExport / sessionGet round trip', async () => {
+  await withGateway(async gateway => {
+    const cookies = [
+      { name: 'sid', value: 'abc123', domain: 'example.com', path: '/', expires: -1, httpOnly: true, secure: false },
+      { name: 'theme', value: 'dark', domain: '.example.com', path: '/', expires: 1767225600, httpOnly: false, secure: true, sameSite: 'Lax' as const },
+    ]
+    const saved = await gateway.sessionSave({ title: 'Example session', cookies, url: 'https://example.com/login' })
+    expect(saved.saved).toBe(2)
+    expect(saved.id).toBeTruthy()
+
+    const listed = await gateway.sessionListSaved()
+    expect(listed).toHaveLength(1)
+    expect(listed[0]!.title).toBe('Example session')
+    expect(listed[0]!.cookieCount).toBe(2)
+    expect(listed[0]!.url).toBe('https://example.com/login')
+
+    const exported = await gateway.sessionExport(saved.id, 'header')
+    expect(exported.text).toBe('sid=abc123; theme=dark')
+    expect(exported.domains).toContain('example.com')
+
+    const netscape = await gateway.sessionExport(saved.id, 'netscape')
+    expect(netscape.text).toContain('.example.com\tTRUE\t/\tTRUE\t1767225600\ttheme\tdark')
+
+    const full = await gateway.sessionGet(saved.id)
+    expect(full.cookies).toHaveLength(2)
+    expect(full.cookies[0]!.value).toBe('abc123')
+  })
+})
+
+test('gateway sessionSave rejects duplicates unless overwrite and validates kind', async () => {
+  await withGateway(async gateway => {
+    const cookies = [{ name: 'a', value: 'b', domain: 'x.io', path: '/', expires: -1, httpOnly: false, secure: false }]
+    await gateway.sessionSave({ title: 'S', cookies })
+    await expect(gateway.sessionSave({ title: 'S', cookies })).rejects.toThrow('already exists')
+    const updated = await gateway.sessionSave({ title: 'S', cookies, overwrite: true })
+    expect(updated.saved).toBe(1)
+    // A non-cookie entry must not be exportable as a session.
+    const login = await gateway.add({ title: 'NotCookie', username: 'u', password: 'p' })
+    await expect(gateway.sessionExport(login.id)).rejects.toThrow('not a saved cookie session')
+    await expect(gateway.sessionGet(login.id)).rejects.toThrow('not a saved cookie session')
+  })
+})
+
+test('gateway sessionListOpen and sessionClose handle missing sessions gracefully', async () => {
+  await withGateway(async gateway => {
+    const open = await gateway.sessionListOpen()
+    expect(Array.isArray(open)).toBe(true)
+    // Closing an unknown session is a no-op.
+    const closed = await gateway.sessionClose('no-such-session')
+    expect(closed.closed).toBe(false)
+    // Collecting from an unknown session errors.
+    await expect(gateway.sessionCollect('no-such-session')).rejects.toThrow('unknown session')
+  })
+})

@@ -105,6 +105,14 @@ export function apply(ctx: ClientContext): void {
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),
     undeleteAll: () => invoke<{ restored: number }>('undeleteAll'),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),
+    sessionOpen: (url) => invoke<{ sessionId: string; url: string }>('sessionOpen', { url }),
+    sessionCollect: (sessionId) => invoke<{ cookies: unknown[]; count: number }>('sessionCollect', { sessionId }),
+    sessionClose: (sessionId) => invoke<{ closed: boolean }>('sessionClose', { sessionId }),
+    sessionListOpen: () => invoke<Array<{ sessionId: string; url: string; openedAt: number }>>('sessionListOpen'),
+    sessionListSaved: () => invoke<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>('sessionListSaved'),
+    sessionSave: (options) => invoke<{ saved: number; id: string }>('sessionSave', { ...(options ?? {}) }),
+    sessionExport: (id, format) => invoke<{ text: string; cookieCount: number; domains: string[] }>('sessionExport', { id, format: format ?? 'header' }),
+    sessionGet: (id) => invoke<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>('sessionGet', { id }),
   })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
