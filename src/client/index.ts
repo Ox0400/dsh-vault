@@ -87,6 +87,8 @@ export function apply(ctx: ClientContext): void {
     keychainImport: (options) => invoke<{ added: number; skipped: number; updated: number; note: string }>('keychainImport', { ...(options ?? {}) }),
     import1password: (path, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('import1password', { path, overwrite: overwrite ?? false }),
     importManagerCsv: (path, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importManagerCsv', { path, overwrite: overwrite ?? false }),
+    importEnpass: (path, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importEnpass', { path, overwrite: overwrite ?? false }),
+    importBitwarden: (path, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importBitwarden', { path, overwrite: overwrite ?? false }),
     searchSystem: (query, source, limit) => invoke<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>('searchSystem', { query, source: source ?? 'all', limit: limit ?? 15 }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readOnePasswordPux, readPasswordCsv } from '../src/imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson } from '../src/imports.ts'
 import { readZip } from '../src/zip.ts'
 import { deflateRawSync } from 'node:zlib'
 
@@ -9,6 +9,8 @@ const FIXTURE_1PUX = join(__dirname, 'fixtures', '1pux-sample.1pux')
 const FIXTURE_DASHLANE = join(__dirname, 'fixtures', 'dashlane.csv')
 const FIXTURE_NORDPASS = join(__dirname, 'fixtures', 'nordpass.csv')
 const FIXTURE_KEEPER = join(__dirname, 'fixtures', 'keeper.csv')
+const FIXTURE_ENPASS = join(__dirname, 'fixtures', 'enpass.json')
+const FIXTURE_BITWARDEN = join(__dirname, 'fixtures', 'bitwarden.json')
 
 describe('zip reader', () => {
   it('reads a deflate-compressed zip (the 1PUX fixture)', () => {
@@ -171,5 +173,50 @@ describe('password-manager CSV import', () => {
     expect(creds).toHaveLength(1)
     expect(creds[0]!.title).toBe('a, b')
     expect(creds[0]!.notes).toBe('line1\nline2')
+  })
+})
+
+describe('Enpass JSON import', () => {
+  it('parses an Enpass export into credentials with tags, TOTP and favorite', () => {
+    const creds = readEnpassJson(readFileSync(FIXTURE_ENPASS, 'utf8'))
+    expect(creds.length).toBe(2)
+    const gh = creds.find(c => c.title === 'GitHub')
+    expect(gh).toBeDefined()
+    expect(gh!.username).toBe('alice@example.com')
+    expect(gh!.password).toBe('enpass-gh-pass')
+    expect(gh!.url).toBe('https://github.com/')
+    expect(gh!.tags).toContain('Work')
+    expect(gh!.favorite).toBe(true)
+    const bank = creds.find(c => c.title === 'Bank of Test')
+    expect(bank).toBeDefined()
+    expect(bank!.otp).toBe('JBSWY3DPEHPK3PXP')
+    expect(bank!.tags).toContain('Personal')
+    // Custom (non-typed) protected fields are appended to notes.
+    expect(bank!.notes).toContain('Pin: 1234')
+  })
+
+  it('rejects non-Enpass JSON', () => {
+    expect(() => readEnpassJson('{"foo": 1}')).toThrow(/not an Enpass/)
+    expect(() => readEnpassJson('not json')).toThrow(/not valid JSON/)
+  })
+})
+
+describe('Bitwarden JSON import', () => {
+  it('parses an unencrypted export, skipping non-login items', () => {
+    const creds = readBitwardenJson(readFileSync(FIXTURE_BITWARDEN, 'utf8'))
+    expect(creds.length).toBe(1)
+    const gh = creds[0]!
+    expect(gh.title).toBe('BW GitHub')
+    expect(gh.username).toBe('bw-user')
+    expect(gh.password).toBe('bw-pass-1')
+    expect(gh.url).toBe('https://github.com/login')
+    expect(gh.notes).toBe('bw note')
+    expect(gh.otp).toBe('JBSWY3DPEHPK3PXP')
+    expect(gh.tags).toContain('Work')
+    expect(gh.favorite).toBe(true)
+  })
+
+  it('rejects encrypted exports with a clear hint', () => {
+    expect(() => readBitwardenJson('{"encrypted": true, "items": []}')).toThrow(/encrypted exports are not supported/)
   })
 })

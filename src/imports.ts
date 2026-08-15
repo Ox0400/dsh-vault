@@ -1,11 +1,16 @@
 /**
- * Password-manager import formats for dsh-vault: 1Password 1PUX (ZIP + JSON)
- * and generic password CSV (Dashlane / NordPass / Keeper auto-detected by
- * header synonyms).
+ * Password-manager import formats for dsh-vault: 1Password 1PUX (ZIP + JSON),
+ * Enpass JSON export, Bitwarden JSON export, and generic password CSV
+ * (Dashlane / NordPass / Keeper auto-detected by header synonyms).
  *
  * Format references (open-source):
  * - 1PUX: https://support.1password.com/1pux-format/ — a ZIP with
  *   export.data (accounts → vaults → items → details.fields).
+ * - Enpass JSON export schema: enpass2keepassxc
+ *   (https://github.com/nilsding/enpass2keepassxc) — folders[] + items[] with
+ *   fields[{label,type,value,sensitive}].
+ * - Bitwarden JSON: https://bitwarden.com/help/import-data/#bitwarden-import-format
+ *   — items[] with login{username,password,uris} and totp.
  * - CSV column synonyms: pass-import
  *   (https://github.com/roddhjav/pass-import) nordpass/keeper/dashlane
  *   managers and the Dashlane CSV export documented by the community
@@ -24,6 +29,7 @@ export interface ImportedCredential {
   notes: string
   otp?: string
   tags?: string[]
+  favorite?: boolean
 }
 
 /** ── 1Password 1PUX ─────────────────────────────────────────────────────── */
@@ -106,6 +112,163 @@ export function readOnePasswordPux(data: Buffer): ImportedCredential[] {
         })
       }
     }
+  }
+  return out
+}
+
+/** ── Enpass JSON export ─────────────────────────────────────────────────── */
+
+interface EnpassField {
+  label?: string
+  type?: string
+  value?: string
+  sensitive?: number
+}
+
+interface EnpassItem {
+  uuid?: string
+  title?: string
+  category?: string
+  favorite?: number
+  folders?: string[]
+  fields?: EnpassField[]
+  note?: string
+  subtitle?: string
+  template_type?: string
+  updated_at?: number
+}
+
+interface EnpassFolder {
+  uuid?: string
+  title?: string
+}
+
+interface EnpassExport {
+  folders?: EnpassFolder[]
+  items?: EnpassItem[]
+}
+
+/**
+ * Read an Enpass JSON export (File > Export > .json) into credentials.
+ * Items carry a `fields` array typed as username/password/url/totp/… plus
+ * custom labels; `sensitive` marks protected values.
+ */
+export function readEnpassJson(input: string): ImportedCredential[] {
+  let parsed: EnpassExport
+  try {
+    parsed = JSON.parse(input) as EnpassExport
+  } catch {
+    throw new Error('enpass: not valid JSON')
+  }
+  if (!Array.isArray(parsed.items) && !Array.isArray(parsed.folders)) {
+    throw new Error('enpass: not an Enpass JSON export (missing items/folders)')
+  }
+  const folderNames = new Map<string, string>()
+  for (const f of parsed.folders ?? []) {
+    if (f.uuid !== undefined && f.title !== undefined) folderNames.set(f.uuid, f.title)
+  }
+  const out: ImportedCredential[] = []
+  for (const item of parsed.items ?? []) {
+    const fields = item.fields ?? []
+    let username = ''
+    let password = ''
+    let url = ''
+    let otp = ''
+    const extraNotes: string[] = []
+    for (const f of fields) {
+      const value = f.value ?? ''
+      const type = (f.type ?? '').toLowerCase()
+      if (type === 'username' || type === 'email') username = username || value
+      else if (type === 'password') password = value
+      else if (type === 'url') url = value
+      else if (type === 'totp' || type === 'otp') otp = value
+      else if (value !== '' && (f.label ?? '') !== '') extraNotes.push(`${f.label}: ${value}`)
+    }
+    const tags = (item.folders ?? []).map(id => folderNames.get(id) ?? '').filter(Boolean)
+    const notes = [item.note ?? '', ...extraNotes].filter(Boolean).join('\n')
+    out.push({
+      title: item.title ?? item.subtitle ?? '',
+      username,
+      password,
+      url,
+      notes,
+      ...(otp.length > 0 ? { otp } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+      ...(item.favorite === 1 ? { favorite: true } : {}),
+    })
+  }
+  return out
+}
+
+/** ── Bitwarden JSON export ──────────────────────────────────────────────── */
+
+interface BitwardenLogin {
+  username?: string
+  password?: string
+  uris?: Array<{ uri?: string }>
+  totp?: string
+}
+
+interface BitwardenItem {
+  id?: string
+  name?: string
+  notes?: string
+  folderId?: string
+  favorite?: boolean
+  type?: number
+  login?: BitwardenLogin
+  secureNote?: { type?: number }
+}
+
+interface BitwardenFolder {
+  id?: string
+  name?: string
+}
+
+interface BitwardenExport {
+  encrypted?: boolean
+  folders?: BitwardenFolder[]
+  items?: BitwardenItem[]
+}
+
+/**
+ * Read a Bitwarden JSON export (unencrypted) into credentials. Only login
+ * items (type 1) are imported; notes/URIs/TOTP are preserved.
+ */
+export function readBitwardenJson(input: string): ImportedCredential[] {
+  let parsed: BitwardenExport
+  try {
+    parsed = JSON.parse(input) as BitwardenExport
+  } catch {
+    throw new Error('bitwarden: not valid JSON')
+  }
+  if (parsed.encrypted === true) {
+    throw new Error('bitwarden: encrypted exports are not supported — export unencrypted JSON instead')
+  }
+  if (!Array.isArray(parsed.items)) {
+    throw new Error('bitwarden: not a Bitwarden JSON export (missing items)')
+  }
+  const folderNames = new Map<string, string>()
+  for (const f of parsed.folders ?? []) {
+    if (f.id !== undefined && f.name !== undefined) folderNames.set(f.id, f.name)
+  }
+  const out: ImportedCredential[] = []
+  for (const item of parsed.items ?? []) {
+    if (item.type !== undefined && item.type !== 1) continue // only logins
+    const login = item.login ?? {}
+    const uris = login.uris ?? []
+    const url = uris.length > 0 ? (uris[0]!.uri ?? '') : ''
+    const folderId = item.folderId
+    out.push({
+      title: item.name ?? '',
+      username: login.username ?? '',
+      password: login.password ?? '',
+      url,
+      notes: item.notes ?? '',
+      ...(login.totp !== undefined && login.totp.length > 0 ? { otp: login.totp } : {}),
+      ...(folderId !== undefined && folderNames.get(folderId) !== undefined ? { tags: [folderNames.get(folderId)!] } : {}),
+      ...(item.favorite === true ? { favorite: true } : {}),
+    })
   }
   return out
 }

@@ -35,7 +35,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'importChrome', 'importFirefox', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'importBitwarden', 'importChrome', 'importEnpass', 'importFirefox', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
@@ -202,5 +202,27 @@ test('VaultGateway importManagerCsv imports a Keeper export (folder → tags)', 
     const bank = entries.find(e => e.title === 'Keeper Bank')!
     expect(bank.username).toBe('kb-user')
     expect(bank.tags).toContain('Banking')
+  })
+})
+
+test('VaultGateway importEnpass imports an Enpass JSON export', async () => {
+  const json = join(__dirname, 'fixtures', 'enpass.json')
+  await withGateway(async gateway => {
+    const r = await gateway.importEnpass(json)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    const gh = entries.find(e => e.title === 'GitHub')!
+    expect(gh.username).toBe('alice@example.com')
+    expect(gh.password).toBeUndefined() // summaries hide secrets
+  })
+})
+
+test('VaultGateway importBitwarden imports a Bitwarden JSON export', async () => {
+  const json = join(__dirname, 'fixtures', 'bitwarden.json')
+  await withGateway(async gateway => {
+    const r = await gateway.importBitwarden(json)
+    expect(r.added).toBe(1) // secure notes skipped
+    const entries = (await gateway.list()).entries
+    expect(entries[0]!.title).toBe('BW GitHub')
   })
 })
