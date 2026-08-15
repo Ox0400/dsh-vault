@@ -73,6 +73,8 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
 | `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON 互通（完整字段映射,支持覆盖） |
+| `vault_import_chrome` / `vault_import_keychain` | 从 Chrome Login Data（经 macOS 钥匙串密钥解密）或 macOS 钥匙串导入密码（会话缓存 + 预览,避免授权弹窗轰炸） |
+| `vault_search_system` | 在 Chrome / 钥匙串中搜索站点与用户名——绝不暴露密码 |
 | `vault_copy` | 复制条目（含密钥）到另一个命名保险库 |
 | `vault_templates` | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格） |
 

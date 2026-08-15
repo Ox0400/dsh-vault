@@ -75,6 +75,8 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON interop (full field mapping, overwrite support) |
+| `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (decrypted via the macOS keychain key) or the macOS Keychain (session cache + preview, no prompt spam) |
+| `vault_search_system` | Search Chrome / Keychain for sites & usernames — never exposes passwords |
 | `vault_copy` | Copy an entry (secrets included) into another named vault |
 | `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
 
