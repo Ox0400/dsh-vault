@@ -620,3 +620,28 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.tab {
+  border: 1px solid var(--dsh-color-border, #ccc);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 5px 14px;
+}
+.tabActive {
+  background: var(--dsh-color-primary, #4a6cf7);
+  border-color: transparent;
+  color: #fff;
+}
+.tabPane {
+  margin-top: 2px;
+}

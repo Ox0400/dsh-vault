@@ -172,6 +172,9 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
 ]
 
 const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
+const TAB_KEYS: Record<string, VaultLocaleKey> = {
+  entries: 'tabEntries', security: 'tabSecurity', transfer: 'tabTransfer', organize: 'tabOrganize',
+}
 const VERDICT_KEYS_SHORT: Record<string, VaultLocaleKey> = { weak: 'verdictPoor', fair: 'verdictFair', strong: 'verdictGood', 'very strong': 'verdictGood' }
 const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
   uppercase: 'genOptUppercase', lowercase: 'genOptLowercase', digits: 'genOptDigits',
@@ -237,6 +240,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'favorite' | 'smart'>('alpha')
+  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'organize'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -799,6 +803,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <p role="alert" className={css.lockedBanner}>{t('lockedBanner')}</p>
       )}
 
+      <nav className={css.tabs} aria-label={t('sectionTabs')}>
+        {(['entries', 'security', 'transfer', 'organize'] as const).map(tab => (
+          <button
+            key={tab}
+            type="button"
+            className={`${css.tab}${activeTab === tab ? ` ${css.tabActive}` : ''}`}
+            onClick={() => setActiveTab(tab)}
+          >{t(TAB_KEYS[tab]!)}</button>
+        ))}
+      </nav>
+
+      {activeTab === 'entries' && (<div className={css.tabPane}>
       <div className={css.toolbar}>
         {locked && (
           <span className={css.lockedTag}>{t('lockedShort')}</span>
@@ -857,6 +873,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           + {t('add')}
         </button>
       </div>
+      </div>)}
 
       {policy !== null && (
         <div className={css.policyBar}>
@@ -917,6 +934,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <button type="button" className={css.retryButton} onClick={() => void refresh()}>{t('retry')}</button>
         </p>
       )}
+      {activeTab === 'entries' && (<div className={css.tabPane}>
       {state.status === 'ready' && state.entries.length === 0 && (
         <div className={css.emptyBox}>
           <p className={css.empty}>{t('empty')}</p>
@@ -926,7 +944,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
         </div>
       )}
+      </div>)}
 
+      {activeTab === 'security' && (<div className={css.tabPane}>
       {recentEntries.length > 0 && (
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentlyAdded')}</p>
@@ -1015,6 +1035,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
       )}
 
+      </div>)}
+
+      {activeTab === 'transfer' && (<div className={css.tabPane}>
       <div className={css.reportBox}>
         <p className={css.reportTitle}>{t('systemSearch')}</p>
         <div className={css.dupGroup}>
@@ -1049,7 +1072,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importKeychain')}</button>
         </div>
       </div>
+      </div>)}
 
+      {activeTab === 'organize' && (<div className={css.tabPane}>
       {backupList.length > 0 && (
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentBackups')}</p>
@@ -1093,6 +1118,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
       )}
 
+      </div>)}
+
+      {activeTab === 'entries' && (<div className={css.tabPane}>
       {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter) > visibleCount && (
         <button
           type="button"
@@ -1286,7 +1314,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </ul>
         </>
       )}
+      </div>)}
 
+      {activeTab === 'security' && (<div className={css.tabPane}>
       {state.status === 'ready' && (
         <div className={css.healthBar}>
           {vaultStats !== null && typeof vaultStats.total === 'number' && (
@@ -1381,6 +1411,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             && ` · tags: ${Object.entries(vaultStats.byTag as Record<string, unknown>).map(([k, v]) => `${k}(${String(v)})`).join(' ')}`}
         </p>
       )}
+
+      </div>)}
 
       {editor.status !== 'closed' && (
         <div className={css.editor} role="dialog" aria-label={editor.status === 'creating' ? t('add') : t('edit')}>
