@@ -34,7 +34,7 @@ import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } fro
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
-import { readKdbx } from './kdbx.ts'
+import { readKdbx, describeKdbxKdf } from './kdbx.ts'
 import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
@@ -2744,6 +2744,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const data = await readFile(args.path)
       const keyfile = args.keyfile !== undefined ? await readFile(args.keyfile) : undefined
+      // Warn on expensive pure-JS Argon2 parameters BEFORE deriving the key,
+      // so a 64 MiB database does not look like a hung tool call.
+      let kdfNote = ''
+      try {
+        const info = describeKdbxKdf(data)
+        if (info.kdf === 'argon2' && info.memoryKiB !== undefined && info.memoryKiB >= 65536) {
+          const seconds = Math.round(info.memoryKiB / 65536 * 7)
+          kdfNote = `; Argon2id ${(info.memoryKiB / 1024).toFixed(0)} MiB × ${info.iterations ?? '?'} iters (pure-JS) may take ~${seconds}s to derive — please wait`
+        }
+      } catch { /* header inspection is best-effort */ }
       const creds = readKdbx(data, args.password ?? '', keyfile)
       let added = 0
       let skipped = 0
@@ -2765,7 +2775,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
-      return { added, skipped, updated, note: `KeePass import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+      return { added, skipped, updated, note: `KeePass import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)${kdfNote}` }
     },
   }))
 

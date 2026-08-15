@@ -255,6 +255,60 @@ export function readKdbx(data: Buffer, password: string, keyfileData?: Buffer): 
   throw new Error(`kdbx: unsupported KDBX version 0x${version.toString(16)} (supported: KDBX 3.1 and 4.x)`)
 }
 
+/** KDF facts of a KDBX file (header-only, no key derivation or decryption).
+ * Used to warn about expensive pure-JS Argon2 parameters BEFORE running the
+ * transform, so a tool call cannot appear hung on a 64 MiB database. */
+export interface KdbxKdfInfo {
+  /** KDBX major version: 3 or 4. */
+  version: number
+  /** `argon2` or `aes`. */
+  kdf: 'argon2' | 'aes'
+  /** Argon2 memory in KiB (argon2 only). */
+  memoryKiB?: number
+  /** Argon2 iterations (argon2 only). */
+  iterations?: number
+  /** Argon2 parallelism (argon2 only). */
+  parallelism?: number
+  /** AES-KDF transform rounds (aes only). */
+  rounds?: number
+}
+
+/** Inspect the KDF of a KDBX file without deriving any key. */
+export function describeKdbxKdf(data: Buffer): KdbxKdfInfo {
+  if (data.length < 12) throw new Error('kdbx: file too short')
+  const sig1 = data.readUInt32LE(0)
+  const sig2 = data.readUInt32LE(4)
+  const version = data.readUInt32LE(8)
+  if (sig1 !== 0x9aa2d903 || sig2 !== 0xb54bfb67) throw new Error('kdbx: not a KeePass database (bad signature)')
+  const major = version & 0xffff0000
+  if (major === 0x00040000) {
+    const headerEnd = 12
+    const { fields } = parseDynamicHeader(data.subarray(headerEnd))
+    const kdf = fields[0x0b]
+    if (!kdf) throw new Error('kdbx: missing KDF parameters')
+    const params = parseVariantDictionary(kdf)
+    const uuid = params.$UUID as Buffer | undefined
+    if (uuid !== undefined && uuid.equals(ARGON2_UUID)) {
+      return {
+        version: 4,
+        kdf: 'argon2',
+        ...(typeof params.M === 'number' ? { memoryKiB: params.M } : {}),
+        ...(typeof params.I === 'number' ? { iterations: params.I } : {}),
+        ...(typeof params.P === 'number' ? { parallelism: params.P } : {}),
+      }
+    }
+    return { version: 4, kdf: 'aes', ...(typeof params.R === 'number' ? { rounds: params.R } : {}) }
+  }
+  if (major === 0x00030000) {
+    // KDBX 3.1 header: field 6 is the transform-rounds uint32.
+    const { fields } = parseKdbx3Header(data.subarray(12))
+    const roundsField = fields[6]
+    const rounds = roundsField !== undefined ? roundsField.readUInt32LE(0) : undefined
+    return { version: 3, kdf: 'aes', ...(rounds !== undefined ? { rounds } : {}) }
+  }
+  throw new Error(`kdbx: unsupported KDBX version 0x${version.toString(16)} (supported: KDBX 3.1 and 4.x)`)
+}
+
 /** KDBX 4.x: AES-KDF/Argon2, header HMAC blocks. */
 function readKdbx4(data: Buffer, version: number, password: string, keyfileData?: Buffer): KdbxCredential[] {
   void version

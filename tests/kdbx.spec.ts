@@ -110,3 +110,26 @@ describe('KDBX4 ChaCha20 payload cipher', () => {
     expect(() => readKdbx(readFileSync(FIXTURE), 'wrong')).toThrow()
   })
 })
+
+describe('describeKdbxKdf (header-only KDF inspection)', () => {
+  it('reports Argon2id params for the kdbx4-argon2 fixture without deriving', () => {
+    const { describeKdbxKdf } = require('../src/kdbx.ts') as typeof import('../src/kdbx.ts')
+    const data = readFileSync(join(__dirname, 'fixtures', 'kdbx4-argon2.kdbx'))
+    const info = describeKdbxKdf(data)
+    expect(info.version).toBe(4)
+    expect(info.kdf).toBe('argon2')
+    expect(info.memoryKiB).toBeGreaterThan(0)
+    expect(info.iterations).toBeGreaterThan(0)
+    expect(info.parallelism).toBeGreaterThan(0)
+  })
+
+  it('reports AES-KDF rounds for a kdbx3 file and rejects garbage', () => {
+    const { describeKdbxKdf } = require('../src/kdbx.ts') as typeof import('../src/kdbx.ts')
+    const data = readFileSync(join(__dirname, 'fixtures', 'kdbx3-legacy.kdbx'))
+    const info = describeKdbxKdf(data)
+    expect(info.version).toBe(3)
+    expect(info.kdf).toBe('aes')
+    expect(info.rounds).toBeGreaterThan(0)
+    expect(() => describeKdbxKdf(Buffer.from('nope'))).toThrow()
+  })
+})
