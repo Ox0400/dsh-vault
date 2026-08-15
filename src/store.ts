@@ -16,7 +16,7 @@
  * @module dsh-vault/store
  */
 
-import { chmod, mkdir, readFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -251,6 +251,11 @@ export class VaultStore {
     // Ensure the vault directory exists before any lock-file or document
     // write, so first use never fails with ENOENT on a fresh install.
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+    // Best-effort cleanup of a stale writer lock from a crashed process. The
+    // lock is an exclusive-create sibling; an orphaned one only costs the next
+    // writer its retry timeout, so removing it at open time is safe (no live
+    // writer can exist while we are still booting this store).
+    await rm(`${this.path}.lock`, { force: true }).catch(() => {})
     // Tighten a pre-existing directory (mkdir leaves existing dirs untouched)
     // so the vault tree stays owner-only even when a parent created it wider.
     await chmod(dirname(this.path), 0o700).catch(() => {})
@@ -760,8 +765,9 @@ export class VaultStore {
     }
     const exportKey = await deriveKey(exportPassword, parsed.kdf)
     let added = 0
-    for (const blobEntry of parsed.entries) {
-      const plaintext = decrypt(blobEntry, exportKey)
+    try {
+      for (const blobEntry of parsed.entries) {
+        const plaintext = decrypt(blobEntry, exportKey)
       const entry = JSON.parse(plaintext.toString('utf8')) as VaultEntry
       const existing = this.entries.get(entry.id)
       if (existing !== undefined && !overwrite) {
@@ -785,7 +791,11 @@ export class VaultStore {
       this.entries.set(entry.id, { ...active, updatedAt: Date.now() })
       added++
     }
-    exportKey.fill(0)
+    } catch {
+      throw new Error('vault_import: export password is incorrect or the document is corrupted')
+    } finally {
+      exportKey.fill(0)
+    }
     if (!dryRun) await this.persist()
     return added
   }

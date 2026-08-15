@@ -553,3 +553,28 @@ test('store: concurrent adds across many promises persist every entry', async ()
     assert.equal(reloaded.list().length, N)
   })
 })
+
+test('store: 1000-entry vault stays fast for list/search/stats', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const N = 1000
+    for (let i = 0; i < N; i++) {
+      await vault.add({ title: `Perf${i}`, username: `user${i}`, password: `pw-${i}`, tags: ['perf'] })
+    }
+    const t0 = Date.now()
+    const listed = vault.list()
+    const listMs = Date.now() - t0
+    assert.equal(listed.length, N)
+    const t1 = Date.now()
+    const found = vault.search('user500')
+    const searchMs = Date.now() - t1
+    assert.equal(found.length, 1)
+    const t2 = Date.now()
+    vault.stats()
+    const statsMs = Date.now() - t2
+    // Loose ceilings on a dev machine: list < 1s, search < 100ms, stats < 100ms.
+    assert.ok(listMs < 1000, `list ${listMs}ms`)
+    assert.ok(searchMs < 100, `search ${searchMs}ms`)
+    assert.ok(statsMs < 100, `stats ${statsMs}ms`)
+  })
+})

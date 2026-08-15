@@ -335,7 +335,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await lock()
       setLocked(r.locked)
-      setMessage(r.locked ? t('lockedMsg') : t('error'))
+      if (r.locked) {
+        // The vault is locked: clear the visible list so stale secrets are
+        // not left on screen.
+        setState({ status: 'ready', entries: [] })
+        setMessage(t('lockedMsg'))
+      } else {
+        setMessage(t('error'))
+      }
     } catch {
       setMessage(t('error'))
     } finally {
