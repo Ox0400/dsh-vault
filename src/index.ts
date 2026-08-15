@@ -27,6 +27,7 @@ import { dirname, join } from 'node:path'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
+import { checkPassword } from './breach.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -1928,6 +1929,40 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_breach_check: Watchtower-style breach scan ──────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_breach_check',
+    description: 'Watchtower-style breach scan: check every stored password against the Have I Been '
+      + 'Pwned Pwned Passwords database using the k-anonymity protocol (only the first 5 hex chars of '
+      + 'the SHA-1 hash leave this machine — the full hash is never sent). Falls back to a built-in '
+      + 'common-password list when the network is unavailable. Returns which entries are breached '
+      + '(with breach counts) and which use known-weak passwords. No secrets in the report.',
+    parameters: {
+      ids: { type: 'array', items: { type: 'string' }, description: 'Only check these entry ids (optional; default all).' },
+      online: { type: 'boolean', description: 'Allow online Pwned Passwords lookups (default true).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { checked: { type: 'integer', required: true }, pwned: { type: 'array', required: true, items: { type: 'json' } }, weak: { type: 'array', required: true, items: { type: 'json' } }, offline: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: `checked ${v.checked} password(s): ${(v.pwned as unknown[]).length} breached, ${(v.weak as unknown[]).length} weak${v.offline ? ' (offline fallback)' : ''}` }] },
+    async execute(args) {
+      assertWritable('vault_breach_check')
+      const s = await guardStore()
+      const ids = new Set(Array.isArray(args.ids) ? args.ids : [])
+      const targets = s.list().filter(e => (ids.size === 0 || ids.has(e.id)) && e.password !== undefined)
+      const pwned: Array<{ id: string; title: string; count: number }> = []
+      const weak: Array<{ id: string; title: string }> = []
+      let offline = false
+      for (const e of targets) {
+        const verdict = await checkPassword(e.password!)
+        if (verdict.source !== 'hibp') offline = true
+        if (verdict.breached && verdict.reason === 'pwned') {
+          pwned.push({ id: e.id, title: e.title, count: verdict.count })
+        } else if (verdict.breached && verdict.reason === 'weak') {
+          weak.push({ id: e.id, title: e.title })
+        }
+      }
+      return { checked: targets.length, pwned, weak, offline }
+    },
+  }))
+
   // ── vault_health: weak / reused credential scan ────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_health',
@@ -2622,6 +2657,25 @@ export class VaultGateway extends TypertRemoteService {
   async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }> {
     const store = await this.guardedStore()
     return store.health()
+  }
+
+  /** Watchtower-style breach scan for the UI (k-anonymity; offline fallback). */
+  @Remote('breachCheck')
+  async breachCheck(online = true): Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }> {
+    const store = await this.guardedStore()
+    const pwned: Array<{ id: string; title: string; count: number }> = []
+    const weak: Array<{ id: string; title: string }> = []
+    let offline = false
+    let checked = 0
+    for (const e of store.list()) {
+      if (e.password === undefined) continue
+      checked++
+      const verdict = online === false ? { breached: false, count: 0, source: 'local' as const } : await checkPassword(e.password)
+      if (verdict.source !== 'hibp') offline = true
+      if (verdict.breached && verdict.reason === 'pwned') pwned.push({ id: e.id, title: e.title, count: verdict.count })
+      else if (verdict.breached && verdict.reason === 'weak') weak.push({ id: e.id, title: e.title })
+    }
+    return { checked, pwned, weak, offline }
   }
 
   /** Duplicate groups count for the UI health badge (title+kind matches). */

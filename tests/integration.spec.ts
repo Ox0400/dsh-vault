@@ -73,6 +73,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_backup',
       'vault_backup_now',
       'vault_backup_status',
+      'vault_breach_check',
       'vault_bulk_export',
       'vault_changes',
       'vault_clipboard',
@@ -2173,5 +2174,17 @@ test('vault_switch returns the vault roster', async () => {
     assert.ok(Array.isArray(r.vaults))
     // A not-yet-created vault may be absent from the roster until first use.
     assert.ok(r.vaults.every(v => v.active === (v.name === r.active)), 'active flag consistent')
+  })
+})
+
+test('vault_breach_check flags common passwords offline and reports clean entries', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'WeakPw', password: '123456' })
+    await call(ctx, 'vault_add', { title: 'OkPw', password: 'Xk9!mQ2#zT7$vR4' })
+    const r = await call(ctx, 'vault_breach_check', {}) as { checked: number; weak: Array<{ title: string }>; pwned: Array<{ title: string }>; offline: boolean }
+    assert.equal(r.checked, 2)
+    assert.ok(r.weak.some(w => w.title === 'WeakPw'), 'common password flagged weak')
+    assert.ok(!r.weak.some(w => w.title === 'OkPw'), 'strong password not weak')
+    assert.ok(r.pwned.length >= 0)
   })
 })

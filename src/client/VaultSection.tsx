@@ -85,6 +85,7 @@ export interface VaultSectionInjected {
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
+  breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -181,7 +182,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -213,6 +214,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [locked, setLocked] = useState(false)
   const [vaults, setVaults] = useState<Array<{ name: string; active: boolean }>>([])
   const [audit, setAudit] = useState<Array<{ id: string; title: string; issues: string[] }>>([])
+  const [breach, setBreach] = useState<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -243,6 +245,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await merge(second!.id, first!.id, false)
       await duplicateGroups().then(setDupList)
       void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Run a Watchtower-style breach scan and show the result. */
+  async function runBreachCheck(): Promise<void> {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await breachCheck(true)
+      setBreach(result)
+      if (result.pwned.length === 0 && result.weak.length === 0) {
+        setMessage(result.offline ? t('breachOkOffline') : t('breachOk'))
+      }
     } catch {
       setMessage(t('error'))
     } finally {
@@ -971,6 +990,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>
             {t('backupNow')}
           </button>
+          <button type="button" className={css.backupButton} onClick={() => void runBreachCheck()} disabled={busy}>
+            {t('breachCheck')}
+          </button>
+        </div>
+      )}
+
+      {breach !== null && (breach.pwned.length > 0 || breach.weak.length > 0) && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('breachTitle')}{breach.offline ? ` (${t('breachOffline')})` : ''}</p>
+          {breach.pwned.slice(0, 6).map(item => (
+            <p key={item.id} className={css.reportSub}>· {item.title} — {t('breachPwned')}{item.count > 0 ? ` ×${item.count}` : ''}</p>
+          ))}
+          {breach.weak.slice(0, 6).map(item => (
+            <p key={item.id} className={css.reportSub}>· {item.title} — {t('breachWeak')}</p>
+          ))}
         </div>
       )}
       {state.status === 'ready' && (
