@@ -830,6 +830,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       hours: { type: 'number', description: 'Look-back window in hours (default 24).' },
       kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only report changes for entries of this kind.' },
+      limit: { type: 'number', description: 'Max events (default 50, 1–500).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { changes: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.changes) }] },
     async execute(args) {
@@ -842,7 +843,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const filtered = args.kind === undefined
         ? changes
         : changes.filter(c => (c.kind ?? 'login') === args.kind)
-      return { changes: filtered }
+      const limit = args.limit === undefined ? 50 : args.limit
+      if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+        throw new Error('vault_changes: limit must be an integer 1–500')
+      }
+      return { changes: filtered.slice(0, limit) }
     },
   }))
 
@@ -1634,7 +1639,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Export entries as a KeePassXC-compatible XML document (KeePass 2.x schema). '
       + 'Writes the file and returns its path.',
     parameters: { path: { type: 'string', required: true, description: 'Absolute output .xml path.' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path} — contains plaintext secrets; keep the file protected (mode 600)` }] },
     async execute(args) {
       const s = await guardStore()
       const x = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -2296,11 +2301,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
       mask: { type: 'boolean', description: 'Return masked values (secrets replaced with ***) instead of the real values.' },
       prefix: { type: 'string', description: 'Optional key prefix, e.g. "APP_" → APP_GITHUB_TOKEN.' },
+      keysOnly: { type: 'boolean', description: 'Return only the KEY names (values redacted) — useful for config audits.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { lines: { type: 'array', required: true, items: { type: 'string' } } } }, render: (_a, v) => [{ type: 'text', text: v.lines.join('\n') }] },
     async execute(args) {
       const s = await guardStore()
-      const raw = await envLines(s, args.kind, args.ids, typeof args.prefix === 'string' ? args.prefix : '')
+      let raw = await envLines(s, args.kind, args.ids, typeof args.prefix === 'string' ? args.prefix : '')
+      if (args.keysOnly === true) raw = raw.map(line => line.split('=')[0] ?? line)
       const lines = args.mask === true
         ? raw.map(line => line.replace(/=(.*)$/, (m, v: string) => '=' + (v.length > 8 ? v.slice(0, 4) + '***' : '***')))
         : raw
@@ -2524,7 +2531,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'imported into Bitwarden, Vaultwarden, or other tools that accept that format. Contains '
       + 'plaintext secrets — write it to a protected file. Returns the output path and count.',
     parameters: { path: { type: 'string', required: true, description: 'Absolute output .json path.' } },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path} — contains plaintext secrets; keep the file protected (mode 600)` }] },
     async execute(args) {
       assertWritable('vault_export_bitwarden')
       const s = await guardStore()
@@ -3104,6 +3111,17 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('strength')
   async strength(password: string): Promise<{ score: number; verdict: string; feedback: string; bits: number }> {
     return estimateStrength(password)
+  }
+
+  /** Build an otpauth:// URI for an entry's stored TOTP secret (for other devices). */
+  @Remote('totpUri')
+  async totpUri(id: string): Promise<{ uri: string }> {
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry || entry.otpSecret === undefined) throw new Error('vault: entry has no otpSecret')
+    const secret = entry.otpSecret
+    if (secret.startsWith('otpauth://')) return { uri: secret }
+    return { uri: `otpauth://totp/${encodeURIComponent(entry.title)}?secret=${secret}&issuer=dsh-vault` }
   }
 
   /** Generate a random username suggestion for the editor. */

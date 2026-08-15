@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'backup', 'backupStatus', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'get', 'health', 'history', 'list', 'listVaults', 'lock', 'merge', 'recent', 'restore', 'rotation',
-      'saveTemplate', 'search', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'templates', 'totp', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
+      'saveTemplate', 'search', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
 })
@@ -84,5 +84,14 @@ test('VaultGateway status reports unlocked with entry count', async () => {
     const st = await gateway.status()
     expect(st.locked).toBe(false)
     expect(st.entries).toBe(1)
+  })
+})
+
+test('VaultGateway totpUri builds an otpauth URI', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'URITest', otpSecret: 'GEZDGNBVGY3TQOJQ' })
+    const r = await gateway.totpUri(added.id)
+    expect(r.uri.startsWith('otpauth://totp/')).toBe(true)
+    expect(r.uri).toContain('secret=GEZDGNBVGY3TQOJQ')
   })
 })

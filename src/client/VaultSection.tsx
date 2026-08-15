@@ -83,6 +83,7 @@ export interface VaultSectionInjected {
   status: () => Promise<{ locked: boolean; entries: number }>
   switchVault: (name: string) => Promise<{ switched: boolean; name: string }>
   lock: () => Promise<{ locked: boolean }>
+  totpUri: (id: string) => Promise<{ uri: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
@@ -200,7 +201,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -210,6 +211,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [message, setMessage] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [totpMap, setTotpMap] = useState<Record<string, { code: string; until: number }>>({})
+  const [uriMap, setUriMap] = useState<Record<string, string>>({})
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
@@ -541,6 +543,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setMessage(t('error'))
       return
     }
+    // Editing an existing entry and changing its password: confirm (Bitwarden-style).
+    if (editor.status === 'editing' && form.password !== undefined && form.password !== editor.entry?.password) {
+      if (!window.confirm(t('pwChangeConfirm'))) return
+    }
     setBusy(true)
     setMessage(null)
     try {
@@ -634,6 +640,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       void navigator.clipboard.writeText('').catch(() => {})
       clipboardTimer.current = null
     }, CLIPBOARD_CLEAR_MS)
+  }
+
+  /** Fetch and show the otpauth URI for an entry (for adding to another device). */
+  async function showTotpUri(id: string): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await totpUri(id)
+      setUriMap(previous => ({ ...previous, [id]: previous[id] === r.uri ? '' : r.uri }))
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   /** Fetch and display a TOTP code for an entry with an otpSecret. */
@@ -1052,6 +1071,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     )}
                   </span>
                   <span className={css.identity}>{identityLine(entry)}</span>
+                  {uriMap[entry.id] !== undefined && uriMap[entry.id] !== '' && (
+                    <span className={css.totp} title={t('totpUriHint')}>
+                      <code className={css.uriCode}>{uriMap[entry.id]}</code>
+                    </span>
+                  )}
                   {code !== undefined && (
                     <span className={css.totp}>
                       <svg className={css.totpRing} width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -1096,6 +1120,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     disabled={busy || readonly}
                   >{t('copyPassword')}</button>
                   <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
+                  <button type="button" onClick={() => void showTotpUri(entry.id)} disabled={busy} title={t('totpUriHint')}>{t('totpUri')}</button>
                   {code !== undefined && (
                     <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy}>{t('copyCode')}</button>
                   )}

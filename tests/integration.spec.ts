@@ -2477,3 +2477,22 @@ test('vault_find includes a match score', async () => {
     assert.equal(r.results[0]!.score, 0, 'exact title match scored 0')
   })
 })
+
+test('vault_env keysOnly returns key names only', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'EnvK', kind: 'api-key', apiKey: 'super-secret-key-value', tags: ['env'] })
+    const full = await call(ctx, 'vault_env', {}) as { lines: string[] }
+    assert.ok(full.lines.some(l => l.includes('super-secret-key-value')), 'values present by default')
+    const keys = await call(ctx, 'vault_env', { keysOnly: true }) as { lines: string[] }
+    assert.ok(keys.lines.every(l => !l.includes('=') && !l.includes('super-secret')), 'no values in keysOnly')
+    assert.ok(keys.lines.length >= 1)
+  })
+})
+
+test('vault_changes respects a limit', async () => {
+  await withContext(async ctx => {
+    for (let i = 0; i < 3; i++) await call(ctx, 'vault_add', { title: `ChL${i}` })
+    const r = await call(ctx, 'vault_changes', { hours: 24, limit: 2 }) as { changes: unknown[] }
+    assert.equal(r.changes.length, 2)
+  })
+})

@@ -595,3 +595,10 @@
   font-size: 11px;
   padding: 2px 8px;
 }
+
+
+.uriCode {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
+}
