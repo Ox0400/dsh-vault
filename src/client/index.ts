@@ -68,7 +68,7 @@ export function apply(ctx: ClientContext): void {
     stats: () => invoke<Record<string, unknown>>('stats'),
     recent: () => invoke<{ entries: unknown[] }>('recent').then(r => r.entries),
     backupStatus: () => invoke<{ daysSinceBackup: number; backups: number }>('backupStatus'),
-    backup: (maxBackups) => invoke<{ path: string; kept: number; pruned: number }>('backup', { maxBackups: maxBackups ?? 10 }),
+    backup: (maxBackups) => invoke<{ path: string; kept: number; pruned: number }>('backup', { ...(maxBackups !== undefined ? { maxBackups } : {}) }),
     health: () => invoke<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>('health'),
     duplicates: () => invoke<{ groups: number }>('duplicates'),
     status: () => invoke<{ locked: boolean; entries: number }>('status'),

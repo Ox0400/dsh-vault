@@ -1077,6 +1077,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       remove: { type: 'array', items: { type: 'string' }, description: 'Tags to remove.' },
       replace: { type: 'array', items: { type: 'string' }, description: 'Replace the whole tag list with these tags.' },
       dryRun: { type: 'boolean', description: 'Only report how many entries would change, without writing.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only apply to entries of this kind.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { matched: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `matched ${v.matched}, updated ${v.updated} entries` }] },
     async execute(args) {
@@ -1090,9 +1091,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const all = s.list()
       const query = typeof args.query === 'string' ? args.query.trim() : ''
+      const kindFiltered = args.kind === undefined ? all : all.filter(e => (e.kind ?? 'login') === args.kind)
       const matched = query.length === 0
-        ? all
-        : all.filter(e => {
+        ? kindFiltered
+        : kindFiltered.filter(e => {
             const haystack = [e.title, e.username, e.email, e.phone, e.host, e.url, ...(e.tags ?? []), ...Object.values(e.fields ?? {})]
               .filter((v): v is string => v !== undefined)
               .join('\n').toLowerCase()
@@ -1992,14 +1994,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Export the entire vault (including trash) as a single encrypted document under a '
       + 'separate export password (from the exportPasswordEnv config). Use for backup or migration; '
       + 'the export can be re-imported with vault_import. Never pass the password as an argument.',
-    parameters: { ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' } },
+    parameters: {
+      ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
+      since: { type: 'integer', description: 'Only export active entries created or updated at/after this epoch millis (incremental backup).' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { exported: { type: 'boolean', required: true }, note: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
     async execute(args) {
       const exportPassword = resolveExportPassword(config)
       const s = await guardStore()
-      const blob = args.ids !== undefined && args.ids.length > 0
-        ? await s.exportEncrypted(exportPassword, Date.now(), new Set(args.ids))
-        : await s.exportEncrypted(exportPassword)
+      let blob: string
+      if (args.ids !== undefined && args.ids.length > 0) {
+        blob = await s.exportEncrypted(exportPassword, Date.now(), new Set(args.ids))
+      } else if (args.since !== undefined) {
+        const ids = new Set(s.list().filter(e => e.createdAt >= args.since! || e.updatedAt >= args.since!).map(e => e.id))
+        blob = await s.exportEncrypted(exportPassword, Date.now(), ids)
+      } else {
+        blob = await s.exportEncrypted(exportPassword)
+      }
       const file = join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.json`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
       await writeFile(file, blob, { mode: 0o600 })
@@ -2118,7 +2129,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     login: { username: 'account username', email: 'account email', password: 'account password' },
     ssh: { host: 'server host', port: 'port (e.g. 22)', username: 'login user', password: 'password or passphrase', privateKey: 'PEM private key' },
     'api-key': { apiKey: 'the API key', url: 'API base URL', username: 'owner/account (optional)' },
-    oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)' },
+    oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)', scope: 'granted scopes (via fields)', tokenUrl: 'token endpoint (via fields)' },
     secret: { secret: 'the shared secret', notes: 'what it is for' },
     custom: { fields: 'arbitrary key/value pairs' },
   }

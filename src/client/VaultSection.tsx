@@ -255,7 +255,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setBusy(true)
     setMessage(null)
     try {
-      const result = await backup(10)
+      const result = await backup()
       setBackupInfo({ daysSinceBackup: 0, backups: result.kept })
       setMessage(`${t('backupDone')} (${result.kept} kept, ${result.pruned} pruned)`)
       void refresh()

@@ -2022,6 +2022,7 @@ test('vault_generate_password returns strength estimate', async () => {
 test('vault_history supports since filter', async () => {
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'HistA' })
+    await new Promise(r => setTimeout(r, 10))
     const before = Date.now()
     await call(ctx, 'vault_add', { title: 'HistB' })
     const all = await call(ctx, 'vault_history', {}) as { events: Array<{ at: number }> }
@@ -2072,5 +2073,46 @@ test('vault_verify flags out-of-range ports', async () => {
     const r = await call(ctx, 'vault_verify', { id: bad.id }) as { ok: boolean; issues: string[] }
     assert.equal(r.ok, false)
     assert.ok(r.issues.some(i => i.includes('range')), 'port out of range flagged')
+  })
+})
+
+test('vault_export since exports only recently changed entries', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-since-'))
+    process.env.DSH_VAULT_EXPORT_PW5 = 'export-pw-5'
+    await call(ctx, 'vault_add', { title: 'OldOne', password: 'pw' })
+    await new Promise(r => setTimeout(r, 10))
+    const marker = Date.now()
+    await call(ctx, 'vault_add', { title: 'NewOne', password: 'pw2' })
+    const exported = await call(ctx, 'vault_export', { since: marker }) as { note: string }
+    const file = exported.note.replace('vault exported to ', '')
+    const { readFile } = await import('node:fs/promises')
+    const blob = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(blob.entries.length, 1, 'only the new entry exported')
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW5
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW5' })
+})
+
+test('vault_apply_tags filters by kind', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'KindA', kind: 'api-key', secret: 'k' })
+    await call(ctx, 'vault_add', { title: 'KindB', kind: 'ssh', username: 'u' })
+    const r = await call(ctx, 'vault_apply_tags', { add: ['scoped'], kind: 'api-key' }) as { matched: number; updated: number }
+    assert.equal(r.matched, 1)
+    const ssh = await call(ctx, 'vault_search', { query: 'KindB' }) as { results: Array<{ tags?: string[] }> }
+    assert.ok(!(ssh.results[0]!.tags ?? []).includes('scoped'), 'ssh entry untouched')
+  })
+})
+
+test('vault_templates includes oauth scope and custom fields', async () => {
+  await withContext(async ctx => {
+    const oauth = await call(ctx, 'vault_templates', { kind: 'oauth' }) as { fields: Record<string, string> }
+    assert.ok('scope' in oauth.fields && 'tokenUrl' in oauth.fields)
+    const custom = await call(ctx, 'vault_templates', { kind: 'custom' }) as { fields: Record<string, string> }
+    assert.ok('fields' in custom.fields)
   })
 })
