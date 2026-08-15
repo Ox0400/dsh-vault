@@ -374,6 +374,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       query: { type: 'string', description: 'Search text; matches case-insensitively. Omit to list all (optionally filtered by kind).' },
       kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
+      tag: { type: 'string', description: 'Only return entries carrying this tag.' },
       regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
       sortBy: { type: 'string', enum: ['alpha', 'recent', 'favorite', 'smart'], description: 'Sort: alphabetical (default), by updatedAt desc, favorites first, or smart (favorites → recently used → alphabetical).' },
       createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
@@ -409,6 +410,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const kind = args.kind
       let filtered = kind === undefined ? results : results.filter(r => (r.kind ?? 'login') === kind)
       if (args.favoriteOnly === true) filtered = filtered.filter(r => (r as VaultEntrySummary & { favorite?: boolean }).favorite)
+      if (args.tag !== undefined) {
+        const tag = String(args.tag).trim()
+        if (tag.length > 0) filtered = filtered.filter(r => (r.tags ?? []).includes(tag))
+      }
       if (args.createdAfter !== undefined) {
         const store2 = await guardStore()
         const ids = new Set(store2.list().filter(e => e.createdAt > args.createdAfter!).map(e => e.id))
@@ -1326,6 +1331,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       username: { type: 'string', description: 'Optional username.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Searchable tags.' },
       notes: { type: 'string', description: 'Optional free-form notes.' },
+      favorite: { type: 'boolean', description: 'Pin (favorite) the new entry.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, title: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `added ${v.title} (id: ${v.id})` }] },
     async execute(args) {
@@ -1342,6 +1348,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.username !== undefined ? { username: args.username } : {}),
         ...(args.tags !== undefined ? { tags: normalizeTags(args.tags) } : {}),
         ...(args.notes !== undefined ? { notes: args.notes } : {}),
+        ...(args.favorite === true ? { favorite: true } : {}),
         ...(kind === 'api-key' ? { apiKey: args.secret } : kind === 'login' ? { password: args.secret } : { secret: args.secret }),
       })
       emitAudit('write', 'vault_quick_add', entry.id, entry.title)
@@ -1723,6 +1730,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the browser CSV.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same name instead of skipping (default false).' },
+      dryRun: { type: 'boolean', description: 'Preview how many rows would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -1747,6 +1755,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         idx = { name: 4, url: 0, username: 1, password: 2, otpauth: -1, notes: header.indexOf('extra') }
       }
       if (idx.name < 0 || idx.password < 0) return { added: 0, skipped: rows.length - 1, updated: 0 }
+      if (args.dryRun === true) {
+        const wouldAdd = rows.slice(1).filter(row => {
+          const name = (idx.name < row.length ? row[idx.name] : '')?.trim()
+          return name && !s.list().some(e => e.title === name)
+        }).length
+        return { added: 0, skipped: 0, updated: 0, dryRun: true, note: `would add ${wouldAdd} of ${rows.length - 1} rows` }
+      }
       let added = 0
       let skipped = 0
       let updated = 0
@@ -1950,7 +1965,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Import entries from a pass directory tree: each .gpg file (or plaintext file) becomes '
       + 'an entry titled by its filename; the first line is the password, remaining lines are parsed as '
       + 'login:/email:/url: metadata. Returns added/skipped.',
-    parameters: { dir: { type: 'string', required: true, description: 'Absolute pass directory.' } },
+    parameters: {
+      dir: { type: 'string', required: true, description: 'Absolute pass directory.' },
+      dryRun: { type: 'boolean', description: 'Preview how many entries would be imported without writing (default false).' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_wallet')
@@ -1960,6 +1978,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const entries = await readdir(args.dir, { withFileTypes: true })
       if (entries.length > 5000) {
         throw new Error(`vault_import_wallet: ${entries.length} entries exceeds the 5000-entry safety limit — split the directory`)
+      }
+      if (args.dryRun === true) {
+        const files = entries.filter(ent => ent.isFile() && !s.list().some(e => e.title === ent.name.replace(/\.gpg$/i, '')))
+        return { added: 0, skipped: 0, updated: 0, dryRun: true, note: `would add ${files.length} of ${entries.length} entries` }
       }
       for (const ent of entries) {
         if (!ent.isFile()) continue
@@ -2675,6 +2697,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       path: { type: 'string', required: true, description: 'Absolute path of the CSV file.' },
       delimiter: { type: 'string', description: 'CSV delimiter (default ",").' },
       overwrite: { type: 'boolean', description: 'Replace entries with the same title (default false).' },
+      dryRun: { type: 'boolean', description: 'Preview how many rows would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2686,6 +2709,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (rows.length === 0) return { added: 0, skipped: 0, updated: 0 }
       if (rows.length - 1 > 5000) {
         throw new Error(`vault_import_csv: ${rows.length - 1} rows exceeds the 5000-row safety limit — split the file`)
+      }
+      if (args.dryRun === true) {
+        return { added: 0, skipped: 0, updated: 0, dryRun: true, note: `would import ${rows.length - 1} rows` }
       }
       const headers = rows[0]!.map(h => h.trim())
       const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
@@ -3060,7 +3086,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Watchtower-style breach scan for the UI (k-anonymity; offline fallback). */
   @Remote('breachCheck')
-  async breachCheck(online = true): Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean; elapsedMs: number }> {
+  async breachCheck(online?: boolean): Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean; elapsedMs: number }> {
     const store = await this.guardedStore()
     const pwned: Array<{ id: string; title: string; count: number }> = []
     const weak: Array<{ id: string; title: string }> = []
@@ -3069,7 +3095,8 @@ export class VaultGateway extends TypertRemoteService {
     for (const e of store.list()) {
       if (e.password === undefined) continue
       checked++
-      const verdict = online === false ? { breached: false, count: 0, source: 'local' as const } : await checkPassword(e.password)
+      const useOnline = online !== false
+      const verdict = useOnline ? await checkPassword(e.password) : { breached: false, count: 0, source: 'local' as const }
       if (verdict.source !== 'hibp') offline = true
       if (verdict.breached && verdict.reason === 'pwned') pwned.push({ id: e.id, title: e.title, count: verdict.count })
       else if (verdict.breached && verdict.reason === 'weak') weak.push({ id: e.id, title: e.title })
@@ -3216,7 +3243,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** List available vault files (one .json per vault, excluding access/meta/exports). */
   @Remote('listVaults')
-  async listVaults(): Promise<Array<{ name: string; active: boolean }>> {
+  async listVaults(): Promise<Array<{ name: string; active: boolean; entries?: number }>> {
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
     const names: string[] = []
     try {
@@ -3228,7 +3255,16 @@ export class VaultGateway extends TypertRemoteService {
         names.push(m[1]!)
       }
     } catch { /* no dir yet */ }
-    return names.sort().map(name => ({ name, active: name === this.activeName }))
+    const out: Array<{ name: string; active: boolean; entries?: number }> = []
+    for (const name of names.sort()) {
+      try {
+        const store = await sharedVaultStore(this.masterPassword, { name, path: join(dir, `${name}.json`) })
+        out.push({ name, active: name === this.activeName, entries: store.list().length + store.listTrash().length })
+      } catch {
+        out.push({ name, active: name === this.activeName })
+      }
+    }
+    return out
   }
 
   /** Mark an entry as recently used (touches updatedAt). */

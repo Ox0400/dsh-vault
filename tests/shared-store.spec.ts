@@ -30,6 +30,7 @@ async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): P
   } finally {
     if (prevDshHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = prevDshHome
+    VaultPlugin.resetVaultSwitch()
     ctx.registry.delete(VaultPlugin)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)

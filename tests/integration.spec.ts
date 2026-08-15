@@ -49,6 +49,7 @@ async function withContext<T>(
   } finally {
     if (prevDshHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = prevDshHome
+    VaultPlugin.resetVaultSwitch()
     // Clean up registered plugins; the ephemeral vault dir is removed too.
     ctx.registry.delete(VaultPlugin)
     ctx.registry.delete(ToolRuntime)

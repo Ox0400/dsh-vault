@@ -95,3 +95,14 @@ test('VaultGateway totpUri builds an otpauth URI', async () => {
     expect(r.uri).toContain('secret=GEZDGNBVGY3TQOJQ')
   })
 })
+
+test('VaultGateway breachCheck works with and without the online arg', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'BcTest', password: '123456' })
+    const withArg = await gateway.breachCheck(true)
+    expect(withArg.checked).toBe(1)
+    expect(withArg.weak.some(w => w.title === 'BcTest')).toBe(true)
+    const withoutArg = await gateway.breachCheck()
+    expect(withoutArg.checked).toBe(1)
+  })
+})

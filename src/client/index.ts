@@ -73,7 +73,7 @@ export function apply(ctx: ClientContext): void {
     duplicates: () => invoke<{ groups: number }>('duplicates'),
     status: () => invoke<{ locked: boolean; entries: number }>('status'),
     switchVault: (name) => invoke<{ switched: boolean; name: string }>('switchVault', { name }),
-    listVaults: () => invoke<Array<{ name: string; active: boolean }>>('listVaults'),
+    listVaults: () => invoke<Array<{ name: string; active: boolean; entries?: number }>>('listVaults'),
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
     lock: () => invoke<{ locked: boolean }>('lock'),
     totpUri: (id) => invoke<{ uri: string }>('totpUri', { id }),

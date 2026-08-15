@@ -237,7 +237,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [dupGroups, setDupGroups] = useState<number>(0)
   const [dupList, setDupList] = useState<Array<Array<{ id: string; title: string }>>>([])
   const [locked, setLocked] = useState(false)
-  const [vaults, setVaults] = useState<Array<{ name: string; active: boolean }>>([])
+  const [vaults, setVaults] = useState<Array<{ name: string; active: boolean; entries?: number }>>([])
   const [audit, setAudit] = useState<Array<{ id: string; title: string; issues: string[] }>>([])
   const [breach, setBreach] = useState<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean } | null>(null)
 
@@ -742,7 +742,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             aria-label={t('vaultSelect')}
           >
             {vaults.map(v => (
-              <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}</option>
+              <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}{v.entries !== undefined ? ` (${v.entries})` : ''}</option>
             ))}
           </select>
         )}
