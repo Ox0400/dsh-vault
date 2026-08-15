@@ -921,7 +921,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           if (e.port !== undefined && !/^\d{1,5}$/.test(String(e.port))) issues.push('port is not numeric')
           if (e.port !== undefined && /^\d{1,5}$/.test(String(e.port)) && Number(e.port) > 65535) issues.push('port out of range')
           if (e.expiresAt !== undefined && e.expiresAt < Date.now()) issues.push('expired')
-          switch (e.kind ?? 'login') {
+          const kind = e.kind ?? 'login'
+          if (e.password !== undefined && (kind === 'login' || kind === 'ssh') && e.otpSecret === undefined) {
+            issues.push('no 2FA (add a TOTP secret)')
+          }
+          switch (kind) {
             case 'ssh':
               if (!e.host) issues.push('ssh: missing host')
               if (!e.password && !e.privateKey) issues.push('ssh: missing password/privateKey')
@@ -951,7 +955,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (entry.port !== undefined && !/^\d{1,5}$/.test(String(entry.port))) issues.push('port is not numeric')
       if (entry.port !== undefined && /^\d{1,5}$/.test(String(entry.port)) && Number(entry.port) > 65535) issues.push('port out of range')
       if (entry.expiresAt !== undefined && entry.expiresAt < Date.now()) issues.push('expired')
-      switch (entry.kind ?? 'login') {
+      const singleKind = entry.kind ?? 'login'
+      if (entry.password !== undefined && (singleKind === 'login' || singleKind === 'ssh') && entry.otpSecret === undefined) {
+        issues.push('no 2FA (add a TOTP secret)')
+      }
+      switch (singleKind) {
         case 'ssh':
           if (!entry.host) issues.push('ssh: missing host')
           if (!entry.password && !entry.privateKey) issues.push('ssh: missing password/privateKey')
@@ -1308,7 +1316,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Report how many days have passed since the last vault-backup-* file was written '
       + '(1Password-style backup reminder). Returns daysSinceBackup and a suggestion.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { daysSinceBackup: { type: 'integer', required: true }, backups: { type: 'integer', required: true }, lastBackupAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: `last backup ${v.daysSinceBackup} days ago (${v.backups} backup file(s))` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { daysSinceBackup: { type: 'integer', required: true }, backups: { type: 'integer', required: true }, lastBackupAt: { type: 'integer' }, oldestBackupAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: `last backup ${v.daysSinceBackup} days ago (${v.backups} backup file(s))` }] },
     async execute() {
       const s = await guardStore()
       const dir = dirname(resolveVaultPath(config))
@@ -1323,7 +1331,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const last = backups.length > 0 ? Math.max(...backups) : 0
       const days = last > 0 ? Math.floor((Date.now() - last) / 86_400_000) : -1
       void s
-      return { daysSinceBackup: days, backups: backups.length, ...(last > 0 ? { lastBackupAt: last } : {}) }
+      const oldest = backups.length > 0 ? Math.min(...backups) : 0
+      return { daysSinceBackup: days, backups: backups.length, ...(last > 0 ? { lastBackupAt: last } : {}), ...(oldest > 0 ? { oldestBackupAt: oldest } : {}) }
     },
   }))
 
@@ -1819,6 +1828,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           if (entry.url !== undefined) patch.url = entry.url
           if (entry.username !== undefined) patch.username = entry.username
           if (entry.password !== undefined) patch.password = entry.password
+          if (entry.otpSecret !== undefined) patch.otpSecret = entry.otpSecret
+          if (entry.notes !== undefined) patch.notes = entry.notes
           await s.update(existing.id, patch)
           updated++
           continue
@@ -2312,6 +2323,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             const title = (item.name ?? '').trim()
             if (!title) { skipped++; continue }
             const patch: VaultEntryPatch = {}
+            // Bitwarden type 2 = secure note → store as a custom entry with notes.
+            if (item.type === 2) patch.kind = 'custom'
             const login = item.login
             if (login?.username !== undefined) patch.username = login.username
             if (login?.password !== undefined) patch.password = login.password

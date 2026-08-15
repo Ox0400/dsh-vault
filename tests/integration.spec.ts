@@ -928,9 +928,9 @@ test('vault_verify reports missing required fields', async () => {
     const r = await call(ctx, 'vault_verify', { id: bad.id as string }) as { ok: boolean; issues: string[] }
     assert.equal(r.ok, false)
     assert.ok(r.issues.some(i => i.includes('host')))
-    const good = await call(ctx, 'vault_add', { title: 'Full SSH', kind: 'ssh', host: 'h', password: 'p' })
-    const ok = await call(ctx, 'vault_verify', { id: good.id as string }) as { ok: boolean }
-    assert.equal(ok.ok, true)
+    const good = await call(ctx, 'vault_add', { title: 'Full SSH', kind: 'ssh', host: 'h', password: 'p', otpSecret: 'GEZDGNBVGY3TQOJQ' })
+    const ok = await call(ctx, 'vault_verify', { id: good.id as string }) as { ok: boolean; issues: string[] }
+    assert.equal(ok.ok, true, `issues: ${JSON.stringify(ok.issues)}`)
   })
 })
 
@@ -1735,7 +1735,7 @@ test('vault_expiry with 0 clears the expiry', async () => {
 
 test('vault_verify all: true audits every entry', async () => {
   await withContext(async ctx => {
-    await call(ctx, 'vault_add', { title: 'Good', username: 'u', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'Good', username: 'u', password: 'pw', otpSecret: 'GEZDGNBVGY3TQOJQ' })
     await call(ctx, 'vault_add', { title: 'BadSSH', kind: 'ssh', username: 'u' })
     const r = await call(ctx, 'vault_verify', { all: true }) as { ok: boolean; audited: number; withIssues: number; perEntry: Array<{ title: string; ok: boolean; issues: string[] }> }
     assert.equal(r.audited, 2)
@@ -2717,5 +2717,65 @@ test('vault_duplicates respects a limit', async () => {
     }
     const r = await call(ctx, 'vault_duplicates', { mode: 'title', limit: 2 }) as { groups: unknown[] }
     assert.equal(r.groups.length, 2)
+  })
+})
+
+test('vault_import_browser overwrite updates otpauth and notes', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bwov-'))
+    const file = join(dir, 'b.csv')
+    await writeFile(file, 'name,url,username,password\n"OV1","https://s","u1","pw1"\n')
+    await call(ctx, 'vault_import_browser', { path: file })
+    await writeFile(file, 'name,url,username,password,otpauth,notes\n"OV1","https://s","u1","pw1","otpauth://totp/OV1?secret=GEZDGNBVGY3TQOJQ","note2"\n')
+    const r = await call(ctx, 'vault_import_browser', { path: file, overwrite: true }) as { updated: number }
+    assert.equal(r.updated, 1)
+    const found = await call(ctx, 'vault_search', { query: 'OV1' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { otpSecret?: string; notes?: string } }
+    assert.ok(full.entry.otpSecret?.includes('GEZDGNBVGY3TQOJQ'))
+    assert.equal(full.entry.notes, 'note2')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_verify flags login entries missing 2FA', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'No2FA', password: 'pw' })
+    await call(ctx, 'vault_add', { title: 'Has2FA', password: 'pw', otpSecret: 'GEZDGNBVGY3TQOJQ' })
+    const r = await call(ctx, 'vault_verify', { all: true }) as { perEntry: Array<{ title: string; issues: string[] }> }
+    const no2fa = r.perEntry.find(e => e.title === 'No2FA')!
+    assert.ok(no2fa.issues.some(i => i.includes('2FA')), 'no-2FA flagged')
+    const has = r.perEntry.find(e => e.title === 'Has2FA')!
+    assert.ok(!has.issues.some(i => i.includes('2FA')), 'with-2FA not flagged')
+  })
+})
+
+test('vault_import sniff maps Bitwarden secure notes to custom entries', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-note-'))
+    const file = join(dir, 'b.json')
+    await writeFile(file, JSON.stringify({ encrypted: false, folders: [], items: [{ name: 'MyNote', type: 2, notes: 'some note' }] }))
+    const r = await call(ctx, 'vault_import', { path: file }) as { imported: number }
+    assert.equal(r.imported, 1)
+    const found = await call(ctx, 'vault_search', { query: 'MyNote' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { kind?: string; notes?: string } }
+    assert.equal(full.entry.kind, 'custom')
+    assert.equal(full.entry.notes, 'some note')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_backup_status reports oldestBackupAt', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'BSOld', password: 'pw' })
+    await call(ctx, 'vault_backup', {})
+    const r = await call(ctx, 'vault_backup_status', {}) as { oldestBackupAt?: number; backups: number }
+    assert.ok(r.backups >= 1)
+    assert.ok(r.oldestBackupAt !== undefined && r.oldestBackupAt > 0)
   })
 })

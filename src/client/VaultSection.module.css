@@ -613,3 +613,10 @@
 .genHist span {
   align-self: center;
 }
+
+
+.lockedTag {
+  color: #c98a1b;
+  font-size: 12px;
+  font-weight: 600;
+}

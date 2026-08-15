@@ -753,12 +753,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
 
       <div className={css.toolbar}>
+        {locked && (
+          <span className={css.lockedTag}>{t('lockedShort')}</span>
+        )}
         {vaults.length > 0 && (
           <select
             className={css.kindFilter}
             value={vaults.find(v => v.active)?.name ?? ''}
             onChange={event => void switchVaultTo(event.target.value)}
             aria-label={t('vaultSelect')}
+            disabled={locked}
           >
             {vaults.map(v => (
               <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}{v.entries !== undefined ? ` (${v.entries})` : ''}</option>
@@ -773,6 +777,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             placeholder={t('searchPlaceholder')}
             value={query}
             onChange={event => setQuery(event.target.value)}
+            disabled={locked}
           />
           {query.length > 0 && (
             <button type="button" className={css.clearButton} onClick={() => setQuery('')} aria-label={t('clearSearch')}>×</button>
@@ -801,7 +806,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <option value="favorite">{t('sortFavorite')}</option>
           <option value="smart">{t('sortSmart')}</option>
         </select>
-        <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly}>
+        <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
           + {t('add')}
         </button>
       </div>
