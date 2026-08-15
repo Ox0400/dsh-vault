@@ -92,12 +92,12 @@ export interface VaultSectionInjected {
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importFirefox: (masterPassword?: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  import1password: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  importManagerCsv: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  importEnpass: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  importBitwarden: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  import1pif: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
-  importKeePassXml: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  import1password: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importManagerCsv: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importEnpass: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importBitwarden: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  import1pif: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importKeePassXml: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   searchSystem: (query: string, source?: string, limit?: number) => Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
@@ -391,6 +391,27 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Preview a file import (dry run) — reports counts without writing. */
+  async function runImportPreview(run: () => Promise<{ note: string }>): Promise<void> {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await run()
+      setMessage(`${t('previewLabel')} ${r.note}`)
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Preview a file-based import: prompt for the path, then dry-run. */
+  async function runFilePreview(promptKey: string, run: (path: string) => Promise<{ note: string }>): Promise<void> {
+    const path = window.prompt(t(promptKey as never))
+    if (path === null || path.trim() === '') return
+    await runImportPreview(() => run(path.trim()))
   }
 
   /** Import a password-manager CSV file (Dashlane/NordPass/Keeper). */
@@ -1174,26 +1195,32 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('import1passwordDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>{t('import1password')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('import1passwordPrompt', import1password)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importManagerCsvDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportManagerCsv()} disabled={busy || readonly || locked}>{t('importManagerCsv')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importEnpassDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>{t('importEnpass')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importEnpassPrompt', importEnpass)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importBitwardenDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>{t('importBitwarden')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('import1pifDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImport1pif()} disabled={busy || readonly || locked}>{t('import1pif')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('import1pifPrompt', import1pif)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importKeePassXmlDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>{t('importKeePassXml')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
       </div>
       </div>)}

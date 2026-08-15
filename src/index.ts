@@ -2688,6 +2688,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       dir: { type: 'string', description: 'Optional absolute path to the Firefox profile directory; defaults to the latest profile in the Firefox profiles.ini.' },
       masterPassword: { type: 'string', description: 'Firefox primary password (leave empty when none is set).' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same origin+username (default false = incremental).' },
+      dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2704,7 +2705,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const existing = s.list().find(e => e.title === title && e.username === c.username)
         if (existing && args.overwrite !== true) { skipped++; continue }
         const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `Firefox import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2722,6 +2726,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       password: { type: 'string', description: 'Database password (empty allowed).' },
       keyfile: { type: 'string', description: 'Optional absolute path of a keyfile.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2744,7 +2749,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.url.length > 0 ? { url: c.url } : {}),
           ...(c.notes.length > 0 ? { notes: c.notes } : {}),
         }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `KeePass import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2761,6 +2769,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the .1pux file.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2783,9 +2792,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
-          ...(c.favorite === true ? { favorite: true } : {}),
         }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `1Password import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2804,6 +2815,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the CSV file.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2828,9 +2840,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
-          ...(c.favorite === true ? { favorite: true } : {}),
         }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `CSV import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2847,6 +2861,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the .1pif file.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2872,7 +2887,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
           ...(c.favorite === true ? { favorite: true } : {}),
         }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `1Password 1PIF import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2888,6 +2906,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the KeePass .xml export.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2910,7 +2929,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.url.length > 0 ? { url: c.url } : {}),
           ...(c.notes.length > 0 ? { notes: c.notes } : {}),
         }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `KeePass XML import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2927,6 +2949,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the Enpass .json export.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2951,10 +2974,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
           ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
-          ...(c.favorite === true ? { favorite: true } : {}),
-          ...(c.favorite === true ? { favorite: true } : {}),
         }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `Enpass import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -2973,6 +2997,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       localStatePath: { type: 'string', description: 'Windows only: absolute path to the browser Local State file (holds the DPAPI-wrapped key).' },
       profile: { type: 'string', description: 'Chrome profile directory name (default "Default"), e.g. "Profile 1". Ignored when path is set.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same origin+username (default false = incremental).' },
+      dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -2990,7 +3015,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const existing = s.list().find(e => e.title === title && e.username === c.username)
         if (existing && args.overwrite !== true) { skipped++; continue }
         const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
-        if (existing) { await s.update(existing.id, patch); updated++ }
+        if (args.dryRun === true) {
+          if (existing) updated++
+          else added++
+        } else if (existing) { await s.update(existing.id, patch); updated++ }
         else { await s.add({ title, ...patch }); added++ }
       }
       return { added, skipped, updated, note: `Chrome import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3052,6 +3080,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the Bitwarden .json export.' },
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false).' },
+          dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
@@ -3777,7 +3806,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import Firefox profile passwords into the vault. */
   @Remote('importFirefox')
-  async importFirefox(masterPassword?: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async importFirefox(masterPassword?: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const dir = defaultFirefoxProfileDir()
     const creds = readFirefoxLogins(dir, masterPassword ?? '')
@@ -3788,7 +3817,10 @@ export class VaultGateway extends TypertRemoteService {
       const existing = store.list().find(e => e.title === title && e.username === c.username)
       if (existing && overwrite !== true) { skipped++; continue }
       const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `Firefox import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3796,7 +3828,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import Chrome passwords (Login Data) into the vault. */
   @Remote('importChrome')
-  async importChrome(overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async importChrome(overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const dbPath = defaultChromeLoginData('chrome', 'Default')
     const creds = readChromeLogins(dbPath)
@@ -3807,7 +3839,10 @@ export class VaultGateway extends TypertRemoteService {
       const existing = store.list().find(e => e.title === title && e.username === c.username)
       if (existing && overwrite !== true) { skipped++; continue }
       const patch: VaultEntryPatch = { username: c.username, password: c.password, url: c.origin }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `Chrome import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3815,7 +3850,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import a 1Password 1PUX export file. */
   @Remote('import1password')
-  async import1password(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async import1password(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const creds = readOnePasswordPux(await readFile(path))
     let added = 0, skipped = 0, updated = 0
@@ -3833,7 +3868,10 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
       }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `1Password import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3841,7 +3879,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import a password-manager CSV (Dashlane/NordPass/Keeper auto-detected). */
   @Remote('importManagerCsv')
-  async importManagerCsv(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async importManagerCsv(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const raw = await readFile(path, 'utf8')
     const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
@@ -3861,7 +3899,10 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
       }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `CSV import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3869,7 +3910,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import a legacy 1Password 1PIF export. */
   @Remote('import1pif')
-  async import1pif(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async import1pif(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const raw = await readFile(path, 'utf8')
     const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
@@ -3889,7 +3930,10 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
       }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `1Password 1PIF import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3897,7 +3941,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import a KeePass 2.x XML export. */
   @Remote('importKeePassXml')
-  async importKeePassXml(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async importKeePassXml(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const raw = await readFile(path, 'utf8')
     const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
@@ -3914,7 +3958,10 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.url.length > 0 ? { url: c.url } : {}),
         ...(c.notes.length > 0 ? { notes: c.notes } : {}),
       }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `KeePass XML import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3922,7 +3969,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import an Enpass JSON export. */
   @Remote('importEnpass')
-  async importEnpass(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async importEnpass(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const raw = await readFile(path, 'utf8')
     const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
@@ -3941,9 +3988,11 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
-        ...(c.favorite === true ? { favorite: true } : {}),
       }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `Enpass import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -3951,7 +4000,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Import a Bitwarden JSON export. */
   @Remote('importBitwarden')
-  async importBitwarden(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+  async importBitwarden(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
     const store = await this.guardedStore()
     const raw = await readFile(path, 'utf8')
     const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
@@ -3970,9 +4019,11 @@ export class VaultGateway extends TypertRemoteService {
         ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
         ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
         ...(c.favorite === true ? { favorite: true } : {}),
-        ...(c.favorite === true ? { favorite: true } : {}),
       }
-      if (existing) { await store.update(existing.id, patch); updated++ }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `Bitwarden import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
@@ -4459,6 +4510,11 @@ function validateLimit(value: number | undefined, tool: string): number {
     throw new Error(`${tool}: limit must be an integer between 1 and 100`)
   }
   return value
+}
+
+/** Add a `dryRun` flag to an import tool's parameters. */
+function withDryRun<T extends Record<string, unknown>>(params: T, description = 'Preview what would be imported without writing anything (default false).'): T {
+  return { ...params, dryRun: { type: 'boolean' as const, description } }
 }
 
 /** A summary view of an entry without timestamps or secrets (used by update output). */

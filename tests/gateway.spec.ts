@@ -270,3 +270,26 @@ test('VaultGateway importKeePassXml imports a KeePass XML export', async () => {
     expect(site.username).toBe('xml-user')
   })
 })
+
+test('VaultGateway importManagerCsv dryRun previews without writing', async () => {
+  const csv = join(__dirname, 'fixtures', 'dashlane.csv')
+  await withGateway(async gateway => {
+    // Preview first: nothing written.
+    const preview = await gateway.importManagerCsv(csv, false, true)
+    expect(preview.added).toBe(2)
+    expect((await gateway.list()).entries).toHaveLength(0)
+    // Real import writes.
+    const real = await gateway.importManagerCsv(csv, false, false)
+    expect(real.added).toBe(2)
+    expect((await gateway.list()).entries).toHaveLength(2)
+  })
+})
+
+test('VaultGateway import1password dryRun previews without writing', async () => {
+  const pux = join(__dirname, 'fixtures', '1pux-sample.1pux')
+  await withGateway(async gateway => {
+    const preview = await gateway.import1password(pux, false, true)
+    expect(preview.added).toBe(2)
+    expect((await gateway.list()).entries).toHaveLength(0)
+  })
+})
