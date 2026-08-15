@@ -92,6 +92,8 @@ export interface VaultSectionInjected {
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importFirefox: (masterPassword?: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  import1password: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importManagerCsv: (path: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   searchSystem: (query: string, source?: string, limit?: number) => Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
@@ -214,7 +216,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, keychainImport, searchSystem } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, keychainImport, searchSystem } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -361,6 +363,40 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = source === 'chrome'
         ? await importChrome(false)
         : await keychainImport({ limit: 10, preview })
+      setMessage(r.note)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Import a 1Password 1PUX file (path entered by the user). */
+  async function runImport1password(): Promise<void> {
+    const path = window.prompt(t('import1passwordPrompt'))
+    if (path === null || path.trim() === '') return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await import1password(path.trim(), false)
+      setMessage(r.note)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Import a password-manager CSV file (Dashlane/NordPass/Keeper). */
+  async function runImportManagerCsv(): Promise<void> {
+    const path = window.prompt(t('importManagerCsvPrompt'))
+    if (path === null || path.trim() === '') return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await importManagerCsv(path.trim(), false)
       setMessage(r.note)
       void refresh()
     } catch {
@@ -1062,6 +1098,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <span className={css.dupNames}>{t('importKeychainDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>{t('keychainPreview')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importKeychain')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('import1passwordDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>{t('import1password')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('importManagerCsvDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runImportManagerCsv()} disabled={busy || readonly || locked}>{t('importManagerCsv')}</button>
         </div>
       </div>
       </div>)}

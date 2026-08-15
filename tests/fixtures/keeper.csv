@@ -1,0 +1,3 @@
+Folder,Title,Login,Password,Website Address,Notes,Shared Folder,Custom Fields
+"Banking","Keeper Bank","kb-user","kb-pass-1","https://keeper.example/bank","","",""
+"Work","Keeper Mail","km-user","km-pass-2","https://mail.keeper.example","","",""

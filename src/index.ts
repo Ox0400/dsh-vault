@@ -34,6 +34,7 @@ import { readChromeLogins } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx } from './kdbx.ts'
+import { readOnePasswordPux, readPasswordCsv } from './imports.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -2750,6 +2751,87 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_import_1password: import a 1Password 1PUX export ────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_1password',
+    description: 'Import credentials from a 1Password 1PUX export file (an unencrypted ZIP archive '
+      + 'containing export.data). Parses accounts → vaults → items → fields per the official 1PUX '
+      + 'format, extracting title, username, password, url, notes, TOTP secret and tags. Imports '
+      + 'incrementally: entries with the same title are skipped unless overwrite is set.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the .1pux file.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_1password')
+      const s = await guardStore()
+      const creds = readOnePasswordPux(await readFile(args.path))
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.title.trim()
+        if (!title) { skipped++; continue }
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = {
+          ...(c.username.length > 0 ? { username: c.username } : {}),
+          ...(c.password.length > 0 ? { password: c.password } : {}),
+          ...(c.url.length > 0 ? { url: c.url } : {}),
+          ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+          ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+          ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `1Password import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
+  // ── vault_import_manager_csv: import a password-manager CSV ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_manager_csv',
+    description: 'Import credentials from a password-manager CSV export. The header row is matched '
+      + 'against known column names so Dashlane, NordPass, Keeper (and similar exports) are '
+      + 'auto-detected; header-less legacy files are treated as title,url,login,password,notes. '
+      + 'Recognized columns: title/name, username/login, password, url/website address, notes, '
+      + 'otp/2fa secret, tags/folder/group/category.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the CSV file.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false = incremental).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `added ${v.added}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_manager_csv')
+      const s = await guardStore()
+      const raw = await readFile(args.path, 'utf8')
+      const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      const creds = readPasswordCsv(cleaned)
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const c of creds) {
+        const title = c.title.trim()
+        if (!title) { skipped++; continue }
+        const existing = s.list().find(e => e.title === title)
+        if (existing && args.overwrite !== true) { skipped++; continue }
+        const patch: VaultEntryPatch = {
+          ...(c.username.length > 0 ? { username: c.username } : {}),
+          ...(c.password.length > 0 ? { password: c.password } : {}),
+          ...(c.url.length > 0 ? { url: c.url } : {}),
+          ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+          ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+          ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+        }
+        if (existing) { await s.update(existing.id, patch); updated++ }
+        else { await s.add({ title, ...patch }); added++ }
+      }
+      return { added, skipped, updated, note: `CSV import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+    },
+  }))
+
   // ── vault_import_chrome: import passwords from Chrome's Login Data ─────────
   ctx.tools.register(defineTool({
     name: 'vault_import_chrome',
@@ -3599,6 +3681,58 @@ export class VaultGateway extends TypertRemoteService {
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `Chrome import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Import a 1Password 1PUX export file. */
+  @Remote('import1password')
+  async import1password(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const creds = readOnePasswordPux(await readFile(path))
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (!title) { skipped++; continue }
+      const existing = store.list().find(e => e.title === title)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = {
+        ...(c.username.length > 0 ? { username: c.username } : {}),
+        ...(c.password.length > 0 ? { password: c.password } : {}),
+        ...(c.url.length > 0 ? { url: c.url } : {}),
+        ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+        ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+        ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+      }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `1Password import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Import a password-manager CSV (Dashlane/NordPass/Keeper auto-detected). */
+  @Remote('importManagerCsv')
+  async importManagerCsv(path: string, overwrite?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const raw = await readFile(path, 'utf8')
+    const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+    const creds = readPasswordCsv(cleaned)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (!title) { skipped++; continue }
+      const existing = store.list().find(e => e.title === title)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = {
+        ...(c.username.length > 0 ? { username: c.username } : {}),
+        ...(c.password.length > 0 ? { password: c.password } : {}),
+        ...(c.url.length > 0 ? { url: c.url } : {}),
+        ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+        ...(c.otp !== undefined && c.otp.length > 0 ? { otpSecret: c.otp } : {}),
+        ...(c.tags !== undefined && c.tags.length > 0 ? { tags: c.tags } : {}),
+      }
+      if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `CSV import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
   /** Preview or import macOS keychain entries (preview never prompts). */

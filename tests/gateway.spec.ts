@@ -35,7 +35,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'importChrome', 'importFirefox', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'importChrome', 'importFirefox', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
@@ -165,5 +165,42 @@ test('VaultGateway backup/backups/restoreBackup round trip', async () => {
 test('VaultGateway restoreBackup rejects non-backup paths', async () => {
   await withGateway(async gateway => {
     await expect(gateway.restoreBackup('/tmp/not-a-backup.json')).rejects.toThrow(/not a vault backup/)
+  })
+})
+
+test('VaultGateway import1password imports a 1PUX export', async () => {
+  const pux = join(__dirname, 'fixtures', '1pux-sample.1pux')
+  await withGateway(async gateway => {
+    const r = await gateway.import1password(pux)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    const github = entries.find(e => e.title === 'GitHub')!
+    expect(github.username).toBe('alice@example.com')
+    // Second import is incremental → all skipped.
+    const r2 = await gateway.import1password(pux)
+    expect(r2.added).toBe(0)
+    expect(r2.skipped).toBe(2)
+  })
+})
+
+test('VaultGateway importManagerCsv imports a Dashlane export', async () => {
+  const csv = join(__dirname, 'fixtures', 'dashlane.csv')
+  await withGateway(async gateway => {
+    const r = await gateway.importManagerCsv(csv)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    expect(entries.some(e => e.title === 'twitter.com' && e.username === 'ostqxi')).toBe(true)
+  })
+})
+
+test('VaultGateway importManagerCsv imports a Keeper export (folder → tags)', async () => {
+  const csv = join(__dirname, 'fixtures', 'keeper.csv')
+  await withGateway(async gateway => {
+    const r = await gateway.importManagerCsv(csv)
+    expect(r.added).toBe(2)
+    const entries = (await gateway.list()).entries
+    const bank = entries.find(e => e.title === 'Keeper Bank')!
+    expect(bank.username).toBe('kb-user')
+    expect(bank.tags).toContain('Banking')
   })
 })
