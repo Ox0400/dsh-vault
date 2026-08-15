@@ -24,6 +24,7 @@ export interface VaultSummaryWire {
   tags?: string[]
   icon?: string
   color?: string
+  updatedAt?: number
 }
 
 export interface VaultFullWire {
@@ -516,6 +517,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Human-friendly value formatting for the expanded detail box. */
+  function formatDetail(key: string, value: unknown): string {
+    if (key === 'expiresAt' || key === 'updatedAt' || key === 'createdAt') {
+      const n = Number(value)
+      return Number.isFinite(n) && n > 0 ? new Date(n).toISOString().slice(0, 16).replace('T', ' ') : String(value)
+    }
+    if (key === 'sensitivity' && value === 'high') return t('sensitivityHigh')
+    if (key === 'kind') return t(KIND_KEYS[String(value)] ?? 'kindCustom')
+    if (Array.isArray(value)) return value.join(', ')
+    if (typeof value === 'object' && value !== null) return JSON.stringify(value)
+    return String(value)
+  }
+
   /** Field-set summary line for one entry (non-secret). */
   function kindIcon(kind?: string): string {
     switch (kind ?? 'login') {
@@ -797,7 +811,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : 0).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
@@ -839,9 +853,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 </div>
                 {expandedId === entry.id && (
                   <div className={css.detailBox}>
-                    {Object.entries(entry).filter(([k]) => !['id', 'title'].includes(k) && entry[k as keyof VaultSummaryWire] !== undefined).map(([k, v]) => (
+                    {Object.entries(entry).filter(([k]) => !['id', 'title', 'favorite'].includes(k) && entry[k as keyof VaultSummaryWire] !== undefined).map(([k, v]) => (
                       <span key={k} className={css.detailItem}>
-                        <strong>{k}</strong>: {Array.isArray(v) ? v.join(', ') : String(v)}
+                        <strong>{k}</strong>: {formatDetail(k, v)}
                       </span>
                     ))}
                   </div>

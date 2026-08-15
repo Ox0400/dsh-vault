@@ -1994,3 +1994,53 @@ test('vault_import_browser overwrite updates existing names', async () => {
     await rm(dir, { recursive: true, force: true })
   })
 })
+
+test('vault_search sortBy recent actually orders by updatedAt', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Older' })
+    const newer = await call(ctx, 'vault_add', { title: 'Newer' }) as { id: string }
+    // Touch the newer one so its updatedAt clearly exceeds Older's.
+    await call(ctx, 'vault_touch', { id: newer.id })
+    const r = await call(ctx, 'vault_search', { query: '', sortBy: 'recent' }) as { results: Array<{ title: string; updatedAt?: number }> }
+    assert.ok(r.results.length >= 2)
+    assert.equal(r.results[0]!.title, 'Newer', 'most recently updated first')
+    assert.ok(r.results.every(x => typeof x.updatedAt === 'number'), 'updatedAt exposed on summaries')
+  })
+})
+
+test('vault_generate_password returns strength estimate', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_generate_password', { length: 24 }) as { password: string; strength: { score: number; verdict: string } }
+    assert.ok(r.password.length >= 24)
+    assert.ok(typeof r.strength.score === 'number' && r.strength.score >= 0)
+    assert.ok(typeof r.strength.verdict === 'string')
+    const p = await call(ctx, 'vault_generate_password', { passphrase: true }) as { strength: { score: number } }
+    assert.ok(p.strength.score > 0, 'passphrase scored')
+  })
+})
+
+test('vault_history supports since filter', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'HistA' })
+    const before = Date.now()
+    await call(ctx, 'vault_add', { title: 'HistB' })
+    const all = await call(ctx, 'vault_history', {}) as { events: Array<{ at: number }> }
+    const after = await call(ctx, 'vault_history', { since: before }) as { events: Array<{ at: number }> }
+    assert.ok(all.events.length > after.events.length, 'since filters older events')
+    assert.ok(after.events.every(e => e.at >= before))
+  })
+})
+
+test('vault_duplicates groups are title-sorted', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Zeta' })
+    await call(ctx, 'vault_add', { title: 'Alpha' })
+    await call(ctx, 'vault_add', { title: 'Zeta' })
+    await call(ctx, 'vault_add', { title: 'Alpha' })
+    const r = await call(ctx, 'vault_duplicates', { mode: 'title' }) as { groups: Array<Array<{ title: string }>> }
+    for (const group of r.groups) {
+      const titles = group.map(g => g.title)
+      assert.deepEqual([...titles].sort(), titles, 'group sorted by title')
+    }
+  })
+})

@@ -119,7 +119,7 @@ export interface VaultEntry {
 export type VaultEntrySummary = Pick<
   VaultEntry,
   'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags' | 'icon' | 'color'
->
+> & { updatedAt?: number; createdAt?: number }
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
 export type VaultEntryPatch = Partial<Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt'>>
@@ -915,6 +915,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
   return {
     id: entry.id,
     title: entry.title,
+    updatedAt: entry.updatedAt,
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
     ...(entry.icon !== undefined ? { icon: entry.icon } : {}),

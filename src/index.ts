@@ -619,6 +619,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         properties: {
           password: { type: 'string', required: true },
           length: { type: 'integer', required: true },
+          strength: { type: 'json' },
         },
       },
       render: (_args, value) => [{ type: 'text', text: value.password }],
@@ -630,7 +631,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(args.separator !== undefined ? { separator: args.separator } : {}),
           ...(args.wordDigits !== undefined ? { wordDigits: args.wordDigits } : {}),
         })
-        return { password, length: password.length }
+        return { password, length: password.length, strength: estimateStrength(password) }
       }
       const password = generatePassword({
         ...(args.length !== undefined ? { length: args.length } : {}),
@@ -643,7 +644,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.prefix !== undefined ? { prefix: args.prefix } : {}),
         ...(args.suffix !== undefined ? { suffix: args.suffix } : {}),
       })
-      return { password, length: password.length }
+      return { password, length: password.length, strength: estimateStrength(password) }
     },
   }))
 
@@ -924,12 +925,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_history',
     description: 'Show recent mutations to the vault (add/update/delete/restore/purge) within this '
       + 'process, newest first. No secrets — an audit trail for "what changed recently".',
-    parameters: { limit: { type: 'number', description: 'Max entries (default 20).' } },
+    parameters: {
+      limit: { type: 'number', description: 'Max entries (default 20).' },
+      since: { type: 'integer', description: 'Only events after this epoch millis (optional).' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { events: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.events) }] },
     async execute(args) {
       const s = await guardStore()
       const limit = validateLimit(args.limit, 'vault_history')
-      return { events: s.getHistory().slice(0, limit) as unknown as JsonValue[] }
+      let events = s.getHistory()
+      if (args.since !== undefined) events = events.filter(e => e.at >= args.since!)
+      return { events: events.slice(0, limit) as unknown as JsonValue[] }
     },
   }))
 
@@ -1181,8 +1187,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         }
       }
       const mode = args.mode ?? 'both'
-      const titleGroups = [...byKey.values()].filter(g => g.length > 1)
-      const contentGroups = [...byContent.values()].filter(g => g.length > 1)
+      const sortGroup = (g: VaultEntrySummary[]): VaultEntrySummary[] => [...g].sort((a, b) => a.title.localeCompare(b.title))
+      const titleGroups = [...byKey.values()].filter(g => g.length > 1).map(sortGroup)
+      const contentGroups = [...byContent.values()].filter(g => g.length > 1).map(sortGroup)
       if (mode === 'title') return { groups: titleGroups }
       if (mode === 'content') return { groups: contentGroups }
       return { groups: [...titleGroups, ...contentGroups] }
@@ -2730,6 +2737,7 @@ export type VaultEntrySummaryWire = {
   tags?: string[]
   icon?: string
   color?: string
+  updatedAt?: number
 }
 
 /** Wire-safe full entry shape (secrets included; loopback UI only). */
@@ -2740,6 +2748,7 @@ function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire
   return {
     id: entry.id,
     title: entry.title,
+    ...(entry.updatedAt !== undefined ? { updatedAt: entry.updatedAt } : {}),
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
     ...(entry.icon !== undefined ? { icon: entry.icon } : {}),
