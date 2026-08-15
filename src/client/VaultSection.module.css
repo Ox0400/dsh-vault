@@ -536,3 +536,10 @@
   margin-left: 6px;
   padding: 2px 8px;
 }
+
+
+.scoreRing {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -2px;
+}

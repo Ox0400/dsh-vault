@@ -138,6 +138,9 @@ interface VaultFile {
 /** Fixed plaintext inside the verification envelope. */
 const VERIFY_PLAINTEXT = 'dsh-vault:password-ok'
 
+/** Version of the portable encrypted export document (vault_export/vault_import). */
+const EXPORT_FORMAT_VERSION = 2
+
 /** Derive the default on-disk path for a named vault. */
 export function defaultVaultPath(vaultName = 'default'): string {
   return join(dshHomePath('vault'), `${vaultName}.json`)
@@ -723,6 +726,7 @@ export class VaultStore {
       ? [...this.entries.values()]
       : [...this.entries.values()].filter(e => onlyIds.has(e.id))
     const payload = {
+      format: EXPORT_FORMAT_VERSION,
       exportedAt: now,
       kdf: exportKdf,
       entries: entries.map(entry => ({
@@ -741,8 +745,12 @@ export class VaultStore {
   async importEncrypted(blob: string, exportPassword: string, overwrite = false, dryRun = false): Promise<number> {
     if (exportPassword.length === 0) throw new Error('vault: export password must not be empty')
     const parsed = JSON.parse(blob) as {
+      format?: number
       kdf: KdfParams
       entries: Array<EncryptedBlob & { id: string }>
+    }
+    if (parsed.format !== undefined && parsed.format > EXPORT_FORMAT_VERSION) {
+      throw new Error(`vault: export document format ${parsed.format} is newer than supported ${EXPORT_FORMAT_VERSION} — upgrade dsh-vault and retry`)
     }
     if (!parsed.kdf || !Array.isArray(parsed.entries)) {
       throw new Error('vault: invalid export document — expected { kdf, entries[] } from vault_export')
@@ -823,6 +831,33 @@ export class VaultStore {
     this.key?.fill(0)
     this.key = newKey
     return { n: newKdf.n }
+  }
+
+  /**
+   * Verify the on-disk vault document: decrypts the verification envelope
+   * with the in-memory key and compares the encrypted entry count against the
+   * live store. Returns a non-secret integrity verdict.
+   */
+  async integrity(): Promise<{ fileEntries: number; memoryEntries: number; verifyOk: boolean; ok: boolean }> {
+    let fileEntries = 0
+    let verifyOk = false
+    try {
+      const raw = await readFile(this.path, 'utf8')
+      const doc = JSON.parse(raw) as VaultFile
+      fileEntries = doc.entries.length
+      if (this.key !== undefined) {
+        try {
+          decrypt(doc.verify, this.key)
+          verifyOk = true
+        } catch {
+          verifyOk = false
+        }
+      }
+    } catch {
+      fileEntries = 0
+    }
+    const memoryEntries = this.entries.size
+    return { fileEntries, memoryEntries, verifyOk, ok: verifyOk && fileEntries === memoryEntries }
   }
 
   async persist(): Promise<void> {

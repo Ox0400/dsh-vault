@@ -104,6 +104,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_import_browser',
       'vault_import_csv',
       'vault_import_wallet',
+      'vault_integrity',
       'vault_last_modified',
       'vault_list',
       'vault_lock',
@@ -2260,4 +2261,47 @@ test('vault_export_csv includeSecrets adds a weakPassword column', async () => {
     assert.ok(okRow.endsWith('"false"'), 'strong flagged false')
     await rm(dir, { recursive: true, force: true })
   })
+})
+
+test('vault_integrity reports a healthy vault', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'IntA', password: 'pw' })
+    const r = await call(ctx, 'vault_integrity', {}) as { ok: boolean; verifyOk: boolean; fileEntries: number; memoryEntries: number }
+    assert.equal(r.ok, true)
+    assert.equal(r.verifyOk, true)
+    assert.equal(r.fileEntries, r.memoryEntries)
+    assert.ok(r.memoryEntries >= 1)
+  })
+})
+
+test('vault_rekey takes an automatic backup first', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'RekeyA', password: 'pw' })
+    const r = await call(ctx, 'vault_rekey', {}) as { n: number; backup: string }
+    assert.ok(r.n >= 32768)
+    assert.ok(r.backup.includes('vault-backup-'), 'backup created before re-key')
+    const { readFile } = await import('node:fs/promises')
+    const raw = JSON.parse(await readFile(r.backup, 'utf8'))
+    assert.ok(raw.entries.length >= 1, 'backup holds entries')
+  })
+})
+
+test('vault_import rejects a future export format', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-fmt-'))
+    const file = join(dir, 'future.json')
+    // A plausible future document with an unsupported format number.
+    await writeFile(file, JSON.stringify({ format: 999, kdf: {}, entries: [] }))
+    process.env.DSH_VAULT_EXPORT_PW8 = 'export-pw-8'
+    const r = await ctx.tools.execute({
+      signal, callId: CallId(`dsh-vault-fmt-${++callCounter}`),
+      name: 'vault_import', arguments: { path: file },
+    })
+    assert.equal(r.isError, true, 'future format rejected')
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW8
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW8' })
 })

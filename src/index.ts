@@ -1939,6 +1939,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_integrity: verify the on-disk vault document ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_integrity',
+    description: 'Verify the on-disk vault file: decrypts the password-verification envelope with the '
+      + 'live key and compares the stored entry count against the in-memory store. Catches a corrupted '
+      + 'or partially-written vault document before it causes silent data loss. No secrets in the report.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, verifyOk: { type: 'boolean', required: true }, fileEntries: { type: 'integer', required: true }, memoryEntries: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.ok ? 'vault file is intact' : `integrity mismatch: ${v.fileEntries} on disk vs ${v.memoryEntries} in memory, verify=${v.verifyOk}` }] },
+    async execute() {
+      const s = await guardStore()
+      return await s.integrity()
+    },
+  }))
+
   // ── vault_breach_check: Watchtower-style breach scan ──────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_breach_check',
@@ -2478,11 +2492,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 're-encrypt every entry in place. Safe to run periodically or after raising the vault '
       + 'cost expectations; the old document is replaced atomically. Returns the new cost parameter n.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { n: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault re-keyed with scrypt N=${v.n}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { n: { type: 'integer', required: true }, backup: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault re-keyed with scrypt N=${v.n} (backup: ${v.backup})` }] },
     async execute() {
       assertWritable('vault_rekey')
       const s = await guardStore()
-      return await s.rekey()
+      // Destructive operation: take an automatic encrypted backup first so a
+      // failed re-key never strands the vault unrecoverable.
+      const source = resolveVaultPath(config)
+      const dir = dirname(source)
+      const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
+      const raw = await readFile(source, 'utf8')
+      await mkdir(dir, { recursive: true, mode: 0o700 })
+      await writeFile(backup, raw, { mode: 0o600 })
+      const result = await s.rekey()
+      return { ...result, backup }
     },
   }))
 

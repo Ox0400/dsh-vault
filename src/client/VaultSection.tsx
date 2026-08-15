@@ -1006,6 +1006,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report !== null && (
             <span className={`${css.badge} ${report.verdict === 'good' ? css.badgeOk : report.verdict === 'fair' ? css.badgeWarn : css.badgeDanger}`}>
+              <svg className={css.scoreRing} width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
+                <circle
+                  cx="8" cy="8" r="6.5" fill="none"
+                  stroke={report.verdict === 'good' ? '#2e9e5b' : report.verdict === 'fair' ? '#c98a1b' : '#cf3d3d'}
+                  strokeWidth="2" strokeLinecap="round"
+                  strokeDasharray={`${(report.score / 100 * 2 * Math.PI * 6.5).toFixed(1)} ${(2 * Math.PI * 6.5).toFixed(1)}`}
+                  transform="rotate(-90 8 8)"
+                />
+              </svg>
               {t('healthScore')}: {report.score} ({t(VERDICT_KEYS[report.verdict] ?? 'verdictGood')})
             </span>
           )}

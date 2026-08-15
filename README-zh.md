@@ -60,6 +60,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据；`soonWindowDays`（1-90，默认 7）调整即将窗口（不含密钥） |
 | `vault_health` | 保险库健康扫描：弱密码/复用凭据、未启用 2FA、不安全的 http:// 站点,以及整体安全评分（0–100） |
 | `vault_breach_check` | Watchtower 风格泄露扫描：对接 Have I Been Pwned（k-anonymity,仅发送 SHA-1 前缀）,附离线常见密码兜底 |
+| `vault_integrity` | 校验磁盘上的保险库文件可正确解密并与内存中的 store 一致 |
 | `vault_merge` | 合并一个条目到另一个；`keepSource: true` 保留源条目 |
 | `vault_quick_add` | 快速录入（标题 + 一个密钥），支持 tags/notes |
 | `vault_expiry` | 设置/清除过期（`expiresAt: 0` 移除） |
