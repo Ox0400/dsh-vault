@@ -2714,9 +2714,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_import_kdbx: import from a KeePass KDBX4 database ───────────────
   ctx.tools.register(defineTool({
     name: 'vault_import_kdbx',
-    description: 'Import entries from a KeePass KDBX 4.x database (AES-KDF + AES-256-CBC, ChaCha20 '
-      + 'protected fields) using the open-source KDBX4 spec. Password and optional keyfile supported; '
-      + 'Argon2 KDF databases are rejected with a hint to re-save via KeePassXC with AES-KDF.',
+    description: 'Import entries from a KeePass KDBX 4.x database (AES-KDF or Argon2 KDF, AES-256-CBC, '
+      + 'ChaCha20/Salsa20 protected fields) using the open-source KDBX4 spec and RFC 9106. Password and '
+      + 'optional keyfile supported.',
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the .kdbx file.' },
       password: { type: 'string', description: 'Database password (empty allowed).' },

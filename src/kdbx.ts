@@ -3,10 +3,10 @@
  *
  * Implements the KDBX 4 file format per the open-source
  * [keepassxc-specs](https://github.com/Evidlo/keepassxc-specs/blob/master/kdbx-binary/kdbx4_overview.md)
- * and KeePass docs: AES-KDF key transformation, AES-256-CBC payload
- * decryption, HMAC-SHA256 block verification, gzip payload decompression, and
- * ChaCha20 protected-field stream decryption. Argon2 KDF and other ciphers
- * are rejected with a clear message.
+ * and KeePass docs: AES-KDF and Argon2 (RFC 9106) key transformation,
+ * AES-256-CBC payload decryption, HMAC-SHA256 block verification, gzip
+ * payload decompression, and ChaCha20/Salsa20 protected-field stream
+ * decryption.
  *
  * @module dsh-vault/kdbx
  */
@@ -15,6 +15,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac } from 'node:c
 import { gunzipSync } from 'node:zlib'
 import { chacha20Xor } from './chacha20.ts'
 import { salsa20Xor } from './salsa20.ts'
+import { argon2 } from './argon2.ts'
 
 export interface KdbxCredential {
   title: string
@@ -164,21 +165,48 @@ export function readKdbx(data: Buffer, password: string, keyfileData?: Buffer): 
   const kdfParams = parseVariantDictionary(kdf)
   const kdfUuid = kdfParams.$UUID as Buffer | undefined
   if (!kdfUuid) throw new Error('kdbx: KDF parameters missing $UUID')
-  if (kdfUuid.equals(ARGON2_UUID)) throw new Error('kdbx: Argon2 KDF is not supported yet — open the DB in KeePassXC and re-save with AES-KDF')
-  if (!kdfUuid.equals(AES_KDF_UUID)) throw new Error('kdbx: unsupported KDF')
 
   // key_composite = SHA256(SHA256(password) || SHA256(keyfile)); empty keyfile contributes zero bytes.
   const pwHash = createHash('sha256').update(Buffer.from(password, 'utf8')).digest()
   const keyfileHash = keyfileData !== undefined ? createHash('sha256').update(keyfileData).digest() : Buffer.alloc(0)
   const composite = createHash('sha256').update(Buffer.from(Buffer.concat([pwHash, keyfileHash]))).digest()
 
-  // AES-KDF: transform R rounds of AES-ECB (key = S) over the 32-byte
-  // composite, then SHA-256 the result (matches KeePassXC/KeePass KDBX4).
-  const rounds = typeof kdfParams.R === 'number' ? kdfParams.R : 0
-  const transformKey = kdfParams.S as Buffer
-  let transformed: Buffer = composite
-  for (let i = 0; i < rounds; i++) transformed = aesEcbEncrypt(transformKey, transformed)
-  const transformedKey = createHash('sha256').update(transformed).digest()
+  let transformedKey: Buffer
+  if (kdfUuid.equals(ARGON2_UUID)) {
+    // Argon2 (RFC 9106) — the KeePassXC/KeePass default since 2.55/2.7.
+    // Params: S (salt), P (parallelism), I (iterations), M (memory KiB), V
+    // (version), optional K (secret) and A (associated data).
+    const salt = kdfParams.S as Buffer | undefined
+    const iterations = typeof kdfParams.I === 'number' ? kdfParams.I : 0
+    const parallelism = typeof kdfParams.P === 'number' ? kdfParams.P : 0
+    const memoryKiB = typeof kdfParams.M === 'number' ? kdfParams.M : 0
+    const version = typeof kdfParams.V === 'number' ? kdfParams.V : 0x13
+    const secret = kdfParams.K as Buffer | undefined
+    const assocData = kdfParams.A as Buffer | undefined
+    if (!salt) throw new Error('kdbx: Argon2 KDF missing salt')
+    transformedKey = argon2({
+      password: composite,
+      salt,
+      parallelism,
+      iterations,
+      memoryKiB,
+      hashLength: 32,
+      type: 2, // KDBX uses Argon2id
+      version,
+      ...(secret !== undefined ? { secret } : {}),
+      ...(assocData !== undefined ? { associatedData: assocData } : {}),
+    })
+  } else if (kdfUuid.equals(AES_KDF_UUID)) {
+    // AES-KDF: transform R rounds of AES-ECB (key = S) over the 32-byte
+    // composite, then SHA-256 the result (matches KeePassXC/KeePass KDBX4).
+    const rounds = typeof kdfParams.R === 'number' ? kdfParams.R : 0
+    const transformKey = kdfParams.S as Buffer
+    let transformed: Buffer = composite
+    for (let i = 0; i < rounds; i++) transformed = aesEcbEncrypt(transformKey, transformed)
+    transformedKey = createHash('sha256').update(transformed).digest()
+  } else {
+    throw new Error('kdbx: unsupported KDF')
+  }
 
   const masterKey = createHash('sha256').update(Buffer.concat([masterSeed as Buffer<ArrayBuffer>, transformedKey as Buffer<ArrayBuffer>])).digest()
 
