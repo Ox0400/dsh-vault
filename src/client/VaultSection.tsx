@@ -118,7 +118,7 @@ export interface VaultSectionInjected {
   sessionCollect: (sessionId: string, url?: string) => Promise<{ cookies: unknown[]; count: number }>
   sessionClose: (sessionId: string) => Promise<{ closed: boolean }>
   sessionListOpen: () => Promise<Array<{ sessionId: string; url: string; openedAt: number }>>
-  sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; updatedAt?: number }>>
+  sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; expiringSoon?: number; updatedAt?: number }>>
   sessionSave: (options: { title: string; cookies: unknown[]; url?: string; overwrite?: boolean }) => Promise<{ saved: number; id: string }>
   sessionExport: (id: string, format?: 'header' | 'netscape' | 'json' | 'playwright') => Promise<{ text: string; cookieCount: number; domains: string[] }>
   sessionGet: (id: string) => Promise<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>
@@ -247,7 +247,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
   const [backupList, setBackupList] = useState<Array<{ path: string; at: number }>>([])
   const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
-  const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; updatedAt?: number }>>([])
+  const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; expiringSoon?: number; updatedAt?: number }>>([])
   const [sessionUrl, setSessionUrl] = useState('')
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionDetail, setSessionDetail] = useState<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string } | null>(null)
@@ -1551,7 +1551,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {savedSessions.length === 0 && (<p className={css.empty}>{t('sessionEmpty')}</p>)}
           {savedSessions.map(s => (
             <div key={s.id} className={css.dupGroup}>
-              <span className={css.dupNames}>{s.title} — {s.cookieCount} {t('sessionCookie')}{(s.expiredCount ?? 0) > 0 ? ` · ${s.expiredCount} ${t('sessionExpired')}` : ''}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
+              <span className={css.dupNames}>{s.title} — {s.cookieCount} {t('sessionCookie')}{(s.expiredCount ?? 0) > 0 ? ` · ${s.expiredCount} ${t('sessionExpired')}` : ''}{(s.expiringSoon ?? 0) > 0 ? ` · ${s.expiringSoon} ${t('sessionExpiringSoon')}` : ''}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
               <button
                 type="button"
                 className={css.dupMerge}
@@ -1606,10 +1606,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               const cookie = c as { name?: string; value?: string; domain?: string; path?: string; expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: string }
               const expiry = typeof cookie.expires === 'number' && cookie.expires >= 0
                 ? new Date(cookie.expires * 1000).toLocaleString() : t('sessionSessionCookie')
+              const nowSec = Math.floor(Date.now() / 1000)
+              const isExpired = typeof cookie.expires === 'number' && cookie.expires > 0 && cookie.expires <= nowSec
+              const expiring = typeof cookie.expires === 'number' && cookie.expires > nowSec && cookie.expires <= nowSec + 7 * 86_400
               return (
                 <div key={`${index}-${cookie.name}`} className={css.auditRow}>
                   <span className={css.dupNames}>{cookie.name} = {cookie.value}</span>
-                  <span className={css.reportSub}>{t('sessionDomain')}: {cookie.domain}{cookie.httpOnly === true ? ' · HttpOnly' : ''}{cookie.secure === true ? ' · Secure' : ''} · {t('sessionExpires')}: {expiry}</span>
+                  <span className={css.reportSub}>{t('sessionDomain')}: {cookie.domain}{cookie.httpOnly === true ? ' · HttpOnly' : ''}{cookie.secure === true ? ' · Secure' : ''} · {t('sessionExpires')}: {expiry}{isExpired ? ` · ${t('sessionExpired')}` : ''}{expiring ? ` · ${t('sessionExpiringSoon')}` : ''}</span>
                 </div>
               )
             })}

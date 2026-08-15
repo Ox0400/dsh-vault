@@ -3025,3 +3025,17 @@ test('vault_session_export playwright format produces an addCookies snippet', as
     assert.ok(r.text.includes('expires: -1'), 'session cookie expiry')
   })
 })
+
+test('vault_session_list reports expiringSoon counts', async () => {
+  await withContext(async ctx => {
+    const now = Math.floor(Date.now() / 1000)
+    const cookies = [
+      { name: 'a', value: '1', domain: 'x.io', path: '/', expires: now + 3600 * 24 * 3, httpOnly: false, secure: false },
+      { name: 'b', value: '2', domain: 'x.io', path: '/', expires: -1, httpOnly: false, secure: false },
+    ]
+    await call(ctx, 'vault_session_import', { title: 'Soon', cookies: JSON.stringify(cookies) })
+    const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ expiringSoon?: number; expiredCount?: number }> }
+    expect(listed.sessions[0]!.expiringSoon).toBe(1)
+    expect(listed.sessions[0]!.expiredCount).toBe(0)
+  })
+})

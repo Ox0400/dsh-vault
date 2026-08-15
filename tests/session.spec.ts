@@ -83,3 +83,16 @@ test('session: pruneExpiredCookies drops past-expiry, keeps session cookies', ()
   assert.equal(kept.length, 2)
   assert.deepEqual(kept.map(c => c.name).sort(), ['live', 'session'])
 })
+
+test('session: countExpiringCookies counts soon-to-expire but not expired', () => {
+  const { countExpiringCookies } = require('../src/session.ts') as typeof import('../src/session.ts')
+  const now = 1700000000
+  const cookies = [
+    { name: 'live', value: '1', domain: 'x.io', path: '/', expires: now + 3600 * 24 * 3, httpOnly: false, secure: false },
+    { name: 'later', value: '2', domain: 'x.io', path: '/', expires: now + 3600 * 24 * 30, httpOnly: false, secure: false },
+    { name: 'stale', value: '3', domain: 'x.io', path: '/', expires: now - 1000, httpOnly: false, secure: false },
+    { name: 'session', value: '4', domain: 'x.io', path: '/', expires: -1, httpOnly: false, secure: false },
+  ]
+  // 3-day cookie is within the 7-day window; 30-day and expired are not.
+  assert.equal(countExpiringCookies(cookies, 7 * 86_400, now), 1)
+})

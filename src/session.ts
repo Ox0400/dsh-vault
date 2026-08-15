@@ -184,6 +184,12 @@ export function countExpiredCookies(cookies: CookieData[], nowSeconds = Math.flo
   return cookies.filter(c => c.expires > 0 && c.expires <= nowSeconds).length
 }
 
+/** Count of cookies expiring within `windowSeconds` (not yet expired) — a
+ * rotation-style soon warning for login sessions. */
+export function countExpiringCookies(cookies: CookieData[], windowSeconds = 7 * 86_400, nowSeconds = Math.floor(Date.now() / 1000)): number {
+  return cookies.filter(c => c.expires > nowSeconds && c.expires <= nowSeconds + windowSeconds).length
+}
+
 /** Parse a Netscape cookie-jar file (curl -b / wget / browser-extension export)
  * into CookieData rows. Comment lines (#), blank lines and header rows are
  * ignored; the tab-separated columns are domain (optionally prefixed with

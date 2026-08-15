@@ -32,7 +32,7 @@ import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
-import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar, pruneExpiredCookies, countExpiredCookies } from './session.ts'
+import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar, pruneExpiredCookies, countExpiredCookies, countExpiringCookies } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx, describeKdbxKdf } from './kdbx.ts'
 import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
@@ -3196,14 +3196,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       query: { type: 'string', description: 'Optional text filter on title/url/domain.' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { sessions: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} session(s): ${(v.sessions as Array<{ title: string; cookieCount?: number; expiredCount?: number }>).map(s => `${s.title} (${s.cookieCount ?? 0} cookies${(s.expiredCount ?? 0) > 0 ? `, ${s.expiredCount} expired` : ''})`).join(', ')}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { sessions: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} session(s): ${(v.sessions as Array<{ title: string; cookieCount?: number; expiredCount?: number; expiringSoon?: number }>).map(s => `${s.title} (${s.cookieCount ?? 0} cookies${(s.expiredCount ?? 0) > 0 ? `, ${s.expiredCount} expired` : ''}${(s.expiringSoon ?? 0) > 0 ? `, ${s.expiringSoon} expiring soon` : ''})`).join(', ')}` }] },
     async execute(args) {
       const s = await guardStore()
       const needle = typeof args.query === 'string' ? args.query.trim().toLowerCase() : ''
       const sessions = s.list()
         .filter(e => e.kind === 'cookie')
         .filter(e => needle.length === 0 || e.title.toLowerCase().includes(needle) || (e.url ?? '').toLowerCase().includes(needle))
-        .map(e => ({ id: e.id, title: e.title, ...(e.url !== undefined ? { url: e.url } : {}), cookieCount: e.cookies?.length ?? 0, expiredCount: e.cookies !== undefined ? countExpiredCookies(e.cookies) : 0, updatedAt: e.updatedAt }))
+        .map(e => ({ id: e.id, title: e.title, ...(e.url !== undefined ? { url: e.url } : {}), cookieCount: e.cookies?.length ?? 0, expiredCount: e.cookies !== undefined ? countExpiredCookies(e.cookies) : 0, expiringSoon: e.cookies !== undefined ? countExpiringCookies(e.cookies) : 0, updatedAt: e.updatedAt }))
       return { sessions, count: sessions.length }
     },
   }))
@@ -4724,7 +4724,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** List saved cookie entries (no values). */
   @Remote('sessionListSaved')
-  async sessionListSaved(): Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount: number; updatedAt?: number }>> {
+  async sessionListSaved(): Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount: number; expiringSoon: number; updatedAt?: number }>> {
     const store = await this.guardedStore()
     return store.list()
       .filter(e => e.kind === 'cookie')
@@ -4734,6 +4734,7 @@ export class VaultGateway extends TypertRemoteService {
         ...(e.url !== undefined ? { url: e.url } : {}),
         cookieCount: e.cookies?.length ?? 0,
         expiredCount: e.cookies !== undefined ? countExpiredCookies(e.cookies) : 0,
+        expiringSoon: e.cookies !== undefined ? countExpiringCookies(e.cookies) : 0,
         ...(e.updatedAt !== undefined ? { updatedAt: e.updatedAt } : {}),
       }))
   }

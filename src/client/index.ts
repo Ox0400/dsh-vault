@@ -110,7 +110,7 @@ export function apply(ctx: ClientContext): void {
     sessionCollect: (sessionId, url) => invoke<{ cookies: unknown[]; count: number }>('sessionCollect', { sessionId, url: url ?? '' }),
     sessionClose: (sessionId) => invoke<{ closed: boolean }>('sessionClose', { sessionId }),
     sessionListOpen: () => invoke<Array<{ sessionId: string; url: string; openedAt: number }>>('sessionListOpen'),
-    sessionListSaved: () => invoke<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>('sessionListSaved'),
+    sessionListSaved: () => invoke<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; expiringSoon?: number; updatedAt?: number }>>('sessionListSaved'),
     sessionSave: (options) => invoke<{ saved: number; id: string }>('sessionSave', { ...(options ?? {}) }),
     sessionExport: (id, format) => invoke<{ text: string; cookieCount: number; domains: string[] }>('sessionExport', { id, format: format ?? 'header' }),
     sessionGet: (id) => invoke<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>('sessionGet', { id }),
