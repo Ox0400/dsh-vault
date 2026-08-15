@@ -4216,6 +4216,42 @@ export class VaultGateway extends TypertRemoteService {
     return { added, skipped, updated, note: `KeePass XML import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
+  /** Import a KeePass KDBX binary database (3.1/4.x, AES-KDF/Argon2). */
+  @Remote('importKdbx')
+  async importKdbx(path: string, password?: string, keyfile?: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {
+    const store = await this.guardedStore()
+    const data = await readFile(path)
+    let kdfNote = ''
+    try {
+      const info = describeKdbxKdf(data)
+      if (info.kdf === 'argon2' && info.memoryKiB !== undefined && info.memoryKiB >= 65536) {
+        const seconds = Math.round(info.memoryKiB / 65536 * 7)
+        kdfNote = `; Argon2id ${(info.memoryKiB / 1024).toFixed(0)} MiB × ${info.iterations ?? '?'} iters (pure-JS) may take ~${seconds}s to derive — please wait`
+      }
+    } catch { /* best-effort */ }
+    const keyfileData = keyfile !== undefined && keyfile.length > 0 ? await readFile(keyfile) : undefined
+    const creds = readKdbx(data, password ?? '', keyfileData)
+    let added = 0, skipped = 0, updated = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (!title) { skipped++; continue }
+      const existing = store.list().find(e => e.title === title)
+      if (existing && overwrite !== true) { skipped++; continue }
+      const patch: VaultEntryPatch = {
+        ...(c.username.length > 0 ? { username: c.username } : {}),
+        ...(c.password.length > 0 ? { password: c.password } : {}),
+        ...(c.url.length > 0 ? { url: c.url } : {}),
+        ...(c.notes.length > 0 ? { notes: c.notes } : {}),
+      }
+      if (dryRun === true) {
+        if (existing) updated++
+        else added++
+      } else if (existing) { await store.update(existing.id, patch); updated++ }
+      else { await store.add({ title, ...patch }); added++ }
+    }
+    return { added, skipped, updated, note: `KeePass KDBX import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)${kdfNote}` }
+  }
+
   /** Import an Enpass JSON export. */
   @Remote('importEnpass')
   async importEnpass(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {

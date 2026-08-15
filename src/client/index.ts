@@ -92,6 +92,7 @@ export function apply(ctx: ClientContext): void {
     import1pif: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('import1pif', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     importBitwardenEncrypted: (path, password, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importBitwardenEncrypted', { path, password, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     importKeePassXml: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importKeePassXml', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
+    importKdbx: (path, password, keyfile, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importKdbx', { path, password: password ?? '', keyfile: keyfile ?? '', overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     searchSystem: (query, source, limit) => invoke<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>('searchSystem', { query, source: source ?? 'all', limit: limit ?? 15 }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),

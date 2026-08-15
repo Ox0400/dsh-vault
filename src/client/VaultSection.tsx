@@ -99,6 +99,7 @@ export interface VaultSectionInjected {
   import1pif: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importBitwardenEncrypted: (path: string, password: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importKeePassXml: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  importKdbx: (path: string, password?: string, keyfile?: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   searchSystem: (query: string, source?: string, limit?: number) => Promise<{ matches: Array<{ source: string; name: string; username: string }>; note: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
@@ -229,7 +230,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -527,6 +528,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setMessage(null)
     try {
       const r = await importKeePassXml(path.trim(), false)
+      setMessage(r.note)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Import a KeePass KDBX binary database (asks for path + optional password). */
+  async function runImportKdbx(): Promise<void> {
+    const path = window.prompt(t('importKdbxPrompt'))
+    if (path === null || path.trim() === '') return
+    const password = window.prompt(t('importKdbxPasswordPrompt')) ?? ''
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await importKdbx(path.trim(), password, '', false)
       setMessage(r.note)
       void refresh()
     } catch {
@@ -1413,6 +1432,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <span className={css.dupNames}>{t('importKeePassXmlDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>{t('importKeePassXml')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>{t('preview')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('importKdbxDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runImportKdbx()} disabled={busy || readonly || locked}>{t('importKdbx')}</button>
         </div>
       </div>
       </div>)}

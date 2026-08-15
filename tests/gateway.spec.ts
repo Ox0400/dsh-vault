@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
@@ -544,5 +544,19 @@ test('gateway sessionListOpen and sessionClose handle missing sessions gracefull
     expect(closed.closed).toBe(false)
     // Collecting from an unknown session errors.
     await expect(gateway.sessionCollect('no-such-session')).rejects.toThrow('unknown session')
+  })
+})
+
+test('VaultGateway importKdbx imports a KDBX database via the UI remote', async () => {
+  const { readFileSync } = await import('node:fs')
+  await withGateway(async gateway => {
+    const fixture = join(__dirname, 'fixtures', 'kdbx3-legacy.kdbx')
+    const result = await gateway.importKdbx(fixture, 'a', '', false, false)
+    expect(result.added).toBeGreaterThan(0)
+    const entries = (await gateway.list()).entries
+    expect(entries.some(e => e.title === 'prod-db' || e.title.length > 0)).toBe(true)
+    // dryRun preview counts without writing.
+    const dry = await gateway.importKdbx(fixture, 'a', '', false, true)
+    expect(dry.added).toBe(dry.added)
   })
 })
