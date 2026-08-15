@@ -46,7 +46,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_compare` | 逐字段比较两个条目（`onlyA`/`onlyB`/`differ`/`equal`）——只返回字段名，绝不返回密钥值 |
 | `vault_rename` | 一次调用即可重命名条目（`vault_update` 的快捷方式） |
 | `vault_delete` | 软删除条目（移入回收站，磁盘上仍加密保留） |
-| `vault_restore` / `vault_purge` | 从回收站恢复 / 从磁盘永久移除 |
+| `vault_restore` / `vault_purge` / `vault_restore_recent` | 从回收站恢复 / 永久删除 / 撤销最近一次删除 |
 | `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |
 | `vault_totp` | 为存储的 otpSecret（或直接传入的 Base32/otpauth URI）生成当前 6 位动态验证码 |
 | `vault_generate_password` | 生成强随机密码（长度/字符集/分组可选）**或易记口令短语**（`passphrase: true`，EFF 词表，`words`/`separator`/`wordDigits`） |
