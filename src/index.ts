@@ -32,7 +32,7 @@ import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
-import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar } from './session.ts'
+import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar, pruneExpiredCookies, countExpiredCookies } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx, describeKdbxKdf } from './kdbx.ts'
 import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
@@ -3188,20 +3188,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_session_list: list saved cookie entries ─────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_session_list',
-    description: 'List saved browser login sessions (entries of kind "cookie") with their cookie counts — '
-      + 'no cookie values are returned. Use vault_session_export to get a Cookie header or Netscape jar '
-      + 'for a saved session (for curl/requests automation), or vault_get to read the full entry.',
+    description: 'List saved browser login sessions (entries of kind "cookie") with their cookie counts '
+      + 'and how many are expired — no cookie values are returned. Use vault_session_export to get a '
+      + 'Cookie header or Netscape jar for a saved session (for curl/requests automation), '
+      + 'vault_session_prune to drop expired cookies, or vault_get to read the full entry.',
     parameters: {
       query: { type: 'string', description: 'Optional text filter on title/url/domain.' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { sessions: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} session(s): ${(v.sessions as Array<{ title: string; cookieCount?: number }>).map(s => `${s.title} (${s.cookieCount ?? 0} cookies)`).join(', ')}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { sessions: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} session(s): ${(v.sessions as Array<{ title: string; cookieCount?: number; expiredCount?: number }>).map(s => `${s.title} (${s.cookieCount ?? 0} cookies${(s.expiredCount ?? 0) > 0 ? `, ${s.expiredCount} expired` : ''})`).join(', ')}` }] },
     async execute(args) {
       const s = await guardStore()
       const needle = typeof args.query === 'string' ? args.query.trim().toLowerCase() : ''
       const sessions = s.list()
         .filter(e => e.kind === 'cookie')
         .filter(e => needle.length === 0 || e.title.toLowerCase().includes(needle) || (e.url ?? '').toLowerCase().includes(needle))
-        .map(e => ({ id: e.id, title: e.title, ...(e.url !== undefined ? { url: e.url } : {}), cookieCount: e.cookies?.length ?? 0, updatedAt: e.updatedAt }))
+        .map(e => ({ id: e.id, title: e.title, ...(e.url !== undefined ? { url: e.url } : {}), cookieCount: e.cookies?.length ?? 0, expiredCount: e.cookies !== undefined ? countExpiredCookies(e.cookies) : 0, updatedAt: e.updatedAt }))
       return { sessions, count: sessions.length }
     },
   }))
@@ -3320,6 +3321,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (existing) { await s.update(existing.id, patch); id = existing.id }
       else { const entry = await s.add({ title, ...patch }); id = entry.id }
       return { saved: cookies.length, id, note: title }
+    },
+  }))
+
+  // ── vault_session_prune: remove expired cookies from a saved session ──────
+  ctx.tools.register(defineTool({
+    name: 'vault_session_prune',
+    description: 'Remove expired cookies from a saved login session: cookies whose expiry time has '
+      + 'passed are deleted (session cookies with expires <= 0 are always kept). Use preview: true to '
+      + 'see how many would be pruned without modifying the entry. Useful before exporting a stale '
+      + 'session to automation.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id of the saved session (see vault_session_list).' },
+      preview: { type: 'boolean', description: 'Only report how many cookies would be pruned (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { pruned: { type: 'integer', required: true }, remaining: { type: 'integer', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `pruned ${v.pruned}, ${v.remaining} remaining` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) throw new Error('vault_session_prune: entry not found')
+      if ((entry.kind ?? 'login') !== 'cookie' || !Array.isArray(entry.cookies)) {
+        throw new Error('vault_session_prune: entry is not a saved cookie session')
+      }
+      const expired = countExpiredCookies(entry.cookies)
+      if (args.preview === true || expired === 0) {
+        return { pruned: 0, remaining: entry.cookies.length, note: expired === 0 ? `no expired cookies (${entry.cookies.length} valid)` : `preview: ${expired} expired of ${entry.cookies.length} — run without preview to prune` }
+      }
+      const kept = pruneExpiredCookies(entry.cookies)
+      const patch: VaultEntryPatch = {
+        cookies: kept,
+        notes: `pruned ${expired} expired cookies (${new Date().toISOString()})`,
+      }
+      await s.update(entry.id, patch)
+      return { pruned: expired, remaining: kept.length, note: `pruned ${expired} expired cookies, ${kept.length} remaining` }
     },
   }))
 
@@ -4685,7 +4719,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** List saved cookie entries (no values). */
   @Remote('sessionListSaved')
-  async sessionListSaved(): Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>> {
+  async sessionListSaved(): Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount: number; updatedAt?: number }>> {
     const store = await this.guardedStore()
     return store.list()
       .filter(e => e.kind === 'cookie')
@@ -4694,6 +4728,7 @@ export class VaultGateway extends TypertRemoteService {
         title: e.title,
         ...(e.url !== undefined ? { url: e.url } : {}),
         cookieCount: e.cookies?.length ?? 0,
+        expiredCount: e.cookies !== undefined ? countExpiredCookies(e.cookies) : 0,
         ...(e.updatedAt !== undefined ? { updatedAt: e.updatedAt } : {}),
       }))
   }
@@ -4752,6 +4787,25 @@ export class VaultGateway extends TypertRemoteService {
       cookies: entry.cookies,
       ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
     }
+  }
+
+  /** Remove expired cookies from a saved session (preview keeps them). */
+  @Remote('sessionPrune')
+  async sessionPrune(id: string, preview?: boolean): Promise<{ pruned: number; remaining: number; note: string }> {
+    this.assertWritable('sessionPrune')
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) throw new Error('sessionPrune: entry not found')
+    if ((entry.kind ?? 'login') !== 'cookie' || !Array.isArray(entry.cookies)) {
+      throw new Error('sessionPrune: entry is not a saved cookie session')
+    }
+    const expired = countExpiredCookies(entry.cookies)
+    if (preview === true || expired === 0) {
+      return { pruned: 0, remaining: entry.cookies.length, note: expired === 0 ? `no expired cookies (${entry.cookies.length} valid)` : `preview: ${expired} expired of ${entry.cookies.length} — run without preview to prune` }
+    }
+    const kept = pruneExpiredCookies(entry.cookies)
+    await store.update(entry.id, { cookies: kept, notes: `pruned ${expired} expired cookies (${new Date().toISOString()})` })
+    return { pruned: expired, remaining: kept.length, note: `pruned ${expired} expired cookies, ${kept.length} remaining` }
   }
 }
 

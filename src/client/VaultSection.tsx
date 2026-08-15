@@ -118,10 +118,11 @@ export interface VaultSectionInjected {
   sessionCollect: (sessionId: string, url?: string) => Promise<{ cookies: unknown[]; count: number }>
   sessionClose: (sessionId: string) => Promise<{ closed: boolean }>
   sessionListOpen: () => Promise<Array<{ sessionId: string; url: string; openedAt: number }>>
-  sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>
+  sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; updatedAt?: number }>>
   sessionSave: (options: { title: string; cookies: unknown[]; url?: string; overwrite?: boolean }) => Promise<{ saved: number; id: string }>
   sessionExport: (id: string, format?: 'header' | 'netscape' | 'json') => Promise<{ text: string; cookieCount: number; domains: string[] }>
   sessionGet: (id: string) => Promise<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>
+  sessionPrune: (id: string, preview?: boolean) => Promise<{ pruned: number; remaining: number; note: string }>
 }
 
 /** Type-level alias so consumers can reference the wire shapes without values. */
@@ -231,7 +232,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -246,7 +247,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
   const [backupList, setBackupList] = useState<Array<{ path: string; at: number }>>([])
   const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
-  const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>([])
+  const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; updatedAt?: number }>>([])
   const [sessionUrl, setSessionUrl] = useState('')
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionDetail, setSessionDetail] = useState<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string } | null>(null)
@@ -760,6 +761,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const detail = await sessionGet(id)
       setSessionDetail(detail)
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Remove expired cookies from a saved session (confirms first). */
+  async function runSessionPrune(id: string): Promise<void> {
+    if (!window.confirm(t('sessionPruneConfirm'))) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await sessionPrune(id, false)
+      setMessage(result.note)
+      refreshSessions()
     } catch {
       setMessage(t('error'))
     } finally {
@@ -1534,7 +1551,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {savedSessions.length === 0 && (<p className={css.empty}>{t('sessionEmpty')}</p>)}
           {savedSessions.map(s => (
             <div key={s.id} className={css.dupGroup}>
-              <span className={css.dupNames}>{s.title} — {s.cookieCount} {t('sessionCookie')}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
+              <span className={css.dupNames}>{s.title} — {s.cookieCount} {t('sessionCookie')}{(s.expiredCount ?? 0) > 0 ? ` · ${s.expiredCount} ${t('sessionExpired')}` : ''}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
               <button
                 type="button"
                 className={css.dupMerge}
@@ -1556,6 +1573,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 disabled={busy}
                 title={t('sessionView')}
               >{t('sessionView')}</button>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void runSessionPrune(s.id)}
+                disabled={busy || readonly || locked || (s.expiredCount ?? 0) === 0}
+                title={t('sessionPrune')}
+              >{t('sessionPrune')}</button>
               <button
                 type="button"
                 className={css.dangerButton}

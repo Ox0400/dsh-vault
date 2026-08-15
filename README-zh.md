@@ -88,6 +88,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_session_list` | 列出已保存的登录会话与 cookie 数量（不含值） |
 | `vault_session_export` | 将会话导出为 `Cookie` 请求头、Netscape cookie-jar 文件（curl `-b`）或原始 JSON,供自动化任务使用 |
 | `vault_session_close` | 关闭已打开的浏览器登录会话（已收集的 cookie 仍保留在保险库中） |
+| `vault_session_prune` | 移除已保存会话中的过期 cookie（无过期的会话 cookie 保留）;`preview: true` 只报告不修改 |
 | `vault_copy` | 复制条目（含密钥）到另一个命名保险库 |
 | `vault_templates` | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格） |
 

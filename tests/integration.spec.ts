@@ -177,6 +177,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_session_import_file',
       'vault_session_list',
       'vault_session_open',
+      'vault_session_prune',
       'vault_set_icon',
       'vault_stats',
       'vault_strength',
@@ -2963,5 +2964,28 @@ test('vault_session_import_file imports a Netscape jar and round-trips with expo
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+test('vault_session_prune tool removes expired cookies and lists expired counts', async () => {
+  await withContext(async ctx => {
+    const now = Math.floor(Date.now() / 1000)
+    const cookies = [
+      { name: 'live', value: '1', domain: 'x.io', path: '/', expires: now + 10000, httpOnly: false, secure: false },
+      { name: 'stale', value: '2', domain: 'x.io', path: '/', expires: now - 10000, httpOnly: false, secure: false },
+    ]
+    const imported = await call(ctx, 'vault_session_import', { title: 'PruneTool', cookies: JSON.stringify(cookies) }) as { id: string }
+    // List reports the expired count (no values).
+    const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ expiredCount?: number }> }
+    expect(listed.sessions[0]!.expiredCount).toBe(1)
+    // Preview does not modify.
+    const preview = await call(ctx, 'vault_session_prune', { id: imported.id, preview: true }) as { note: string }
+    expect(preview.note).toContain('1 expired')
+    const pruned = await call(ctx, 'vault_session_prune', { id: imported.id }) as { pruned: number; remaining: number }
+    expect(pruned.pruned).toBe(1)
+    expect(pruned.remaining).toBe(1)
+    const after = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ expiredCount?: number; cookieCount?: number }> }
+    expect(after.sessions[0]!.expiredCount).toBe(0)
+    expect(after.sessions[0]!.cookieCount).toBe(1)
   })
 })

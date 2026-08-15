@@ -173,6 +173,17 @@ export function netscapeJar(cookies: CookieData[]): string {
   return lines.join('\n')
 }
 
+/** Drop cookies whose expiry (epoch seconds) is in the past; session cookies
+ * (expires <= 0) are always kept. Returns the pruned list. */
+export function pruneExpiredCookies(cookies: CookieData[], nowSeconds = Math.floor(Date.now() / 1000)): CookieData[] {
+  return cookies.filter(c => c.expires <= 0 || c.expires > nowSeconds)
+}
+
+/** Count of expired cookies in a list (diagnostics). */
+export function countExpiredCookies(cookies: CookieData[], nowSeconds = Math.floor(Date.now() / 1000)): number {
+  return cookies.filter(c => c.expires > 0 && c.expires <= nowSeconds).length
+}
+
 /** Parse a Netscape cookie-jar file (curl -b / wget / browser-extension export)
  * into CookieData rows. Comment lines (#), blank lines and header rows are
  * ignored; the tab-separated columns are domain (optionally prefixed with

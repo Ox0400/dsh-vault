@@ -37,7 +37,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
-      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
+      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
 })
@@ -558,5 +558,29 @@ test('VaultGateway importKdbx imports a KDBX database via the UI remote', async 
     // dryRun preview counts without writing.
     const dry = await gateway.importKdbx(fixture, 'a', '', false, true)
     expect(dry.added).toBe(dry.added)
+  })
+})
+
+test('gateway sessionPrune removes expired cookies and previews without writing', async () => {
+  await withGateway(async gateway => {
+    const now = Math.floor(Date.now() / 1000)
+    const cookies = [
+      { name: 'live', value: '1', domain: 'x.io', path: '/', expires: now + 10000, httpOnly: false, secure: false },
+      { name: 'stale', value: '2', domain: 'x.io', path: '/', expires: now - 10000, httpOnly: false, secure: false },
+    ]
+    const saved = await gateway.sessionSave({ title: 'PruneMe', cookies })
+    // Preview reports the expired count without touching the entry.
+    const preview = await gateway.sessionPrune(saved.id, true)
+    expect(preview.pruned).toBe(0)
+    expect(preview.note).toContain('1 expired')
+    const before = await gateway.sessionGet(saved.id)
+    expect(before.cookies).toHaveLength(2)
+    // Actual prune removes the stale cookie.
+    const pruned = await gateway.sessionPrune(saved.id, false)
+    expect(pruned.pruned).toBe(1)
+    expect(pruned.remaining).toBe(1)
+    const after = await gateway.sessionGet(saved.id)
+    expect(after.cookies).toHaveLength(1)
+    expect(after.cookies[0]!.name).toBe('live')
   })
 })

@@ -69,3 +69,17 @@ function awaitImport(): { parseNetscapeJar: (t: string) => CookieData[] } {
   const m = require('../src/session.ts') as { parseNetscapeJar: (t: string) => CookieData[] }
   return m
 }
+
+test('session: pruneExpiredCookies drops past-expiry, keeps session cookies', () => {
+  const { pruneExpiredCookies, countExpiredCookies } = require('../src/session.ts') as typeof import('../src/session.ts')
+  const now = 1700000000
+  const cookies = [
+    { name: 'live', value: '1', domain: 'x.io', path: '/', expires: now + 1000, httpOnly: false, secure: false },
+    { name: 'session', value: '2', domain: 'x.io', path: '/', expires: -1, httpOnly: false, secure: false },
+    { name: 'stale', value: '3', domain: 'x.io', path: '/', expires: now - 1000, httpOnly: false, secure: false },
+  ]
+  assert.equal(countExpiredCookies(cookies, now), 1)
+  const kept = pruneExpiredCookies(cookies, now)
+  assert.equal(kept.length, 2)
+  assert.deepEqual(kept.map(c => c.name).sort(), ['live', 'session'])
+})

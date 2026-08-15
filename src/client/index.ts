@@ -114,6 +114,7 @@ export function apply(ctx: ClientContext): void {
     sessionSave: (options) => invoke<{ saved: number; id: string }>('sessionSave', { ...(options ?? {}) }),
     sessionExport: (id, format) => invoke<{ text: string; cookieCount: number; domains: string[] }>('sessionExport', { id, format: format ?? 'header' }),
     sessionGet: (id) => invoke<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>('sessionGet', { id }),
+    sessionPrune: (id, preview) => invoke<{ pruned: number; remaining: number; note: string }>('sessionPrune', { id, preview: preview ?? false }),
   })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({

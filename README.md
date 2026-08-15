@@ -90,6 +90,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_session_list` | List saved login sessions with cookie counts (no values) |
 | `vault_session_export` | Export a saved session as a `Cookie` header value, a Netscape cookie-jar file (curl `-b`), or raw JSON for automation |
 | `vault_session_close` | Close an open browser login session (collected cookies stay in the vault) |
+| `vault_session_prune` | Remove expired cookies from a saved session (session cookies are kept); `preview: true` reports without writing |
 | `vault_copy` | Copy an entry (secrets included) into another named vault |
 | `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
 
