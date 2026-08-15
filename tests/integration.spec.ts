@@ -2044,3 +2044,33 @@ test('vault_duplicates groups are title-sorted', async () => {
     }
   })
 })
+
+test('vault_import dryRun previews without writing', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-dry-'))
+    const file = join(dir, 'export.json')
+    process.env.DSH_VAULT_EXPORT_PW4 = 'export-pw-4'
+    const a = await call(ctx, 'vault_add', { title: 'DryRun', password: 'pw' }) as { id: string }
+    const exported = await call(ctx, 'vault_export', { ids: [a.id] }) as { note: string }
+    const src = exported.note.replace('vault exported to ', '')
+    const before = await call(ctx, 'vault_count', {}) as { count: number }
+    const preview = await call(ctx, 'vault_import', { path: src, dryRun: true }) as { imported: number }
+    assert.ok(preview.imported >= 1)
+    const after = await call(ctx, 'vault_count', {}) as { count: number }
+    assert.equal(after.count, before.count, 'dryRun wrote nothing')
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW4
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW4' })
+})
+
+test('vault_verify flags out-of-range ports', async () => {
+  await withContext(async ctx => {
+    const bad = await call(ctx, 'vault_add', { title: 'BadPort', kind: 'ssh', host: 'h', port: '70000' }) as { id: string }
+    const r = await call(ctx, 'vault_verify', { id: bad.id }) as { ok: boolean; issues: string[] }
+    assert.equal(r.ok, false)
+    assert.ok(r.issues.some(i => i.includes('range')), 'port out of range flagged')
+  })
+})

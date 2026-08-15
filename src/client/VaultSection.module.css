@@ -498,3 +498,19 @@
   font-size: 12px;
   padding: 2px 8px;
 }
+
+
+.auditRow {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: 4px 0;
+}
+.auditIssues {
+  color: var(--dsh-color-text-2, #666);
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

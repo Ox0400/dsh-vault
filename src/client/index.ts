@@ -75,6 +75,7 @@ export function apply(ctx: ClientContext): void {
     switchVault: (name) => invoke<{ switched: boolean; name: string }>('switchVault', { name }),
     listVaults: () => invoke<Array<{ name: string; active: boolean }>>('listVaults'),
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
+    verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     duplicateGroups: () => invoke<Array<Array<{ id: string; title: string }>>>('duplicateGroups'),
     merge: (fromId, toId, keepSource) => invoke<{ found: boolean }>('merge', { fromId, toId, keepSource: keepSource ?? false }),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),

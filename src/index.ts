@@ -860,6 +860,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         for (const e of s.list()) {
           const issues: string[] = []
           if (e.port !== undefined && !/^\d{1,5}$/.test(String(e.port))) issues.push('port is not numeric')
+          if (e.port !== undefined && /^\d{1,5}$/.test(String(e.port)) && Number(e.port) > 65535) issues.push('port out of range')
           if (e.expiresAt !== undefined && e.expiresAt < Date.now()) issues.push('expired')
           switch (e.kind ?? 'login') {
             case 'ssh':
@@ -884,6 +885,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const issues: string[] = []
       if (!entry.title) issues.push('missing title')
       if (entry.port !== undefined && !/^\d{1,5}$/.test(String(entry.port))) issues.push('port is not numeric')
+      if (entry.port !== undefined && /^\d{1,5}$/.test(String(entry.port)) && Number(entry.port) > 65535) issues.push('port out of range')
       if (entry.expiresAt !== undefined && entry.expiresAt < Date.now()) issues.push('expired')
       switch (entry.kind ?? 'login') {
         case 'ssh':
@@ -2008,15 +2010,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_import',
     description: 'Import a previously exported vault document (see vault_export), merging entries by '
-      + 'id. Pass the document path; the export password comes from the exportPasswordEnv config.',
-    parameters: { path: { type: 'string', required: true, description: 'Absolute path of the exported vault JSON file.' } },
+      + 'id (gaps filled) or replacing them with overwrite. dryRun previews without writing. Pass the '
+      + 'document path; the export password comes from the exportPasswordEnv config.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the exported vault JSON file.' },
+      overwrite: { type: 'boolean', description: 'Replace existing entries with the same id instead of merging (default false).' },
+      dryRun: { type: 'boolean', description: 'Preview how many entries would be imported without writing anything (default false).' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { imported: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.imported} entries` }] },
     async execute(args) {
       assertWritable('vault_import')
       const exportPassword = resolveExportPassword(config)
       const s = await guardStore()
       const blob = await readFile(args.path, 'utf8')
-      const count = await s.importEncrypted(blob, exportPassword)
+      const count = await s.importEncrypted(blob, exportPassword, args.overwrite === true, args.dryRun === true)
       return { imported: count }
     },
   }))
@@ -2598,6 +2605,33 @@ export class VaultGateway extends TypertRemoteService {
       byKey.set(key, list)
     }
     return [...byKey.values()].filter(g => g.length > 1)
+  }
+
+  /** Per-entry verification issues for the UI audit panel (no secrets). */
+  @Remote('verifyAll')
+  async verifyAll(): Promise<Array<{ id: string; title: string; issues: string[] }>> {
+    const store = await this.ensureStore()
+    const out: Array<{ id: string; title: string; issues: string[] }> = []
+    for (const e of store.list()) {
+      const issues: string[] = []
+      if (e.port !== undefined && !/^\d{1,5}$/.test(String(e.port))) issues.push('port is not numeric')
+      if (e.port !== undefined && /^\d{1,5}$/.test(String(e.port)) && Number(e.port) > 65535) issues.push('port out of range')
+      if (e.expiresAt !== undefined && e.expiresAt < Date.now()) issues.push('expired')
+      switch (e.kind ?? 'login') {
+        case 'ssh':
+          if (!e.host) issues.push('ssh: missing host')
+          if (!e.password && !e.privateKey) issues.push('ssh: missing password/privateKey')
+          break
+        case 'api-key':
+          if (!e.apiKey && !e.secret) issues.push('api-key: missing apiKey/secret')
+          break
+        case 'oauth':
+          if (!e.accessToken) issues.push('oauth: missing accessToken')
+          break
+      }
+      if (issues.length > 0) out.push({ id: e.id, title: e.title, issues })
+    }
+    return out
   }
 
   /** Vault lock/entry status for the UI banner. */

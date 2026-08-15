@@ -84,6 +84,7 @@ export interface VaultSectionInjected {
   switchVault: (name: string) => Promise<{ switched: boolean; name: string }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
+  verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -180,7 +181,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -211,6 +212,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [dupList, setDupList] = useState<Array<Array<{ id: string; title: string }>>>([])
   const [locked, setLocked] = useState(false)
   const [vaults, setVaults] = useState<Array<{ name: string; active: boolean }>>([])
+  const [audit, setAudit] = useState<Array<{ id: string; title: string; issues: string[] }>>([])
 
   const readonly = policy?.accessMode === 'readonly'
 
@@ -341,6 +343,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           setDupGroups((dp as { groups: number }).groups)
         }
         duplicateGroups().then(setDupList).catch(() => {})
+        verifyAll().then(setAudit).catch(() => {})
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
@@ -357,7 +360,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     const onFocus = (): void => { load() }
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
-  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups])
+  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll])
 
   /** Open the editor for a new entry. */
   function startCreate(): void {
@@ -726,6 +729,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               ))}
             </>
           )}
+        </div>
+      )}
+
+      {audit.length > 0 && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('auditTitle')} ({audit.length})</p>
+          {audit.slice(0, 6).map(item => (
+            <div key={item.id} className={css.auditRow}>
+              <span className={css.dupNames}>{item.title}</span>
+              <span className={css.auditIssues}>{item.issues.join('; ')}</span>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void startEdit(item.id)}
+                disabled={busy}
+              >{t('auditEdit')}</button>
+            </div>
+          ))}
         </div>
       )}
 

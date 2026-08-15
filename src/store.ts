@@ -706,7 +706,7 @@ export class VaultStore {
    * Import an exported vault blob, merging entries by id (existing entries win
    * unless `overwrite`). Returns the number of entries added.
    */
-  async importEncrypted(blob: string, exportPassword: string, overwrite = false): Promise<number> {
+  async importEncrypted(blob: string, exportPassword: string, overwrite = false, dryRun = false): Promise<number> {
     if (exportPassword.length === 0) throw new Error('vault: export password must not be empty')
     const parsed = JSON.parse(blob) as {
       kdf: KdfParams
@@ -725,6 +725,7 @@ export class VaultStore {
       const entry = JSON.parse(plaintext.toString('utf8')) as VaultEntry
       const existing = this.entries.get(entry.id)
       if (existing !== undefined && !overwrite) {
+        if (dryRun) { added++; continue }
         // Merge instead of skipping: fill gaps in the existing entry.
         const merged = { ...existing }
         const er = merged as unknown as Record<string, unknown>
@@ -738,13 +739,14 @@ export class VaultStore {
         added++
         continue
       }
+      if (dryRun) { added++; continue }
       // Imported entries come back as active (clear any soft-delete marker).
       const { deletedAt, ...active } = entry
       this.entries.set(entry.id, { ...active, updatedAt: Date.now() })
       added++
     }
     exportKey.fill(0)
-    await this.persist()
+    if (!dryRun) await this.persist()
     return added
   }
 
