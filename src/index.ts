@@ -788,6 +788,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'soft-deleted, newest first. No secrets — a lightweight audit view.',
     parameters: {
       hours: { type: 'number', description: 'Look-back window in hours (default 24).' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only report changes for entries of this kind.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { changes: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.changes) }] },
     async execute(args) {
@@ -796,7 +797,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) {
         throw new Error('vault_changes: hours must be a positive number ≤ 8760')
       }
-      return { changes: s.changes(hours * 60 * 60 * 1000) }
+      const changes = s.changes(hours * 60 * 60 * 1000)
+      const filtered = args.kind === undefined
+        ? changes
+        : changes.filter(c => (c.kind ?? 'login') === args.kind)
+      return { changes: filtered }
     },
   }))
 
@@ -1359,13 +1364,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_search_advanced',
     description: 'Search with multiple optional criteria: title substring, username/email substring, '
-      + 'kind, tag, and created-after (epoch millis). All provided criteria must match (AND). Returns secret-free summaries.',
+      + 'kind, tag, created-after/before (epoch millis), and favorite-only. All provided criteria must '
+      + 'match (AND). Returns secret-free summaries.',
     parameters: {
       title: { type: 'string', description: 'Title substring.' },
       username: { type: 'string', description: 'Username/email substring.' },
       kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind.' },
       tag: { type: 'string', description: 'Exact tag.' },
       createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
+      createdBefore: { type: 'integer', description: 'Only entries created before this epoch millis.' },
+      favoriteOnly: { type: 'boolean', description: 'Only pinned (favorite) entries.' },
       limit: { type: 'number', description: 'Max results (default 20).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { results: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.results) }] },
@@ -1377,6 +1385,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.kind !== undefined ? { kind: args.kind } : {}),
         ...(args.tag !== undefined ? { tag: args.tag } : {}),
         ...(args.createdAfter !== undefined ? { createdAfter: args.createdAfter } : {}),
+        ...(args.createdBefore !== undefined ? { createdBefore: args.createdBefore } : {}),
+        ...(args.favoriteOnly !== undefined ? { favoriteOnly: args.favoriteOnly } : {}),
         limit: validateLimit(args.limit, 'vault_search_advanced'),
       }) as unknown as JsonValue[] }
     },
@@ -1527,18 +1537,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_has: check whether a credential exists ────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_has',
-    description: 'Quickly check whether the vault contains a credential matching a title/username/host. '
-      + 'Returns found + which entry matched. Useful before deciding whether to add.',
-    parameters: { target: { type: 'string', required: true, description: 'Title, username, or host to look for.' } },
+    description: 'Quickly check whether the vault contains a credential matching a title/username/host '
+      + '(substring, or exact title when exact is set). Returns found + which entry matched. Useful '
+      + 'before deciding whether to add.',
+    parameters: {
+      target: { type: 'string', required: true, description: 'Title, username, or host to look for.' },
+      exact: { type: 'boolean', description: 'Require an exact (case-insensitive) title match instead of substring search.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Restrict to this kind.' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, id: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.found ? 'credential found' : 'no matching credential' }] },
     async execute(args) {
       const s = await guardStore()
       const needle = args.target.trim().toLowerCase()
       if (needle.length === 0) return { found: false }
-      const match = s.list().find(e =>
-        e.title.toLowerCase().includes(needle)
-        || (e.username ?? '').toLowerCase().includes(needle)
-        || (e.host ?? '').toLowerCase().includes(needle))
+      const match = s.list().find(e => {
+        if (args.kind !== undefined && (e.kind ?? 'login') !== args.kind) return false
+        if (args.exact === true) return e.title.toLowerCase() === needle
+        return e.title.toLowerCase().includes(needle)
+          || (e.username ?? '').toLowerCase().includes(needle)
+          || (e.host ?? '').toLowerCase().includes(needle)
+      })
       return match === undefined ? { found: false } : { found: true, id: match.id }
     },
   }))
@@ -2082,10 +2100,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const s = await guardStore()
       const kind = args.kind
       const entries = s.list().filter(e => kind === undefined || (e.kind ?? 'login') === kind)
-      const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret']
+      const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey']
+      const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color']
       const fields = args.includeSecrets === true
-        ? ['title', 'kind', 'username', ...secretFields, 'url', 'email', 'phone', 'host', 'port', 'expiresAt', 'notes', 'tags', 'sensitivity']
-        : ['title', 'kind', 'username', 'url', 'email', 'phone', 'host', 'port', 'expiresAt', 'notes', 'tags', 'sensitivity']
+        ? ['title', 'kind', 'username', ...secretFields, ...metaFields]
+        : ['title', 'kind', 'username', ...metaFields]
       const esc = (v: unknown): string => {
         const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
         return `"${str.replace(/"/g, '""')}"`
@@ -2163,7 +2182,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const headers = rows[0]!.map(h => h.trim())
       const known = new Set(['title', 'username', 'password', 'url', 'email', 'phone', 'host', 'port',
         'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'notes', 'tags',
-        'kind', 'sensitivity', 'favorite', 'rotationDays'])
+        'kind', 'sensitivity', 'favorite', 'rotationDays', 'icon', 'color', 'privateKey'])
       let added = 0
       let skipped = 0
       let updated = 0
@@ -2499,6 +2518,28 @@ export class VaultGateway extends TypertRemoteService {
       byKey.set(key, list)
     }
     return { groups: [...byKey.values()].filter(g => g.length > 1).length }
+  }
+
+  /** Duplicate groups with ids+titles for the UI cleanup panel (title+kind). */
+  @Remote('duplicateGroups')
+  async duplicateGroups(): Promise<Array<Array<{ id: string; title: string }>>> {
+    const store = await this.ensureStore()
+    const byKey = new Map<string, Array<{ id: string; title: string }>>()
+    for (const e of store.list()) {
+      const key = `${e.title.toLowerCase()}::${e.kind ?? 'login'}`
+      const list = byKey.get(key) ?? []
+      list.push({ id: e.id, title: e.title })
+      byKey.set(key, list)
+    }
+    return [...byKey.values()].filter(g => g.length > 1)
+  }
+
+  /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */
+  @Remote('merge')
+  async merge(fromId: string, toId: string, keepSource?: boolean): Promise<{ found: boolean }> {
+    const store = await this.ensureStore()
+    const merged = await store.merge(fromId, toId, { keepSource: keepSource === true })
+    return { found: merged !== undefined }
   }
 
   /** Read one full entry (including secrets) by id. */

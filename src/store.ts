@@ -530,6 +530,8 @@ export class VaultStore {
     kind?: string
     tag?: string
     createdAfter?: number
+    createdBefore?: number
+    favoriteOnly?: boolean
     limit?: number
   }): VaultEntrySummary[] {
     const limit = criteria.limit ?? 20
@@ -543,6 +545,8 @@ export class VaultStore {
       if (criteria.kind !== undefined && (entry.kind ?? 'login') !== criteria.kind) continue
       if (criteria.tag !== undefined && !(entry.tags ?? []).includes(criteria.tag)) continue
       if (criteria.createdAfter !== undefined && entry.createdAt < criteria.createdAfter) continue
+      if (criteria.createdBefore !== undefined && entry.createdAt > criteria.createdBefore) continue
+      if (criteria.favoriteOnly === true && entry.favorite !== true) continue
       results.push(toSummary(entry))
     }
     return results

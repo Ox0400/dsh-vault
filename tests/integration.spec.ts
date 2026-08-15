@@ -1794,3 +1794,65 @@ test('vault_import overwrite replaces entries by id', async () => {
     delete process.env.DSH_VAULT_EXPORT_PW3
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW3' })
 })
+
+test('vault_has supports exact + kind matching', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'ExactMatch', kind: 'api-key', secret: 'k' })
+    const hit = await call(ctx, 'vault_has', { target: 'exactmatch', exact: true }) as { found: boolean; id: string }
+    assert.equal(hit.found, true)
+    assert.ok(hit.id.length > 0)
+    const byKind = await call(ctx, 'vault_has', { target: 'ExactMatch', exact: true, kind: 'ssh' }) as { found: boolean }
+    assert.equal(byKind.found, false, 'kind mismatch → not found')
+    const substring = await call(ctx, 'vault_has', { target: 'actMat' }) as { found: boolean }
+    assert.equal(substring.found, true, 'substring still matches by default')
+    const miss = await call(ctx, 'vault_has', { target: 'Nope', exact: true }) as { found: boolean }
+    assert.equal(miss.found, false)
+  })
+})
+
+test('vault_search_advanced supports createdBefore and favoriteOnly', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'AdvA' })
+    const r1 = await call(ctx, 'vault_search_advanced', { title: 'AdvA', createdBefore: Date.now() + 86_400_000 }) as { results: Array<{ id: string }> }
+    assert.equal(r1.results.length, 1)
+    const r2 = await call(ctx, 'vault_search_advanced', { title: 'AdvA', createdBefore: 1 }) as { results: Array<{ id: string }> }
+    assert.equal(r2.results.length, 0, 'excluded by past createdBefore')
+    await call(ctx, 'vault_pin', { id: (await call(ctx, 'vault_search', { query: 'AdvA' }) as { results: Array<{ id: string }> }).results[0]!.id })
+    const fav = await call(ctx, 'vault_search_advanced', { favoriteOnly: true }) as { results: Array<{ id: string }> }
+    assert.equal(fav.results.length, 1)
+  })
+})
+
+test('vault_changes filters by kind', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'ChgA', kind: 'api-key', secret: 'k' })
+    await call(ctx, 'vault_add', { title: 'ChgB', kind: 'ssh', username: 'u' })
+    const api = await call(ctx, 'vault_changes', { hours: 24, kind: 'api-key' }) as { changes: Array<{ title: string; kind?: string }> }
+    assert.ok(api.changes.some(c => c.title === 'ChgA'))
+    assert.ok(!api.changes.some(c => c.title === 'ChgB'))
+  })
+})
+
+test('vault_export_csv round-trips icon/color/favorite/rotationDays via vault_import_csv', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csv-rt-'))
+    const csv = join(dir, 'rt.csv')
+    await writeFile(csv, [
+      'title,kind,username,password,icon,color,favorite,rotationDays',
+      '"RtA","login","u1","pw1","🚀","red","true","30"',
+    ].join('\n') + '\n')
+    const r = await call(ctx, 'vault_import_csv', { path: csv }) as { added: number }
+    assert.equal(r.added, 1)
+    const found = await call(ctx, 'vault_search', { query: 'RtA' }) as { results: Array<{ id: string; icon?: string; color?: string; favorite?: boolean }> }
+    const s = found.results[0]!
+    assert.equal(s.icon, '🚀')
+    assert.equal(s.color, 'red')
+    assert.equal(s.favorite, true)
+    const full = await call(ctx, 'vault_get', { id: s.id }) as { entry: { rotationDays?: number } }
+    assert.equal(full.entry.rotationDays, 30)
+    await rm(dir, { recursive: true, force: true })
+  })
+})

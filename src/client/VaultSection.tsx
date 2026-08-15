@@ -78,6 +78,8 @@ export interface VaultSectionInjected {
   backup: (maxBackups?: number) => Promise<{ path: string; kept: number; pruned: number }>
   health: () => Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>
   duplicates: () => Promise<{ groups: number }>
+  duplicateGroups: () => Promise<Array<Array<{ id: string; title: string }>>>
+  merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
@@ -173,7 +175,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -201,8 +203,26 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [backupInfo, setBackupInfo] = useState<{ daysSinceBackup: number; backups: number } | null>(null)
   const [recentEntries, setRecentEntries] = useState<Array<Record<string, unknown>>>([])
   const [dupGroups, setDupGroups] = useState<number>(0)
+  const [dupList, setDupList] = useState<Array<Array<{ id: string; title: string }>>>([])
 
   const readonly = policy?.accessMode === 'readonly'
+
+  /** Merge one duplicate into another (first keeps gaps filled), then refresh. */
+  async function mergeEntries(group: Array<{ id: string; title: string }>): Promise<void> {
+    if (group.length < 2) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const [first, second] = group
+      await merge(second!.id, first!.id, false)
+      await duplicateGroups().then(setDupList)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   /** Run an encrypted backup now and refresh the backup-age badge. */
   async function backupNow(): Promise<void> {
@@ -275,6 +295,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         if (dp !== null && typeof dp === 'object' && (dp as { groups?: number }).groups !== undefined) {
           setDupGroups((dp as { groups: number }).groups)
         }
+        duplicateGroups().then(setDupList).catch(() => {})
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
@@ -291,7 +312,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     const onFocus = (): void => { load() }
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
-  }, [stats, backupStatus, rotation, health, recent, duplicates])
+  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups])
 
   /** Open the editor for a new entry. */
   function startCreate(): void {
@@ -631,6 +652,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               ))}
             </>
           )}
+        </div>
+      )}
+
+      {dupList.length > 0 && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('dupTitle')} ({dupList.length})</p>
+          {dupList.slice(0, 5).map((group, gi) => (
+            <div key={gi} className={css.dupGroup}>
+              <span className={css.dupNames}>{group.map(g => g.title).join(' / ')}</span>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void mergeEntries(group)}
+                disabled={busy || readonly}
+              >{t('dupMerge')}</button>
+            </div>
+          ))}
         </div>
       )}
 

@@ -71,6 +71,8 @@ export function apply(ctx: ClientContext): void {
     backup: (maxBackups) => invoke<{ path: string; kept: number; pruned: number }>('backup', { maxBackups: maxBackups ?? 10 }),
     health: () => invoke<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } }>('health'),
     duplicates: () => invoke<{ groups: number }>('duplicates'),
+    duplicateGroups: () => invoke<Array<Array<{ id: string; title: string }>>>('duplicateGroups'),
+    merge: (fromId, toId, keepSource) => invoke<{ found: boolean }>('merge', { fromId, toId, keepSource: keepSource ?? false }),
     restore: (id) => invoke<{ restored: boolean }>('restore', { id }),
     undeleteAll: () => invoke<{ restored: number }>('undeleteAll'),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),

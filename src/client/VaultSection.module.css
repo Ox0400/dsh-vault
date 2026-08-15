@@ -464,3 +464,26 @@
   cursor: pointer;
   font-size: 13px;
 }
+
+
+.dupGroup {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin: 4px 0;
+}
+.dupNames {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dupMerge {
+  border: 1px solid var(--dsh-color-border, #ccc);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 2px 8px;
+}
