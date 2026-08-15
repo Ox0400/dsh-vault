@@ -174,6 +174,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_session_collect',
       'vault_session_export',
       'vault_session_import',
+      'vault_session_import_file',
       'vault_session_list',
       'vault_session_open',
       'vault_set_icon',
@@ -2874,11 +2875,16 @@ test('vault_session_import → vault_session_list → vault_session_export round
 
 test('vault_session_import accepts a raw Cookie header string', async () => {
   await withContext(async ctx => {
-    const imported = await call(ctx, 'vault_session_import', { title: 'Header session', cookies: 'a=1; b=2; c=' }) as { saved: number }
+    const imported = await call(ctx, 'vault_session_import', { title: 'Header session', cookies: 'a=1; b=2; c=', url: 'https://github.com/login' }) as { saved: number }
     // a and b parse; c has an empty value and is still a valid cookie pair.
     assert.equal(imported.saved, 3)
     const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ cookieCount?: number }> }
     assert.equal(listed.sessions[0]!.cookieCount, 3)
+    // Domain derived from the entry URL so jar export stays usable.
+    const full = await call(ctx, 'vault_get', { id: imported.id as string }) as { found: boolean; entry: { cookies?: Array<{ domain: string }> } }
+    assert.ok(full.entry.cookies!.every(c => c.domain === 'github.com'), 'header cookies get the URL host as domain')
+    const jar = await call(ctx, 'vault_session_export', { id: imported.id as string, format: 'netscape' }) as { text: string }
+    assert.ok(jar.text.includes('.github.com\tTRUE\t/\tFALSE\t0\ta\t1'))
   })
 })
 
@@ -2930,3 +2936,32 @@ test('vault_session_* tool flow end-to-end (headless via tool param, no visible 
     await closeAllSessions()
   }
 }, 30000)
+
+test('vault_session_import_file imports a Netscape jar and round-trips with export', async () => {
+  await withContext(async ctx => {
+    const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-jar-'))
+    const jarPath = join(dir, 'cookies.txt')
+    const jar = [
+      '# Netscape HTTP Cookie File',
+      '.example.com\tTRUE\t/\tFALSE\t1767225600\tsid\tabc123',
+      '#HttpOnly_.github.com\tTRUE\t/\tTRUE\t0\tauth\txyz',
+    ].join('\n')
+    await writeFile(jarPath, jar)
+    try {
+      const imported = await call(ctx, 'vault_session_import_file', { path: jarPath, title: 'Jar session', url: 'https://example.com' }) as { saved: number; id: string }
+      assert.equal(imported.saved, 2)
+      const full = await call(ctx, 'vault_get', { id: imported.id }) as { found: boolean; entry: { kind?: string; cookies?: Array<{ name: string; httpOnly?: boolean }> } }
+      assert.equal(full.entry.kind, 'cookie')
+      const auth = full.entry.cookies!.find(c => c.name === 'auth')
+      assert.equal(auth?.httpOnly, true)
+      // Round-trip: export back to header.
+      const exported = await call(ctx, 'vault_session_export', { id: imported.id, format: 'header' }) as { text: string }
+      assert.ok(exported.text.includes('sid=abc123'))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

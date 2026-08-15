@@ -84,6 +84,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_session_open` | 在真实浏览器窗口中打开指定网址,供用户手动登录（密码、二次验证、验证码）——对禁止嵌入的网站也能捕获登录态 |
 | `vault_session_collect` | 收集已打开浏览器会话的全部 cookie（含 HttpOnly）,保存为 `cookie` 条目 |
 | `vault_session_import` | 从粘贴的 JSON cookie 数组（开发者工具导出格式）或原始 `Cookie` 头字符串保存会话 cookie——无需浏览器的替代方案 |
+| `vault_session_import_file` | 导入 Netscape cookie-jar 文件（curl `-b` / wget / 浏览器扩展导出；与 `vault_session_export` 输出的格式一致） |
 | `vault_session_list` | 列出已保存的登录会话与 cookie 数量（不含值） |
 | `vault_session_export` | 将会话导出为 `Cookie` 请求头、Netscape cookie-jar 文件（curl `-b`）或原始 JSON,供自动化任务使用 |
 | `vault_session_close` | 关闭已打开的浏览器登录会话（已收集的 cookie 仍保留在保险库中） |

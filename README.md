@@ -86,6 +86,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_session_open` | Open a real headed browser window at a URL so the user can log in manually (password, 2FA, captcha) — the portable way to capture login state for sites that block embedding |
 | `vault_session_collect` | Collect every cookie of an open browser session (incl. HttpOnly) and save it as a `cookie` entry |
 | `vault_session_import` | Save session cookies from pasted JSON (devtools export shape) or a raw `Cookie` header string — the no-browser alternative |
+| `vault_session_import_file` | Import a Netscape cookie-jar file (curl `-b` / wget / browser-extension export; the same format `vault_session_export` writes) |
 | `vault_session_list` | List saved login sessions with cookie counts (no values) |
 | `vault_session_export` | Export a saved session as a `Cookie` header value, a Netscape cookie-jar file (curl `-b`), or raw JSON for automation |
 | `vault_session_close` | Close an open browser login session (collected cookies stay in the vault) |

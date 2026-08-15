@@ -32,7 +32,7 @@ import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
-import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar } from './session.ts'
+import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx, describeKdbxKdf } from './kdbx.ts'
 import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
@@ -3257,6 +3257,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const cookies = parsePastedCookies(args.cookies)
       if (cookies.length === 0) throw new Error('vault_session_import: no cookies parsed from the input')
       const url = typeof args.url === 'string' && args.url.trim().length > 0 ? args.url.trim() : undefined
+      // Cookies parsed from a raw `Cookie` header carry no domain; derive one
+      // from the entry URL so exports (Netscape jar / header) stay usable.
+      if (url !== undefined) {
+        const host = hostFromUrl(url)
+        for (const c of cookies) {
+          if (c.domain.length === 0 && host.length > 0) c.domain = host
+        }
+      }
       const existing = s.list().find(e => e.title === title)
       const patch: VaultEntryPatch = {
         kind: 'cookie',
@@ -3265,6 +3273,44 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         notes: `imported from pasted text (${cookies.length} cookies, ${new Date().toISOString()})`,
       }
       if (existing && args.overwrite !== true) throw new Error(`vault_session_import: entry "${title}" already exists — pass overwrite: true to replace it`)
+      let id: string
+      if (existing) { await s.update(existing.id, patch); id = existing.id }
+      else { const entry = await s.add({ title, ...patch }); id = entry.id }
+      return { saved: cookies.length, id, note: title }
+    },
+  }))
+
+  // ── vault_session_import_file: import a Netscape cookie-jar file ──────────
+  ctx.tools.register(defineTool({
+    name: 'vault_session_import_file',
+    description: 'Save session cookies from a Netscape cookie-jar file (the format curl -b / wget '
+      + 'and browser extensions export; the same format vault_session_export writes). Parses the '
+      + 'tab-separated domain/path/expiry/httpOnly/secure columns and saves them as a "cookie" entry. '
+      + 'The no-browser alternative to vault_session_open + vault_session_collect for jar exports.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the .txt/.jar cookie file.' },
+      title: { type: 'string', required: true, description: 'Vault entry title, e.g. "GitHub session".' },
+      url: { type: 'string', description: 'Site URL stored on the entry (optional).' },
+      overwrite: { type: 'boolean', description: 'Replace an existing entry with the same title (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { saved: { type: 'integer', required: true }, id: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `saved ${v.saved} cookies` }] },
+    async execute(args) {
+      assertWritable('vault_session_import_file')
+      const s = await guardStore()
+      const title = args.title.trim()
+      if (title.length === 0) throw new Error('vault_session_import_file: title is required')
+      const raw = await readFile(args.path, 'utf8')
+      const cookies = parseNetscapeJar(raw)
+      if (cookies.length === 0) throw new Error('vault_session_import_file: no cookies parsed from the jar file')
+      const url = typeof args.url === 'string' && args.url.trim().length > 0 ? args.url.trim() : undefined
+      const existing = s.list().find(e => e.title === title)
+      const patch: VaultEntryPatch = {
+        kind: 'cookie',
+        ...(url !== undefined ? { url } : {}),
+        cookies,
+        notes: `imported from cookie jar (${cookies.length} cookies, ${new Date().toISOString()})`,
+      }
+      if (existing && args.overwrite !== true) throw new Error(`vault_session_import_file: entry "${title}" already exists — pass overwrite: true to replace it`)
       let id: string
       if (existing) { await s.update(existing.id, patch); id = existing.id }
       else { const entry = await s.add({ title, ...patch }); id = entry.id }
@@ -4946,6 +4992,18 @@ function validateLimit(value: number | undefined, tool: string): number {
 /** Add a `dryRun` flag to an import tool's parameters. */
 function withDryRun<T extends Record<string, unknown>>(params: T, description = 'Preview what would be imported without writing anything (default false).'): T {
   return { ...params, dryRun: { type: 'boolean' as const, description } }
+}
+
+/** Extract the hostname from a URL (e.g. "https://github.com/login" → "github.com").
+ * Returns '' when no host is present. */
+function hostFromUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.hostname
+  } catch {
+    const match = /^https?:\/\/([^/]+)/i.exec(url)
+    return match !== null ? match[1]!.replace(/:\d+$/, '') : ''
+  }
 }
 
 /** Parse pasted session cookies: a JSON array of cookie objects (devtools
