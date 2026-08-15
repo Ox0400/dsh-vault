@@ -95,6 +95,13 @@
   color: var(--color-accent, #4f8cff);
 }
 
+.totpRing {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+
 .rowActions {
   display: flex;
   align-items: center;

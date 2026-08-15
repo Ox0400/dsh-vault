@@ -118,7 +118,7 @@ export interface VaultEntry {
 /** An entry as returned by search/list — never carries secrets. */
 export type VaultEntrySummary = Pick<
   VaultEntry,
-  'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags'
+  'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags' | 'icon' | 'color'
 >
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
@@ -450,6 +450,18 @@ export class VaultStore {
     this.recordHistory('restore', id, entry.title)
     await this.persist()
     return true
+  }
+
+  /** Undo the most recent delete: restore the trashed entry deleted last.
+   * Returns the restored summary (or undefined when the trash is empty). */
+  async restoreRecent(): Promise<VaultEntrySummary | undefined> {
+    const trashed = this.listTrash().sort((a, b) => ((b.deletedAt ?? 0) - (a.deletedAt ?? 0)) || b.id.localeCompare(a.id))
+    const latest = trashed[0]
+    if (!latest) return undefined
+    delete latest.deletedAt
+    this.recordHistory('restore', latest.id, latest.title)
+    await this.persist()
+    return toSummary(latest)
   }
 
   /** Permanently remove a trashed (or active) entry; returns true when it existed. */
@@ -893,6 +905,8 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
     title: entry.title,
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
+    ...(entry.icon !== undefined ? { icon: entry.icon } : {}),
+    ...(entry.color !== undefined ? { color: entry.color } : {}),
     ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.email !== undefined ? { email: entry.email } : {}),

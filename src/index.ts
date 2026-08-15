@@ -1208,7 +1208,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       try {
         const entries = await readdir(dir)
         for (const entry of entries) {
-          const m = /^vault-backup-(\d+)\.json$/.exec(entry)
+          const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
           if (m) backups.push(Number(m[1]))
         }
       } catch { /* no dir yet */ }
@@ -1892,6 +1892,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_restore_recent: undo the last delete ─────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_restore_recent',
+    description: 'Undo the most recent delete: restore the trashed entry that was deleted last. '
+      + 'Returns the restored summary or restored=false when the trash is empty.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { restored: { type: 'boolean', required: true }, entry: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.restored ? `restored: ${(v.entry as { title?: string })?.title ?? 'entry'}` : 'trash is empty' }] },
+    async execute() {
+      assertWritable('vault_restore_recent')
+      const s = await guardStore()
+      const entry = await s.restoreRecent()
+      return entry === undefined ? { restored: false } : { restored: true, entry: toSummaryJson(entry) }
+    },
+  }))
+
   ctx.tools.register(defineTool({
     name: 'vault_purge',
     description: 'Permanently delete an entry (active or trashed). Cannot be undone — prefer vault_delete '
@@ -2102,7 +2117,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (!Number.isInteger(maxBackups) || maxBackups < 1 || maxBackups > 100) {
         throw new Error('vault_backup: maxBackups must be an integer 1–100')
       }
-      const backup = join(dir, `vault-backup-${Date.now()}.json`)
+      const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
       const raw = await readFile(source, 'utf8')
       await mkdir(dir, { recursive: true, mode: 0o700 })
       await writeFile(backup, raw, { mode: 0o600 })
@@ -2110,7 +2125,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       let backups: string[] = []
       try {
         const names = await readdir(dir)
-        backups = names.filter(n => /^vault-backup-\d+\.json$/.test(n))
+        backups = names.filter(n => /^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(n))
           .map(n => join(dir, n))
           .sort((a, b) => b.localeCompare(a)) // newest first (timestamp in name)
       } catch {
@@ -2403,14 +2418,14 @@ export class VaultGateway extends TypertRemoteService {
     const max = maxBackups ?? this.backupRetention
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.vaultName))
     const source = this.vaultPath ?? defaultVaultPath(this.vaultName)
-    const backup = join(dir, `vault-backup-${Date.now()}.json`)
+    const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
     const raw = await readFile(source, 'utf8')
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await writeFile(backup, raw, { mode: 0o600 })
     let total = 1
     let pruned = 0
     try {
-      const names = (await readdir(dir)).filter(n => /^vault-backup-\d+\.json$/.test(n))
+      const names = (await readdir(dir)).filter(n => /^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(n))
         .map(n => join(dir, n)).sort((a, b) => b.localeCompare(a))
       total = names.length
       for (const stale of names.filter(n => n !== backup).slice(max - 1)) {
@@ -2427,7 +2442,7 @@ export class VaultGateway extends TypertRemoteService {
     try {
       const entries = await readdir(dir)
       for (const entry of entries) {
-        const m = /^vault-backup-(\d+)\.json$/.exec(entry)
+        const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
         if (m) backups.push(Number(m[1]))
       }
     } catch { /* no dir yet */ }
@@ -2570,18 +2585,22 @@ export type VaultEntrySummaryWire = {
   port?: string
   url?: string
   tags?: string[]
+  icon?: string
+  color?: string
 }
 
 /** Wire-safe full entry shape (secrets included; loopback UI only). */
 export type VaultEntryWire = Omit<VaultEntry, 'createdAt' | 'updatedAt'>
 
 /** Project a stored entry onto its wire summary. */
-function toSummary(entry: VaultEntry): VaultEntrySummaryWire {
+function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire {
   return {
     id: entry.id,
     title: entry.title,
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
+    ...(entry.icon !== undefined ? { icon: entry.icon } : {}),
+    ...(entry.color !== undefined ? { color: entry.color } : {}),
     ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.email !== undefined ? { email: entry.email } : {}),
@@ -2790,7 +2809,7 @@ function validateLimit(value: number | undefined, tool: string): number {
 }
 
 /** A summary view of an entry without timestamps or secrets (used by update output). */
-function toSummaryJson(entry: VaultEntry): JsonValue {
+function toSummaryJson(entry: VaultEntry | VaultEntrySummary): JsonValue {
   return toSummary(entry) as unknown as JsonValue
 }
 

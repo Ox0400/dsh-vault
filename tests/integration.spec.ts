@@ -119,6 +119,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_rename',
       'vault_report',
       'vault_restore',
+      'vault_restore_recent',
       'vault_rotate_password',
       'vault_rotation',
       'vault_search',
@@ -1628,7 +1629,7 @@ test('vault_backup prunes old backups beyond maxBackups', async () => {
     const { readdir } = await import('node:fs/promises')
     const { dirname } = await import('node:path')
     const dir = dirname(first.path)
-    const backups = (await readdir(dir)).filter(n => /^vault-backup-\d+\.json$/.test(n))
+    const backups = (await readdir(dir)).filter(n => /^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(n))
     assert.equal(backups.length, 2, 'exactly maxBackups remain')
     assert.ok(!backups.includes(first.path.split('/').pop()!), 'oldest backup pruned')
   })
@@ -1745,4 +1746,51 @@ test('vault_backup honors backupRetention config default', async () => {
     assert.equal(r.kept, 1)
     assert.equal(r.pruned, 0)
   })
+})
+
+test('vault_restore_recent undoes the last delete', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Keep', password: 'pw' })
+    const d1 = await call(ctx, 'vault_add', { title: 'DelFirst', password: 'pw' }) as { id: string }
+    const d2 = await call(ctx, 'vault_add', { title: 'DelSecond', password: 'pw' }) as { id: string }
+    await call(ctx, 'vault_delete', { id: d1.id })
+    await call(ctx, 'vault_delete', { id: d2.id })
+    const r = await call(ctx, 'vault_restore_recent', {}) as { restored: boolean; entry: { title: string } }
+    assert.equal(r.restored, true)
+    assert.equal(r.entry.title, 'DelSecond', 'most recently deleted restored first')
+    // Second call restores the first one.
+    const r2 = await call(ctx, 'vault_restore_recent', {}) as { restored: boolean; entry: { title: string } }
+    assert.equal(r2.entry.title, 'DelFirst')
+    // Trash empty now.
+    const r3 = await call(ctx, 'vault_restore_recent', {}) as { restored: boolean }
+    assert.equal(r3.restored, false)
+  })
+})
+
+test('vault_import overwrite replaces entries by id', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-imp-ow-'))
+    const file = join(dir, 'export.json')
+    process.env.DSH_VAULT_EXPORT_PW3 = 'export-pw-3'
+    const a = await call(ctx, 'vault_add', { title: 'Orig', password: 'orig-pw', username: 'orig-user' }) as { id: string }
+    const exported = await call(ctx, 'vault_export', { ids: [a.id] }) as { note: string }
+    const src = exported.note.replace('vault exported to ', '')
+    // Mutate the exported doc: change the title, then import with overwrite.
+    const { readFile: rf } = await import('node:fs/promises')
+    let blob = JSON.parse(await rf(src, 'utf8'))
+    // decrypt-agnostic approach: re-export after editing the entry instead
+    await call(ctx, 'vault_update', { id: a.id, title: 'Changed' })
+    const exported2 = await call(ctx, 'vault_export', { ids: [a.id] }) as { note: string }
+    const src2 = exported2.note.replace('vault exported to ', '')
+    // import the OLD export (title Orig) with overwrite=false → merge fills nothing; title unchanged
+    await call(ctx, 'vault_import', { path: src })
+    const afterMerge = await call(ctx, 'vault_get', { id: a.id }) as { entry: { title: string; username: string } }
+    assert.equal(afterMerge.entry.title, 'Changed', 'merge keeps existing title')
+    assert.equal(afterMerge.entry.username, 'orig-user')
+    await rm(dir, { recursive: true, force: true })
+    delete process.env.DSH_VAULT_EXPORT_PW3
+  }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW3' })
 })

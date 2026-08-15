@@ -22,6 +22,8 @@ export interface VaultSummaryWire {
   port?: string
   url?: string
   tags?: string[]
+  icon?: string
+  color?: string
 }
 
 export interface VaultFullWire {
@@ -180,7 +182,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [codeMap, setCodeMap] = useState<Record<string, string>>({})
+  const [totpMap, setTotpMap] = useState<Record<string, { code: string; until: number }>>({})
+  const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
@@ -249,6 +252,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     return () => { current = false; window.clearTimeout(timer) }
     // refresh is memoized on query (debounced); list/search are stable.
   }, [refresh])
+
+  // TOTP countdown: tick every second so the progress ring stays live.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // Vault health & meta: load once on mount (stats, backup age, rotation,
   // weak/reused scan, recent activity) and refresh on window focus.
@@ -434,9 +443,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setBusy(true)
     try {
       const result = await totp(id)
-      setCodeMap(previous => ({ ...previous, [id]: `${result.code} (${result.secondsRemaining}s)` }))
+      setTotpMap(previous => ({ ...previous, [id]: { code: result.code, until: Date.now() + result.secondsRemaining * 1000 } }))
     } catch {
-      setCodeMap(previous => ({ ...previous, [id]: t('error') }))
+      setTotpMap(previous => ({ ...previous, [id]: { code: t('error'), until: 0 } }))
     } finally {
       setBusy(false)
     }
@@ -605,10 +614,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             </>
           )}
           {report.weak.length > 0 && (
-            <p className={css.reportLine}>{t('reportWeak')}: {report.weak.length}</p>
+            <>
+              <p className={css.reportLine}>{t('reportWeak')}: {report.weak.length}</p>
+              {(report.weak as Array<{ title?: string }>).slice(0, 5).map((item, i) => (
+                <p key={i} className={css.reportSub}>· {String(item.title ?? '?')}</p>
+              ))}
+            </>
           )}
           {report.reused.length > 0 && (
-            <p className={css.reportLine}>{t('reportReused')}: {report.reused.length}</p>
+            <>
+              <p className={css.reportLine}>{t('reportReused')}: {report.reused.length}</p>
+              {(report.reused as Array<{ entries?: Array<{ title?: string }> }>).slice(0, 3).map((group, i) => (
+                <p key={i} className={css.reportSub}>
+                  · {(group.entries ?? []).slice(0, 3).map(e => String(e.title ?? '?')).join(' / ')}
+                </p>
+              ))}
+            </>
           )}
         </div>
       )}
@@ -679,12 +700,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>
           {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : 0).map(entry => {
-            const code = codeMap[entry.id]
+            const totpInfo = totpMap[entry.id]
+            const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
+            const frac = remaining !== undefined ? remaining / 30 : 0
+            const code = totpInfo?.code
             return (
               <li key={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}`}>
                 <div className={css.rowMain} onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}>
-                  <span className={css.title}>
-                    <span className={css.kindIcon}>{kindIcon(entry.kind)}</span>
+                  <span className={css.title} style={entry.color !== undefined && entry.color !== '' ? { borderLeft: `3px solid ${entry.color}`, paddingLeft: 6 } : undefined}>
+                    <span className={css.kindIcon}>{entry.icon ?? kindIcon(entry.kind)}</span>
                     {(entry as VaultSummaryWire & { favorite?: boolean }).favorite && (
                       <span className={css.pinStar} title={t('pinned')}>★</span>
                     )}
@@ -699,7 +723,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     )}
                   </span>
                   <span className={css.identity}>{identityLine(entry)}</span>
-                  {code !== undefined && <span className={css.totp}>{code}</span>}
+                  {code !== undefined && (
+                    <span className={css.totp}>
+                      <svg className={css.totpRing} width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                        <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
+                        <circle
+                          cx="8" cy="8" r="6.5" fill="none"
+                          stroke={remaining !== undefined && remaining <= 5 ? '#cf3d3d' : '#2e9e5b'}
+                          strokeWidth="2" strokeLinecap="round"
+                          strokeDasharray={`${(frac * 2 * Math.PI * 6.5).toFixed(1)} ${(2 * Math.PI * 6.5).toFixed(1)}`}
+                          transform="rotate(-90 8 8)"
+                        />
+                      </svg>
+                      {code}{remaining !== undefined ? ` (${remaining}s)` : ''}
+                    </span>
+                  )}
                 </div>
                 {expandedId === entry.id && (
                   <div className={css.detailBox}>
@@ -730,7 +768,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   >{t('copyPassword')}</button>
                   <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
                   {code !== undefined && (
-                    <button type="button" onClick={() => void copyValue(entry.id, code.split(' ')[0]!)} disabled={busy}>{t('copyCode')}</button>
+                    <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy}>{t('copyCode')}</button>
                   )}
                   <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly}>{t('edit')}</button>
                   <button
