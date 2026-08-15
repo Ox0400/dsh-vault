@@ -3115,15 +3115,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'vault_session_collect with the returned sessionId to save the session cookies into the vault '
       + '— including HttpOnly session cookies, which a page script can never read. '
       + 'This is the portable way to capture login state for sites that block embedding. '
-      + 'Requires playwright-core and a Chromium build (the standard Playwright cache or a system browser).',
+      + 'Requires playwright-core and a Chromium build (the standard Playwright cache or a system browser). '
+      + 'Pass headless: true for automation (no visible window — use only when no human login is needed).',
     parameters: {
       url: { type: 'string', required: true, description: 'Site to open, e.g. "https://example.com/login" (https:// is added when missing).' },
+      headless: { type: 'boolean', description: 'Open without a visible window (automation only; default false).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { sessionId: { type: 'string', required: true }, url: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `login session opened at ${v.url} — sessionId ${v.sessionId}. Have the user log in, then call vault_session_collect.` }] },
     async execute(args) {
       assertWritable('vault_session_open')
-      const session = await openSession(args.url)
-      return { sessionId: session.id, url: session.url, note: `Browser window opened at ${session.url}. Ask the user to log in, then collect the session cookies.` }
+      const session = await openSession(args.url, { headless: args.headless === true })
+      return { sessionId: session.id, url: session.url, note: args.headless === true ? `Headless session opened at ${session.url}.` : `Browser window opened at ${session.url}. Ask the user to log in, then collect the session cookies.` }
     },
   }))
 

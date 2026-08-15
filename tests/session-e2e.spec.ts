@@ -21,7 +21,7 @@ test.skipIf(!available)('session: end-to-end headed flow collects HttpOnly cooki
   await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()))
   const port = (server.address() as { port: number }).port
   try {
-    const session = await openSession(`http://127.0.0.1:${port}/`)
+    const session = await openSession(`http://127.0.0.1:${port}/`, { headless: true })
     expect(session.id).toBeTruthy()
     expect(session.url).toBe(`http://127.0.0.1:${port}/`)
     const cookies = await collectSessionCookies(session.id)
@@ -43,7 +43,7 @@ test.skipIf(!available)('session: end-to-end headed flow collects HttpOnly cooki
 test.skipIf(!available)('session: openSession adds https:// to bare domains', async () => {
   // openSession with a bare host — we only assert the normalized URL here since
   // the host may not resolve; the browser stays open on failure.
-  const session = await openSession('example.com')
+  const session = await openSession('example.com', { headless: true })
   expect(session.url).toBe('https://example.com')
   await closeSession(session.id)
 })

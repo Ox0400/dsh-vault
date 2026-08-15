@@ -188,14 +188,16 @@ export function toAddCookie(cookie: CookieData): PlaywrightCookie {
 const sessions = new Map<string, { browser: BrowserLike; context: ContextLike; url: string; openedAt: number }>()
 
 /** Open a headed browser session at the given URL. Returns a handle; the
- * browser window stays open for the user to log in manually. */
-export async function openSession(url: string): Promise<SessionHandle> {
+ * browser window stays open for the user to log in manually. Pass
+ * `headless: true` for automation/tests (no visible window). */
+export async function openSession(url: string, options?: { headless?: boolean }): Promise<SessionHandle> {
   if (typeof url !== 'string' || url.trim().length === 0) throw new Error('session: url is required')
   const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`
+  const headless = options?.headless === true
   const exe = resolveChromium()
   const launchOptions: { headless: boolean; executablePath?: string } = exe !== undefined
-    ? { headless: false, executablePath: exe }
-    : { headless: false }
+    ? { headless, executablePath: exe }
+    : { headless }
   const browser = await chromium().launch(launchOptions)
   const context = await browser.newContext({ viewport: { width: 1280, height: 860 } })
   const page = await context.newPage()

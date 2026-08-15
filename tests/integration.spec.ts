@@ -2893,3 +2893,40 @@ test('vault_session_import rejects duplicates and empty input', async () => {
     assert.equal(empty.isError, true, 'garbage input rejected')
   })
 })
+
+test('vault_session_* tool flow end-to-end (headless via tool param, no visible window)', async () => {
+  const { createServer } = await import('node:http')
+  const { playwrightAvailable, resolveChromium, closeAllSessions } = await import('../src/session.ts')
+  if (!playwrightAvailable() || resolveChromium() === undefined) return // no browser — skip silently
+  const server = createServer((_req, res) => {
+    res.setHeader('set-cookie', ['sid=toolflow; Path=/; HttpOnly'])
+    res.end('<html><body>ok</body></html>')
+  })
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()))
+  const port = (server.address() as { port: number }).port
+  try {
+    await withContext(async ctx => {
+      // The tool itself supports headless: true, so the whole flow runs
+      // through the model tools without popping a visible browser window.
+      const opened = await call(ctx, 'vault_session_open', { url: `http://127.0.0.1:${port}/`, headless: true })
+      const sessionId = opened.sessionId as string
+      assert.equal(typeof sessionId, 'string')
+
+      const collected = await call(ctx, 'vault_session_collect', { sessionId, title: 'ToolFlow session' })
+      assert.ok((collected.saved as number) >= 1)
+
+      const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ title: string; cookieCount?: number }> }
+      assert.equal(listed.sessions[0]!.title, 'ToolFlow session')
+      assert.ok((listed.sessions[0]!.cookieCount ?? 0) >= 1)
+
+      const exported = await call(ctx, 'vault_session_export', { id: collected.id as string, format: 'header' }) as { text: string }
+      assert.ok(exported.text.includes('sid=toolflow'))
+
+      const closed = await call(ctx, 'vault_session_close', { sessionId })
+      assert.equal(closed.closed, true)
+    })
+  } finally {
+    server.close()
+    await closeAllSessions()
+  }
+}, 30000)
