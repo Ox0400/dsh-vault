@@ -77,6 +77,8 @@ export function apply(ctx: ClientContext): void {
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
     lock: () => invoke<{ locked: boolean }>('lock'),
     totpUri: (id) => invoke<{ uri: string }>('totpUri', { id }),
+    tags: () => invoke<Array<{ name: string; count: number }>>('tags'),
+    renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),
     generatePassword: (options) => invoke<{ password: string }>('generatePassword', { ...(options ?? {}) }),

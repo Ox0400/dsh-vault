@@ -2666,3 +2666,36 @@ test('vault_stats reports favoriteCount', async () => {
     assert.equal(stats.favoriteCount, 1)
   })
 })
+
+test('vault_expiry accepts expiresInDays convenience', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'ExpDays', password: 'pw' }) as { id: string }
+    const r = await call(ctx, 'vault_expiry', { id: a.id, expiresInDays: 30 }) as { updated: boolean }
+    assert.equal(r.updated, true)
+    const full = await call(ctx, 'vault_get', { id: a.id }) as { entry: { expiresAt?: number } }
+    assert.ok(full.entry.expiresAt !== undefined)
+    const diff = full.entry.expiresAt! - Date.now()
+    assert.ok(diff > 29 * 86_400_000 && diff < 31 * 86_400_000, '~30 days out')
+  })
+})
+
+test('vault_recent filters by days', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'RecentDaysOld', password: 'pw' })
+    await new Promise(r => setTimeout(r, 10))
+    await call(ctx, 'vault_add', { title: 'RecentDaysNew', password: 'pw' })
+    const r = await call(ctx, 'vault_recent', { days: 1 }) as { entries: Array<{ title: string }> }
+    assert.ok(r.entries.some(e => e.title === 'RecentDaysNew'))
+    assert.ok(r.entries.some(e => e.title === 'RecentDaysOld'), 'both within 1 day')
+  })
+})
+
+test('vault_count supports favoriteOnly', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'CountFav' }) as { id: string }
+    await call(ctx, 'vault_pin', { id: a.id })
+    await call(ctx, 'vault_add', { title: 'CountNot' })
+    const r = await call(ctx, 'vault_count', { favoriteOnly: true }) as { count: number }
+    assert.equal(r.count, 1)
+  })
+})

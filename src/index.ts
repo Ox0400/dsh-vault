@@ -816,13 +816,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'vault_rotation reports entries whose expiry is near or past.',
     parameters: {
       id: { type: 'string', required: true, description: 'Entry id.' },
-      expiresAt: { type: 'integer', required: true, description: 'Expiry epoch millis, or 0 to clear.' },
+      expiresAt: { type: 'integer', description: 'Expiry epoch millis, or 0 to clear. Provide exactly one of expiresAt or expiresInDays.' },
+      expiresInDays: { type: 'integer', description: 'Set expiry N days from now (convenience). Provide exactly one of expiresAt or expiresInDays.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { updated: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.updated ? 'expiry updated' : 'entry not found' }] },
     async execute(args) {
       assertWritable('vault_expiry')
       const s = await guardStore()
-      const updated = await s.update(args.id, { expiresAt: args.expiresAt })
+      if (args.expiresAt === undefined && args.expiresInDays === undefined) {
+        throw new Error('vault_expiry: provide expiresAt or expiresInDays')
+      }
+      if (args.expiresAt !== undefined && args.expiresInDays !== undefined) {
+        throw new Error('vault_expiry: provide exactly one of expiresAt or expiresInDays')
+      }
+      const expiresAt = args.expiresInDays !== undefined
+        ? Date.now() + args.expiresInDays * 86_400_000
+        : args.expiresAt!
+      const updated = await s.update(args.id, { expiresAt })
       return { updated: updated !== undefined }
     },
   }))
@@ -1002,11 +1012,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       limit: { type: 'number', description: 'Max results (default 10).' },
       kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only entries of this kind.' },
+      days: { type: 'integer', description: 'Only entries updated within the last N days (1–365).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.entries) }] },
     async execute(args) {
       const s = await guardStore()
-      const entries = s.recent(validateLimit(args.limit, 'vault_recent'))
+      let entries = s.recent(validateLimit(args.limit, 'vault_recent'))
+      if (args.days !== undefined) {
+        if (!Number.isInteger(args.days) || args.days < 1 || args.days > 365) {
+          throw new Error('vault_recent: days must be an integer 1–365')
+        }
+        const since = Date.now() - args.days * 86_400_000
+        entries = entries.filter(e => (e.updatedAt ?? 0) >= since)
+      }
       const filtered = args.kind === undefined ? entries : entries.filter(e => (e.kind ?? 'login') === args.kind)
       return { entries: filtered }
     },
@@ -1542,6 +1560,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Count only this kind.' },
       tag: { type: 'string', description: 'Count only entries carrying this tag.' },
+      favoriteOnly: { type: 'boolean', description: 'Count only pinned (favorite) entries.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} entries` }] },
     async execute(args) {
@@ -1551,6 +1570,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const count = s.list().filter(e => {
         if (kind !== undefined && (e.kind ?? 'login') !== kind) return false
         if (tag.length > 0 && !(e.tags ?? []).includes(tag)) return false
+        if (args.favoriteOnly === true && e.favorite !== true) return false
         return true
       }).length
       return { count }
@@ -1669,6 +1689,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           if (e.otpSecret !== undefined) {
             const uri = e.otpSecret.startsWith('otpauth://') ? e.otpSecret : `otpauth://totp/${encodeURIComponent(e.title)}?secret=${e.otpSecret}`
             xml += `<otp><name>dsh-vault</name><otpauth>${x(uri)}</otpauth></otp>\n`
+          }
+          if (e.expiresAt !== undefined) {
+            xml += `<Expires>${new Date(e.expiresAt).toISOString().slice(0, 19)}Z</Expires>\n`
           }
           const strings: Array<[string, unknown]> = []
           if (e.host !== undefined) strings.push(['host', e.host])
@@ -3271,6 +3294,32 @@ export class VaultGateway extends TypertRemoteService {
       }
     }
     return out
+  }
+
+  /** Tag inventory for the UI tag-management panel. */
+  @Remote('tags')
+  async tags(): Promise<Array<{ name: string; count: number }>> {
+    const store = await this.guardedStore()
+    const counts = new Map<string, number>()
+    for (const e of store.list()) {
+      for (const tag of e.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+    return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  }
+
+  /** Rename a tag across every entry (Bitwarden-style tag merge). */
+  @Remote('renameTag')
+  async renameTag(from: string, to: string): Promise<{ renamed: number }> {
+    const store = await this.guardedStore()
+    let renamed = 0
+    for (const e of store.list()) {
+      const tags = e.tags ?? []
+      if (!tags.includes(from)) continue
+      const next = [...new Set([...tags.filter(t => t !== from), to])]
+      await store.update(e.id, { tags: next })
+      renamed++
+    }
+    return { renamed }
   }
 
   /** Mark an entry as recently used (touches updatedAt). */

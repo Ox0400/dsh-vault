@@ -35,8 +35,8 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'get', 'health', 'history', 'list', 'listVaults', 'lock', 'merge', 'recent', 'restore', 'rotation',
-      'saveTemplate', 'search', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
+      'add', 'backup', 'backupStatus', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'get', 'health', 'history', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'rotation',
+      'saveTemplate', 'search', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
     ])
   })
 })
@@ -104,5 +104,19 @@ test('VaultGateway breachCheck works with and without the online arg', async () 
     expect(withArg.weak.some(w => w.title === 'BcTest')).toBe(true)
     const withoutArg = await gateway.breachCheck()
     expect(withoutArg.checked).toBe(1)
+  })
+})
+
+test('VaultGateway renameTag merges a tag across entries', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'A', tags: ['old', 'keep'] })
+    await gateway.add({ title: 'B', tags: ['old'] })
+    const r = await gateway.renameTag('old', 'new')
+    expect(r.renamed).toBe(2)
+    const list = await gateway.list()
+    const a = list.entries.find(e => e.title === 'A')!
+    expect(a.tags).toContain('new')
+    expect(a.tags).not.toContain('old')
+    expect(a.tags).toContain('keep')
   })
 })

@@ -84,6 +84,8 @@ export interface VaultSectionInjected {
   switchVault: (name: string) => Promise<{ switched: boolean; name: string }>
   lock: () => Promise<{ locked: boolean }>
   totpUri: (id: string) => Promise<{ uri: string }>
+  tags: () => Promise<Array<{ name: string; count: number }>>
+  renameTag: (from: string, to: string) => Promise<{ renamed: number }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
@@ -201,7 +203,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -212,6 +214,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [totpMap, setTotpMap] = useState<Record<string, { code: string; until: number }>>({})
   const [uriMap, setUriMap] = useState<Record<string, string>>({})
+  const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
@@ -312,6 +315,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Rename a tag across all entries (Bitwarden-style tag merge). */
+  async function renameTagAll(from: string): Promise<void> {
+    const to = window.prompt(`${t('tagRenamePrompt')} ${from}`)
+    if (!to || to.trim().length === 0 || to.trim() === from) return
+    await renameTag(from, to.trim())
+    await tags().then(setTagList).catch(() => {})
+    void refresh()
   }
 
   /** Merge one duplicate into another (first keeps gaps filled), then refresh. */
@@ -465,6 +477,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         }
         duplicateGroups().then(setDupList).catch(() => {})
         verifyAll().then(setAudit).catch(() => {})
+        tags().then(setTagList).catch(() => {})
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
@@ -481,7 +494,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     const onFocus = (): void => { load() }
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
-  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll])
+  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags])
 
   /** Open the editor for a new entry. */
   function startCreate(): void {
@@ -939,6 +952,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 onClick={() => void startEdit(item.id)}
                 disabled={busy}
               >{t('auditEdit')}</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tagList.length > 0 && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('tagManage')} ({tagList.length})</p>
+          {tagList.slice(0, 8).map(tag => (
+            <div key={tag.name} className={css.dupGroup}>
+              <span className={css.dupNames}>{tag.name} ({tag.count})</span>
+              <button
+                type="button"
+                className={css.dupMerge}
+                onClick={() => void renameTagAll(tag.name)}
+                disabled={busy || readonly}
+              >{t('tagRename')}</button>
             </div>
           ))}
         </div>
