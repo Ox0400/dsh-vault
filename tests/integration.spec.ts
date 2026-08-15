@@ -2699,3 +2699,23 @@ test('vault_count supports favoriteOnly', async () => {
     assert.equal(r.count, 1)
   })
 })
+
+test('vault_verify all reports highSensitivity count', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'HighA', password: 'pw', sensitivity: 'high' })
+    await call(ctx, 'vault_add', { title: 'NormB', password: 'pw' })
+    const r = await call(ctx, 'vault_verify', { all: true }) as { highSensitivity?: number }
+    assert.equal(r.highSensitivity, 1)
+  })
+})
+
+test('vault_duplicates respects a limit', async () => {
+  await withContext(async ctx => {
+    for (let i = 0; i < 3; i++) {
+      await call(ctx, 'vault_add', { title: `DupL${i}` })
+      await call(ctx, 'vault_add', { title: `DupL${i}` })
+    }
+    const r = await call(ctx, 'vault_duplicates', { mode: 'title', limit: 2 }) as { groups: unknown[] }
+    assert.equal(r.groups.length, 2)
+  })
+})

@@ -602,3 +602,14 @@
   overflow-wrap: anywhere;
   opacity: 0.85;
 }
+
+
+.genHist {
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px;
+}
+.genHist span {
+  align-self: center;
+}

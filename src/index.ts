@@ -907,7 +907,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       all: { type: 'boolean', description: 'Verify every active entry and return a per-entry audit.' },
       limit: { type: 'integer', description: 'Max entries audited with all: true (default 500, 1–5000).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } }, audited: { type: 'integer' }, withIssues: { type: 'integer' }, perEntry: { type: 'array', items: { type: 'json' } }, summary: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.audited !== undefined ? `audited ${v.audited} entries, ${v.withIssues} with issues` : (v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}`) }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, issues: { type: 'array', required: true, items: { type: 'string' } }, audited: { type: 'integer' }, withIssues: { type: 'integer' }, perEntry: { type: 'array', items: { type: 'json' } }, summary: { type: 'json' }, highSensitivity: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: v.audited !== undefined ? `audited ${v.audited} entries, ${v.withIssues} with issues` : (v.ok ? 'entry looks complete' : `issues: ${v.issues.join('; ')}`) }] },
     async execute(args) {
       const s = await guardStore()
       if (args.all === true) {
@@ -940,7 +940,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         for (const p of perEntry) {
           for (const issue of p.issues) summary[issue] = (summary[issue] ?? 0) + 1
         }
-        return { ok: withIssues === 0, issues: [], audited: perEntry.length, withIssues, perEntry, summary }
+        const highSensitivity = s.list().filter(e => e.sensitivity === 'high').length
+        return { ok: withIssues === 0, issues: [], audited: perEntry.length, withIssues, perEntry, summary, highSensitivity }
       }
       if (args.id === undefined) throw new Error('vault_verify: provide id or set all: true')
       const entry = s.get(args.id)
@@ -1243,7 +1244,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_duplicates',
     description: 'Find duplicate entries: same title+kind (mode: title), same username+secret (mode: '
       + 'content), or both. Returns groups of summaries (no secrets) so the caller can merge or delete them.',
-    parameters: { mode: { type: 'string', enum: ['title', 'content', 'both'], description: 'both (default): union of title and content groups; title: same title+kind only; content: same username+secret only.' } },
+    parameters: {
+      mode: { type: 'string', enum: ['title', 'content', 'both'], description: 'both (default): union of title and content groups; title: same title+kind only; content: same username+secret only.' },
+      limit: { type: 'integer', description: 'Max groups to return (default 50, 1–500).' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { groups: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `found ${(v.groups as unknown[]).length} duplicate groups` }] },
     async execute(args) {
       const s = await guardStore()
@@ -1264,12 +1268,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         }
       }
       const mode = args.mode ?? 'both'
+      const limit = args.limit === undefined ? 50 : args.limit
+      if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+        throw new Error('vault_duplicates: limit must be an integer 1–500')
+      }
       const sortGroup = (g: VaultEntrySummary[]): VaultEntrySummary[] => [...g].sort((a, b) => a.title.localeCompare(b.title))
       const titleGroups = [...byKey.values()].filter(g => g.length > 1).map(sortGroup)
       const contentGroups = [...byContent.values()].filter(g => g.length > 1).map(sortGroup)
-      if (mode === 'title') return { groups: titleGroups }
-      if (mode === 'content') return { groups: contentGroups }
-      return { groups: [...titleGroups, ...contentGroups] }
+      if (mode === 'title') return { groups: titleGroups.slice(0, limit) }
+      if (mode === 'content') return { groups: contentGroups.slice(0, limit) }
+      return { groups: [...titleGroups, ...contentGroups].slice(0, limit) }
     },
   }))
 
@@ -2934,6 +2942,7 @@ export class VaultGateway extends TypertRemoteService {
   private readonly accessPolicy: AccessPolicy
   private readonly backupRetention: number
   private activeName: string | undefined
+  private readonly genHistory: Array<{ password: string; at: number }> = []
 
   constructor(ctx: Context, config: Config & { accessPolicy?: AccessPolicy }) {
     super(ctx, 'vault')
@@ -3192,7 +3201,10 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('generatePassword')
   async generatePassword(options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }): Promise<{ password: string }> {
     const { generatePassword } = await import('./password.ts')
-    return { password: generatePassword({ length: options?.length ?? 24, lowercase: options?.lowercase ?? true, uppercase: options?.uppercase ?? true, digits: options?.digits ?? true, symbols: options?.symbols ?? true, excludeAmbiguous: options?.excludeAmbiguous ?? false }) }
+    const password = generatePassword({ length: options?.length ?? 24, lowercase: options?.lowercase ?? true, uppercase: options?.uppercase ?? true, digits: options?.digits ?? true, symbols: options?.symbols ?? true, excludeAmbiguous: options?.excludeAmbiguous ?? false })
+    this.genHistory.unshift({ password, at: Date.now() })
+    if (this.genHistory.length > 10) this.genHistory.length = 10
+    return { password }
   }
 
   /** List built-in + custom templates for the editor's template picker. */
@@ -3238,10 +3250,31 @@ export class VaultGateway extends TypertRemoteService {
     return { uri: `otpauth://totp/${encodeURIComponent(entry.title)}?secret=${secret}&issuer=dsh-vault` }
   }
 
+  /** Last generated passwords (session-scoped, newest first) for the editor. */
+  @Remote('generatorHistory')
+  async generatorHistory(): Promise<Array<{ password: string; at: number }>> {
+    return [...this.genHistory]
+  }
+
   /** Generate a random username suggestion for the editor. */
   @Remote('generateUsername')
   async generateUsername(): Promise<{ username: string }> {
     return { username: generateUsername(2) }
+  }
+
+  /** List recent encrypted backups (timestamped files) for the UI. */
+  @Remote('backups')
+  async backups(limit = 5): Promise<Array<{ path: string; at: number }>> {
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
+    const found: Array<{ path: string; at: number }> = []
+    try {
+      const entries = await readdir(dir)
+      for (const entry of entries) {
+        const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
+        if (m) found.push({ path: join(dir, entry), at: Number(m[1]) })
+      }
+    } catch { /* no dir yet */ }
+    return found.sort((a, b) => b.at - a.at).slice(0, limit)
   }
 
   /** Lock the vault immediately (wipe the in-memory key); UI "lock" button. */

@@ -86,6 +86,8 @@ export interface VaultSectionInjected {
   totpUri: (id: string) => Promise<{ uri: string }>
   tags: () => Promise<Array<{ name: string; count: number }>>
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
+  generatorHistory: () => Promise<Array<{ password: string; at: number }>>
+  backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
@@ -203,7 +205,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -215,6 +217,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [totpMap, setTotpMap] = useState<Record<string, { code: string; until: number }>>({})
   const [uriMap, setUriMap] = useState<Record<string, string>>({})
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
+  const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
+  const [backupList, setBackupList] = useState<Array<{ path: string; at: number }>>([])
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
@@ -478,6 +482,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         duplicateGroups().then(setDupList).catch(() => {})
         verifyAll().then(setAudit).catch(() => {})
         tags().then(setTagList).catch(() => {})
+        generatorHistory().then(setGenHistory).catch(() => {})
+        backups(5).then(setBackupList).catch(() => {})
         if (!current) return
         if (st !== null) setVaultStats(st as Record<string, unknown>)
         if (bk !== null) setBackupInfo(bk)
@@ -494,7 +500,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     const onFocus = (): void => { load() }
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
-  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags])
+  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags, generatorHistory, backups])
 
   /** Open the editor for a new entry. */
   function startCreate(): void {
@@ -957,6 +963,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
       )}
 
+      {backupList.length > 0 && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('recentBackups')}</p>
+          {backupList.map(b => (
+            <p key={b.path} className={css.reportSub}>· {new Date(b.at).toLocaleString()}</p>
+          ))}
+        </div>
+      )}
+
       {tagList.length > 0 && (
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('tagManage')} ({tagList.length})</p>
@@ -1330,7 +1345,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                           type="button"
                           className={css.revealButton}
                           title={t('genPwHint')}
-                          onClick={() => { void generatePassword(genOpts).then(r => setForm(previous => ({ ...previous, password: r.password }))) }}
+                          onClick={() => { void generatePassword(genOpts).then(r => { setForm(previous => ({ ...previous, password: r.password })); void generatorHistory().then(setGenHistory).catch(() => {}) }) }}
                         >{t('genPw')}</button>
                         <button
                           type="button"
@@ -1423,6 +1438,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     onChange={event => setGenOpts(previous => ({ ...previous, length: Math.max(6, Math.min(64, Number(event.target.value) || 24)) }))}
                   />
                 </label>
+                {genHistory.length > 0 && (
+                  <div className={css.genHist}>
+                    <span>{t('genHistory')}:</span>
+                    {genHistory.slice(0, 3).map((h, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className={css.revealButton}
+                        onClick={() => setForm(previous => ({ ...previous, password: h.password }))}
+                        title={new Date(h.at).toLocaleString()}
+                      >{h.password}</button>
+                    ))}
+                  </div>
+                )}
                 {(['uppercase', 'lowercase', 'digits', 'symbols', 'excludeAmbiguous'] as const).map(key => (
                   <label key={key} className={css.genOptRow}>
                     <span>{t(GEN_OPT_KEYS[key] ?? 'genOptUppercase')}</span>
