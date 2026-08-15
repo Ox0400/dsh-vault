@@ -107,7 +107,7 @@ export function apply(ctx: ClientContext): void {
     undeleteAll: () => invoke<{ restored: number }>('undeleteAll'),
     totp: (id) => invoke<{ code: string; label?: string; secondsRemaining: number }>('totp', { id }),
     sessionOpen: (url) => invoke<{ sessionId: string; url: string }>('sessionOpen', { url }),
-    sessionCollect: (sessionId) => invoke<{ cookies: unknown[]; count: number }>('sessionCollect', { sessionId }),
+    sessionCollect: (sessionId, url) => invoke<{ cookies: unknown[]; count: number }>('sessionCollect', { sessionId, url: url ?? '' }),
     sessionClose: (sessionId) => invoke<{ closed: boolean }>('sessionClose', { sessionId }),
     sessionListOpen: () => invoke<Array<{ sessionId: string; url: string; openedAt: number }>>('sessionListOpen'),
     sessionListSaved: () => invoke<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>('sessionListSaved'),

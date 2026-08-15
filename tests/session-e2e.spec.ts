@@ -52,3 +52,29 @@ test.skipIf(!available)('session: closeAllSessions cleans up', async () => {
   await closeAllSessions()
   expect((await import('../src/session.ts')).openSessionCount()).toBe(0)
 })
+test.skipIf(!available)('session: URL filtering matches Playwright cookie semantics', async () => {
+  const { createServer } = await import('node:http')
+  const server = createServer((_req, res) => {
+    res.setHeader('set-cookie', ['sid=1; Path=/'])
+    res.end('ok')
+  })
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()))
+  const port = (server.address() as { port: number }).port
+  try {
+    const session = await openSession(`http://127.0.0.1:${port}/`, { headless: true })
+    // collect without filter returns the cookie; collecting with a URL of a
+    // DIFFERENT domain returns nothing (domain-based matching).
+    const { collectSessionCookies, closeSession } = await import('../src/session.ts')
+    const all = await collectSessionCookies(session.id)
+    expect(all.some(c => c.name === 'sid')).toBe(true)
+    const none = await collectSessionCookies(session.id, 'http://example.com/')
+    expect(none.length).toBe(0)
+    const same = await collectSessionCookies(session.id, `http://127.0.0.1:${port}/`)
+    expect(same.some(c => c.name === 'sid')).toBe(true)
+    await closeSession(session.id)
+  } finally {
+    server.close()
+    const { closeAllSessions } = await import('../src/session.ts')
+    await closeAllSessions()
+  }
+})

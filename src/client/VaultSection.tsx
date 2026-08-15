@@ -115,7 +115,7 @@ export interface VaultSectionInjected {
   undeleteAll: () => Promise<{ restored: number }>
   totp: (id: string) => Promise<{ code: string; label?: string; secondsRemaining: number }>
   sessionOpen: (url: string) => Promise<{ sessionId: string; url: string }>
-  sessionCollect: (sessionId: string) => Promise<{ cookies: unknown[]; count: number }>
+  sessionCollect: (sessionId: string, url?: string) => Promise<{ cookies: unknown[]; count: number }>
   sessionClose: (sessionId: string) => Promise<{ closed: boolean }>
   sessionListOpen: () => Promise<Array<{ sessionId: string; url: string; openedAt: number }>>
   sessionListSaved: () => Promise<Array<{ id: string; title: string; url?: string; cookieCount: number; updatedAt?: number }>>
@@ -713,7 +713,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setBusy(true)
     setMessage(null)
     try {
-      const collected = await sessionCollect(sessionId)
+      const collected = await sessionCollect(sessionId, fallbackUrl)
       if (collected.count === 0) { setMessage(t('sessionNoteCollect').replace('{n}', '0')); return }
       const saved = await sessionSave({ title, cookies: collected.cookies, url: fallbackUrl, overwrite: true })
       setMessage(t('sessionSaved').replace('{n}', String(saved.saved)))

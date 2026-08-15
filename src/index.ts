@@ -3132,20 +3132,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_session_collect: save a browser session's cookies into the vault ─
   ctx.tools.register(defineTool({
     name: 'vault_session_collect',
-    description: 'Collect every cookie of a browser login session (opened with vault_session_open) and '
-      + 'save them into the vault as a "cookie" entry under the given title. The browser window stays '
-      + 'open (call vault_session_close when done, or open another). Returns how many cookies were saved.',
+    description: 'Collect the cookies of a browser login session (opened with vault_session_open) and '
+      + 'save them into the vault as a "cookie" entry under the given title. By default only cookies '
+      + 'relevant to the session URL (or the url you pass) are collected — pass a url to restrict to '
+      + 'that site, or collectAll: true to grab every cookie in the browser context. The browser window '
+      + 'stays open (call vault_session_close when done, or open another).',
     parameters: {
       sessionId: { type: 'string', required: true, description: 'Session id returned by vault_session_open.' },
       title: { type: 'string', required: true, description: 'Vault entry title, e.g. "GitHub session".' },
-      url: { type: 'string', description: 'Site URL stored on the entry (defaults to the session URL).' },
+      url: { type: 'string', description: 'Site URL to filter cookies by (defaults to the session URL).' },
+      collectAll: { type: 'boolean', description: 'Collect every cookie in the browser context, not just the session URL domain (default false).' },
       overwrite: { type: 'boolean', description: 'Replace an existing entry with the same title (default false = incremental).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { saved: { type: 'integer', required: true }, id: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `saved ${v.saved} cookies as "${v.note}"` }] },
     async execute(args) {
       assertWritable('vault_session_collect')
       const s = await guardStore()
-      const cookies = await collectSessionCookies(args.sessionId)
+      const cookies = args.collectAll === true
+        ? await collectSessionCookies(args.sessionId)
+        : await collectSessionCookies(args.sessionId, typeof args.url === 'string' && args.url.trim().length > 0 ? args.url.trim() : undefined)
       const title = args.title.trim()
       if (title.length === 0) throw new Error('vault_session_collect: title is required')
       const url = typeof args.url === 'string' && args.url.trim().length > 0 ? args.url.trim() : undefined
@@ -4659,8 +4664,8 @@ export class VaultGateway extends TypertRemoteService {
   /** Collect the cookies of an open browser session (no vault write here —
    * the UI saves them via sessionSave). */
   @Remote('sessionCollect')
-  async sessionCollect(sessionId: string): Promise<{ cookies: CookieData[]; count: number }> {
-    const cookies = await collectSessionCookies(sessionId)
+  async sessionCollect(sessionId: string, url?: string): Promise<{ cookies: CookieData[]; count: number }> {
+    const cookies = await collectSessionCookies(sessionId, url)
     return { cookies, count: cookies.length }
   }
 

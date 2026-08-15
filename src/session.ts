@@ -242,11 +242,15 @@ export async function openSession(url: string, options?: { headless?: boolean })
   return { id, url: normalized, openedAt: Date.now() }
 }
 
-/** Collect every cookie currently present in the given browser session. */
-export async function collectSessionCookies(sessionId: string): Promise<CookieData[]> {
+/** Collect the cookies of the given browser session. When `url` is provided,
+ * only cookies relevant to that URL (Playwright's cookie URL matching) are
+ * returned — handy when the session touched several sites. */
+export async function collectSessionCookies(sessionId: string, url?: string): Promise<CookieData[]> {
   const session = sessions.get(sessionId)
   if (session === undefined) throw new Error(`session: unknown session ${sessionId} — open one with vault_session_open first`)
-  const cookies = await session.context.cookies()
+  const cookies = url !== undefined && url.length > 0
+    ? await session.context.cookies(url)
+    : await session.context.cookies()
   return cookies.map(toCookieData)
 }
 
