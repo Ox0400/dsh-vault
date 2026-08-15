@@ -82,6 +82,7 @@ export interface VaultSectionInjected {
   duplicateGroups: () => Promise<Array<Array<{ id: string; title: string }>>>
   status: () => Promise<{ locked: boolean; entries: number }>
   switchVault: (name: string) => Promise<{ switched: boolean; name: string }>
+  lock: () => Promise<{ locked: boolean }>
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
@@ -199,7 +200,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -321,6 +322,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await merge(second!.id, first!.id, false)
       await duplicateGroups().then(setDupList)
       void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Lock the vault immediately from the UI. */
+  async function lockNow(): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await lock()
+      setLocked(r.locked)
+      setMessage(r.locked ? t('lockedMsg') : t('error'))
     } catch {
       setMessage(t('error'))
     } finally {
@@ -663,6 +678,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  function passwordAge(entry: VaultSummaryWire): string {
+    const up = entry.updatedAt
+    if (up === undefined || up <= 0) return ''
+    const days = Math.max(0, Math.floor((Date.now() - up) / 86_400_000))
+    if (days === 0) return t('ageToday')
+    return `${days}d`
+  }
+
   function identityLine(entry: VaultSummaryWire): string {
     const parts = [
       entry.kind !== undefined ? t(KIND_KEYS[entry.kind] ?? 'kindCustom') : t('kindLogin'),
@@ -1001,6 +1024,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         {dueMap[entry.id]!.due === 'expired' ? t('dueExpired') : dueMap[entry.id]!.due === 'soon' ? `${t('dueExpiring')} ${dueMap[entry.id]!.daysLeft}d` : t('dueNow')}
                       </span>
                     )}
+                    {passwordAge(entry) !== '' && (
+                      <span className={css.dueBadge} title={t('ageHint')}>{passwordAge(entry)}</span>
+                    )}
                   </span>
                   <span className={css.identity}>{identityLine(entry)}</span>
                   {code !== undefined && (
@@ -1133,6 +1159,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           </button>
           <button type="button" className={css.backupButton} onClick={() => void runBreachCheck()} disabled={busy}>
             {t('breachCheck')}
+          </button>
+          <button type="button" className={css.backupButton} onClick={() => void lockNow()} disabled={busy || locked}>
+            {t('lock')}
           </button>
         </div>
       )}

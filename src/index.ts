@@ -2072,7 +2072,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       online: { type: 'boolean', description: 'Allow online Pwned Passwords lookups (default true).' },
       concurrency: { type: 'integer', description: 'Max parallel online lookups (default 4, 1–16).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { checked: { type: 'integer', required: true }, pwned: { type: 'array', required: true, items: { type: 'json' } }, weak: { type: 'array', required: true, items: { type: 'json' } }, offline: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: `checked ${v.checked} password(s): ${(v.pwned as unknown[]).length} breached, ${(v.weak as unknown[]).length} weak${v.offline ? ' (offline fallback)' : ''}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { checked: { type: 'integer', required: true }, pwned: { type: 'array', required: true, items: { type: 'json' } }, weak: { type: 'array', required: true, items: { type: 'json' } }, offline: { type: 'boolean', required: true }, elapsedMs: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `checked ${v.checked} password(s) in ${v.elapsedMs}ms: ${(v.pwned as unknown[]).length} breached, ${(v.weak as unknown[]).length} weak${v.offline ? ' (offline fallback)' : ''}` }] },
     async execute(args) {
       assertWritable('vault_breach_check')
       const s = await guardStore()
@@ -2100,8 +2100,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           }
         }
       }
+      const started = Date.now()
       await Promise.all(Array.from({ length: Math.min(concurrency, targets.length || 1) }, () => worker()))
-      return { checked: targets.length, pwned, weak, offline }
+      return { checked: targets.length, pwned, weak, offline, elapsedMs: Date.now() - started }
     },
   }))
 
@@ -2413,21 +2414,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         && (tag.length === 0 || (e.tags ?? []).includes(tag)))
       const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey']
       const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color']
+      const healthFields = ['weakPassword', 'no2fa', 'httpSite', 'expired']
       const fields = args.includeSecrets === true
-        ? ['title', 'kind', 'username', ...secretFields, ...metaFields, 'weakPassword']
-        : ['title', 'kind', 'username', ...metaFields]
+        ? ['title', 'kind', 'username', ...secretFields, ...metaFields, ...healthFields]
+        : ['title', 'kind', 'username', ...metaFields, ...healthFields]
       const esc = (v: unknown): string => {
         const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
         return `"${str.replace(/"/g, '""')}"`
       }
       const lines = [fields.join(',')]
       const MIN_LEN = 12
+      const now = Date.now()
       for (const e of entries) {
         const rec = e as unknown as Record<string, unknown>
-        if (args.includeSecrets === true) {
-          const pw = typeof rec.password === 'string' ? rec.password : ''
-          ;(rec as Record<string, unknown>).weakPassword = pw.length > 0 && pw.length < MIN_LEN ? 'true' : 'false'
-        }
+        const pw = typeof rec.password === 'string' ? rec.password : ''
+        const kind = typeof rec.kind === 'string' ? rec.kind : 'login'
+        ;(rec as Record<string, unknown>).weakPassword = pw.length > 0 && pw.length < MIN_LEN ? 'true' : 'false'
+        ;(rec as Record<string, unknown>).no2fa = pw.length > 0 && (kind === 'login' || kind === 'ssh') && rec.otpSecret === undefined ? 'true' : 'false'
+        ;(rec as Record<string, unknown>).httpSite = typeof rec.url === 'string' && /^http:\/\//i.test(rec.url) ? 'true' : 'false'
+        ;(rec as Record<string, unknown>).expired = typeof rec.expiresAt === 'number' && rec.expiresAt < now ? 'true' : 'false'
         lines.push(fields.map(f => esc(rec[f])).join(','))
       }
       const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
@@ -2981,7 +2986,7 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Watchtower-style breach scan for the UI (k-anonymity; offline fallback). */
   @Remote('breachCheck')
-  async breachCheck(online = true): Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }> {
+  async breachCheck(online = true): Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean; elapsedMs: number }> {
     const store = await this.guardedStore()
     const pwned: Array<{ id: string; title: string; count: number }> = []
     const weak: Array<{ id: string; title: string }> = []
@@ -2995,7 +3000,7 @@ export class VaultGateway extends TypertRemoteService {
       if (verdict.breached && verdict.reason === 'pwned') pwned.push({ id: e.id, title: e.title, count: verdict.count })
       else if (verdict.breached && verdict.reason === 'weak') weak.push({ id: e.id, title: e.title })
     }
-    return { checked, pwned, weak, offline }
+    return { checked, pwned, weak, offline, elapsedMs: 0 }
   }
 
   /** Duplicate groups count for the UI health badge (title+kind matches). */
@@ -3096,6 +3101,14 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('generateUsername')
   async generateUsername(): Promise<{ username: string }> {
     return { username: generateUsername(2) }
+  }
+
+  /** Lock the vault immediately (wipe the in-memory key); UI "lock" button. */
+  @Remote('lock')
+  async lock(): Promise<{ locked: boolean }> {
+    const store = await this.ensureStore()
+    if (!store.isLocked) store.lock()
+    return { locked: store.isLocked }
   }
 
   /** Vault lock/entry status for the UI banner. */

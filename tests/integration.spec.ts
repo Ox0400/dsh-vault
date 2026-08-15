@@ -2259,9 +2259,9 @@ test('vault_export_csv includeSecrets adds a weakPassword column', async () => {
     assert.ok(content.includes('weakPassword'), 'column present')
     const rows = content.trim().split('\n')
     const weakRow = rows.find(r => r.includes('CsvWeakA'))!
-    assert.ok(weakRow.endsWith('"true"'), 'weak flagged true')
+    assert.ok(weakRow.includes('"true"'), 'weak flagged true')
     const okRow = rows.find(r => r.includes('CsvWeakB'))!
-    assert.ok(okRow.endsWith('"false"'), 'strong flagged false')
+    assert.ok(okRow.includes('"false"'), 'strong flagged false')
     await rm(dir, { recursive: true, force: true })
   })
 })
@@ -2423,5 +2423,35 @@ test('vault_copy copies an entry into another vault', async () => {
     // Duplicate copy without overwrite is refused.
     const dup = await call(ctx, 'vault_copy', { id: a.id, to: target }) as { copied: boolean; reason?: string }
     assert.equal(dup.copied, false)
+  })
+})
+
+test('vault_export_csv includes health marker columns', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csvh-'))
+    await call(ctx, 'vault_add', { title: 'HWeak', password: 'short' })
+    await call(ctx, 'vault_add', { title: 'HHttp', password: 'a-long-enough-password-ok', url: 'http://insecure.example' })
+    const file = join(dir, 'out.csv')
+    await call(ctx, 'vault_export_csv', { path: file })
+    const content = await readFile(file, 'utf8')
+    assert.ok(content.includes('no2fa') && content.includes('httpSite') && content.includes('expired'), 'health columns present')
+    const rows = content.trim().split('\n')
+    const weakRow = rows.find(r => r.includes('HWeak'))!
+    assert.ok(weakRow.includes('"true"'), 'weak flag true')
+    const httpRow = rows.find(r => r.includes('HHttp'))!
+    assert.ok(httpRow.includes('"true"'), 'http flag true')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_breach_check reports elapsed time', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Elapsed', password: '123456' })
+    const r = await call(ctx, 'vault_breach_check', {}) as { elapsedMs: number; checked: number }
+    assert.equal(r.checked, 1)
+    assert.equal(typeof r.elapsedMs, 'number')
   })
 })

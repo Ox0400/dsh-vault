@@ -75,6 +75,7 @@ export function apply(ctx: ClientContext): void {
     switchVault: (name) => invoke<{ switched: boolean; name: string }>('switchVault', { name }),
     listVaults: () => invoke<Array<{ name: string; active: boolean }>>('listVaults'),
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
+    lock: () => invoke<{ locked: boolean }>('lock'),
     verifyAll: () => invoke<Array<{ id: string; title: string; issues: string[] }>>('verifyAll'),
     breachCheck: (online) => invoke<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>('breachCheck', { online: online ?? true }),
     generatePassword: (options) => invoke<{ password: string }>('generatePassword', { ...(options ?? {}) }),

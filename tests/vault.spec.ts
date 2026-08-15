@@ -542,3 +542,14 @@ test('store: health reports no-2FA, HTTP sites, and a security score', async () 
     assert.equal(h.verdict, 'fair')
   })
 })
+
+test('store: concurrent adds across many promises persist every entry', async () => {
+  await withTempVault(async path => {
+    const vault = await openVault({ masterPassword: 'pw', path })
+    const N = 20
+    await Promise.all(Array.from({ length: N }, (_, i) => vault.add({ title: `Conc${i}`, password: `pw-${i}` })))
+    // Reload from disk: every entry must be present (persist chain serialized).
+    const reloaded = await openVault({ masterPassword: 'pw', path })
+    assert.equal(reloaded.list().length, N)
+  })
+})
