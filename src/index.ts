@@ -975,10 +975,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
     parameters: {},
-    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true }, duplicates: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, ${v.trashCount} trashed, ${v.duplicates} dup groups (${JSON.stringify(v.byKind)})` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { total: { type: 'integer', required: true }, byKind: { type: 'json', required: true }, byTag: { type: 'json', required: true }, withTotp: { type: 'integer', required: true }, withPrivateKey: { type: 'integer', required: true }, highSensitivity: { type: 'integer', required: true }, expired: { type: 'integer', required: true }, recent7d: { type: 'integer', required: true }, trashCount: { type: 'integer', required: true }, duplicates: { type: 'integer', required: true }, score: { type: 'integer', required: true }, verdict: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `vault: ${v.total} entries, score ${v.score}/${v.verdict}, ${v.trashCount} trashed, ${v.duplicates} dup groups (${JSON.stringify(v.byKind)})` }] },
     async execute() {
       const s = await guardStore()
-      return s.stats()
+      const stats = s.stats()
+      const h = s.health()
+      return { ...stats, score: h.score, verdict: h.verdict }
     },
   }))
 
@@ -1832,6 +1834,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       let added = 0
       let skipped = 0
       const entries = await readdir(args.dir, { withFileTypes: true })
+      if (entries.length > 5000) {
+        throw new Error(`vault_import_wallet: ${entries.length} entries exceeds the 5000-entry safety limit — split the directory`)
+      }
       for (const ent of entries) {
         if (!ent.isFile()) continue
         const name = ent.name.replace(/\.gpg$/i, '')
@@ -2254,15 +2259,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey']
       const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color']
       const fields = args.includeSecrets === true
-        ? ['title', 'kind', 'username', ...secretFields, ...metaFields]
+        ? ['title', 'kind', 'username', ...secretFields, ...metaFields, 'weakPassword']
         : ['title', 'kind', 'username', ...metaFields]
       const esc = (v: unknown): string => {
         const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
         return `"${str.replace(/"/g, '""')}"`
       }
       const lines = [fields.join(',')]
+      const MIN_LEN = 12
       for (const e of entries) {
-        lines.push(fields.map(f => esc((e as unknown as Record<string, unknown>)[f])).join(','))
+        const rec = e as unknown as Record<string, unknown>
+        if (args.includeSecrets === true) {
+          const pw = typeof rec.password === 'string' ? rec.password : ''
+          ;(rec as Record<string, unknown>).weakPassword = pw.length > 0 && pw.length < MIN_LEN ? 'true' : 'false'
+        }
+        lines.push(fields.map(f => esc(rec[f])).join(','))
       }
       const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
@@ -2761,6 +2772,12 @@ export class VaultGateway extends TypertRemoteService {
   async generatePassword(): Promise<{ password: string }> {
     const { generatePassword } = await import('./password.ts')
     return { password: generatePassword({ length: 24 }) }
+  }
+
+  /** Generate a random username suggestion for the editor. */
+  @Remote('generateUsername')
+  async generateUsername(): Promise<{ username: string }> {
+    return { username: generateUsername(2) }
   }
 
   /** Vault lock/entry status for the UI banner. */

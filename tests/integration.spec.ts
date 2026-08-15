@@ -2230,3 +2230,34 @@ test('vault_verify all honors a limit', async () => {
     assert.equal(r.audited, 2)
   })
 })
+
+test('vault_stats includes security score and verdict', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'StatsWeak', password: 'short' })
+    const stats = await call(ctx, 'vault_stats', {}) as { score: number; verdict: string }
+    assert.equal(typeof stats.score, 'number')
+    assert.ok(['good', 'fair', 'poor'].includes(stats.verdict))
+    assert.ok(stats.score <= 100)
+  })
+})
+
+test('vault_export_csv includeSecrets adds a weakPassword column', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-csvweak-'))
+    await call(ctx, 'vault_add', { title: 'CsvWeakA', password: 'short' })
+    await call(ctx, 'vault_add', { title: 'CsvWeakB', password: 'this-is-a-long-password' })
+    const file = join(dir, 'out.csv')
+    await call(ctx, 'vault_export_csv', { path: file, includeSecrets: true })
+    const content = await readFile(file, 'utf8')
+    assert.ok(content.includes('weakPassword'), 'column present')
+    const rows = content.trim().split('\n')
+    const weakRow = rows.find(r => r.includes('CsvWeakA'))!
+    assert.ok(weakRow.endsWith('"true"'), 'weak flagged true')
+    const okRow = rows.find(r => r.includes('CsvWeakB'))!
+    assert.ok(okRow.endsWith('"false"'), 'strong flagged false')
+    await rm(dir, { recursive: true, force: true })
+  })
+})

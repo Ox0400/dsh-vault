@@ -87,6 +87,7 @@ export interface VaultSectionInjected {
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
   generatePassword: () => Promise<{ password: string }>
+  generateUsername: () => Promise<{ username: string }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -160,6 +161,11 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
 
 const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
 
+/** Number of entries matching the current kind/tag filters (for pagination). */
+function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string): number {
+  return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).length
+}
+
 const KIND_KEYS: Record<string, VaultLocaleKey> = {
   login: 'kindLogin',
   ssh: 'kindSsh',
@@ -185,7 +191,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, generateUsername } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -202,6 +208,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent'>('alpha')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
   const [showTrash, setShowTrash] = useState(false)
@@ -309,6 +316,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         ? await list()
         : await search(query.trim())
       setState({ status: 'ready', entries })
+      setVisibleCount(50)
       status().then(value => setLocked(value.locked)).catch(() => {})
     } catch {
       setState({ status: 'error' })
@@ -821,6 +829,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
       )}
 
+      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter) > visibleCount && (
+        <button
+          type="button"
+          className={css.trashButton}
+          onClick={() => setVisibleCount(count => count + 50)}
+        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter) - visibleCount})</button>
+      )}
+
       {state.status === 'ready' && (state.entries.length > 0 || trashEntries.length > 0) && (
         <button
           type="button"
@@ -886,7 +902,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <ul className={css.list}>
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
@@ -1136,6 +1152,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     />
                     {t('favoriteHint')}
                   </label>
+                ) : field.key === 'username' ? (
+                  <span className={css.secretField}>
+                    <input
+                      type="text"
+                      value={(form.username as string | undefined) ?? ''}
+                      onChange={event => setForm(previous => ({ ...previous, username: event.target.value }))}
+                    />
+                    <button
+                      type="button"
+                      className={css.revealButton}
+                      title={t('genUserHint')}
+                      onClick={() => { void generateUsername().then(r => setForm(previous => ({ ...previous, username: r.username }))) }}
+                    >{t('genUser')}</button>
+                  </span>
                 ) : (
                   <input
                     type="text"
