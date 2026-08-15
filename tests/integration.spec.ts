@@ -85,6 +85,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_env',
       'vault_expiry',
       'vault_export',
+      'vault_export_bitwarden',
       'vault_export_browser',
       'vault_export_csv',
       'vault_export_env',
@@ -101,6 +102,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_health',
       'vault_history',
       'vault_import',
+      'vault_import_bitwarden',
       'vault_import_browser',
       'vault_import_csv',
       'vault_import_wallet',
@@ -2332,5 +2334,54 @@ test('vault_strength reports entropy bits', async () => {
     const r = await call(ctx, 'vault_strength', { password: 'Xk9!mQ2#zT7$vR4' }) as { score: number; verdict: string; bits: number }
     assert.ok(r.bits > 60, `bits ${r.bits} > 60`)
     assert.ok(r.score >= 60)
+  })
+})
+
+test('vault_export_bitwarden / vault_import_bitwarden round-trip', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bw-'))
+    const a = await call(ctx, 'vault_add', { title: 'BW1', username: 'u', password: 'pw-1', url: 'https://a.example', otpSecret: 'GEZDGNBVGY3TQOJQ', tags: ['x'] }) as { id: string }
+    await call(ctx, 'vault_pin', { id: a.id })
+    await call(ctx, 'vault_add', { title: 'BW2', kind: 'ssh', host: 'h', username: 'u2', privateKey: 'KEY' })
+    const file = join(dir, 'bw.json')
+    const exp = await call(ctx, 'vault_export_bitwarden', { path: file }) as { count: number }
+    assert.equal(exp.count, 2)
+    const doc = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(doc.encrypted, false)
+    assert.ok(Array.isArray(doc.items))
+    const bw1 = doc.items.find(i => i.name === 'BW1')
+    assert.equal(bw1.login.password, 'pw-1')
+    assert.equal(bw1.login.totp, 'GEZDGNBVGY3TQOJQ')
+    assert.equal(bw1.favorite, true)
+    // Fresh context: import back.
+    await call(ctx, 'vault_delete', { id: a.id })
+    await call(ctx, 'vault_import_bitwarden', { path: file })
+    const found = await call(ctx, 'vault_search', { query: 'BW1' }) as { results: Array<{ id: string }> }
+    assert.equal(found.results.length, 1, 're-imported')
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { password: string; otpSecret: string; username: string; url: string } }
+    assert.equal(full.entry.password, 'pw-1')
+    assert.equal(full.entry.otpSecret, 'GEZDGNBVGY3TQOJQ')
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+test('vault_import_browser picks up otpauth and notes columns', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-brw2-'))
+    const file = join(dir, 'b.csv')
+    await writeFile(file, 'name,url,username,password,otpauth,notes\n"2FA","https://s","u","pw","otpauth://totp/X?secret=GEZDGNBVGY3TQOJQ","note here"\n')
+    const r = await call(ctx, 'vault_import_browser', { path: file }) as { added: number }
+    assert.equal(r.added, 1)
+    const found = await call(ctx, 'vault_search', { query: '2FA' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { otpSecret: string; notes: string } }
+    assert.ok(full.entry.otpSecret.includes('GEZDGNBVGY3TQOJQ'))
+    assert.equal(full.entry.notes, 'note here')
+    await rm(dir, { recursive: true, force: true })
   })
 })

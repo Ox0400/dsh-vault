@@ -1575,7 +1575,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           xml += `<username>${x(e.username ?? e.email)}</username>\n`
           xml += `<password>${x(e.password)}</password>\n`
           xml += `<url>${x(e.url)}</url>\n`
-          xml += `<notes>${x(e.notes)}</notes>\n</entry>\n`
+          xml += `<notes>${x(e.notes)}</notes>\n`
+          if (e.otpSecret !== undefined) {
+            const uri = e.otpSecret.startsWith('otpauth://') ? e.otpSecret : `otpauth://totp/${encodeURIComponent(e.title)}?secret=${e.otpSecret}`
+            xml += `<otp><name>dsh-vault</name><otpauth>${x(uri)}</otpauth></otp>\n`
+          }
+          const strings: Array<[string, unknown]> = []
+          if (e.host !== undefined) strings.push(['host', e.host])
+          if (e.port !== undefined) strings.push(['port', e.port])
+          if (e.apiKey !== undefined) strings.push(['apiKey', e.apiKey])
+          if (e.secret !== undefined) strings.push(['secret', e.secret])
+          if (e.accessToken !== undefined) strings.push(['accessToken', e.accessToken])
+          if (e.refreshToken !== undefined) strings.push(['refreshToken', e.refreshToken])
+          if (e.privateKey !== undefined) strings.push(['privateKey', e.privateKey])
+          if (e.expiresAt !== undefined) strings.push(['expiresAt', e.expiresAt])
+          if (e.rotationDays !== undefined) strings.push(['rotationDays', e.rotationDays])
+          for (const [k, v] of Object.entries(e.fields ?? {})) strings.push([k, v])
+          for (const [k, v] of strings) {
+            xml += `<String><Key>${x(k)}</Key><Value>${x(v)}</Value></String>\n`
+          }
+          xml += `</entry>\n`
         }
         xml += `</group>\n`
       }
@@ -1637,6 +1656,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         url: header.indexOf('url'),
         username: header.indexOf('username'),
         password: header.indexOf('password'),
+        otpauth: header.indexOf('otpauth'),
+        notes: header.indexOf('notes'),
       }
       if (idx.name < 0 || idx.password < 0) return { added: 0, skipped: rows.length - 1, updated: 0 }
       let added = 0
@@ -1655,6 +1676,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(idx.url >= 0 && idx.url < row.length && row[idx.url] ? { url: row[idx.url] } : {}),
           ...(idx.username >= 0 && idx.username < row.length && row[idx.username] ? { username: row[idx.username] } : {}),
           ...(idx.password >= 0 && idx.password < row.length && row[idx.password] ? { password: row[idx.password] } : {}),
+          ...(idx.otpauth >= 0 && idx.otpauth < row.length && row[idx.otpauth] ? { otpSecret: row[idx.otpauth] } : {}),
+          ...(idx.notes >= 0 && idx.notes < row.length && row[idx.notes] ? { notes: row[idx.notes] } : {}),
         }
         const existing = s.list().find(e => e.title === name)
         if (existing && !args.overwrite) { skipped++; continue }
@@ -2307,6 +2330,128 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
       await writeFile(file, lines.join('\n') + '\n', { mode: 0o600 })
       return { path: file, count: entries.length }
+    },
+  }))
+
+  // ── vault_import_bitwarden: import a Bitwarden JSON export ─────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_import_bitwarden',
+    description: 'Import a Bitwarden (or Vaultwarden) JSON export: maps each item into a vault entry '
+      + '(title, username/password, totp, notes, url, favorite, custom fields). Same-title entries are '
+      + 'skipped unless overwrite is set. Returns added/skipped/updated counts.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the Bitwarden .json export.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
+    async execute(args) {
+      assertWritable('vault_import_bitwarden')
+      const s = await guardStore()
+      const raw = JSON.parse(await readFile(args.path, 'utf8')) as {
+        items?: Array<{
+          name?: string
+          notes?: string | null
+          favorite?: boolean
+          type?: number
+          login?: { username?: string; password?: string; totp?: string; uris?: Array<{ uri?: string }> } | null
+          fields?: Array<{ name?: string; value?: string }> | null
+        }>
+      }
+      const items = Array.isArray(raw.items) ? raw.items : []
+      let added = 0
+      let skipped = 0
+      let updated = 0
+      for (const item of items) {
+        const title = (item.name ?? '').trim()
+        if (!title) { skipped++; continue }
+        const patch: VaultEntryPatch = {}
+        const login = item.login
+        if (login?.username !== undefined) patch.username = login.username
+        if (login?.password !== undefined) patch.password = login.password
+        if (login?.totp !== undefined) patch.otpSecret = login.totp
+        const uri = login?.uris?.find(u => u.uri)?.uri
+        if (uri !== undefined) patch.url = uri
+        if (item.notes !== undefined && item.notes !== null) patch.notes = item.notes
+        if (item.favorite === true) patch.favorite = true
+        const fields: Record<string, string> = {}
+        for (const f of item.fields ?? []) {
+          if (f.name !== undefined && f.value !== undefined) fields[f.name] = f.value
+        }
+        // Promote known custom fields back onto the entry model.
+        for (const key of ['host', 'port', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'privateKey', 'expiresAt', 'rotationDays']) {
+          if (fields[key] !== undefined) {
+            ;(patch as unknown as Record<string, unknown>)[key] = key === 'port' || key === 'expiresAt' || key === 'rotationDays' ? Number(fields[key]) : fields[key]
+            delete fields[key]
+          }
+        }
+        if (Object.keys(fields).length > 0) patch.fields = fields
+        const existing = s.list().find(e => e.title === title)
+        if (existing && !args.overwrite) { skipped++; continue }
+        if (existing && args.overwrite) {
+          await s.update(existing.id, patch)
+          updated++
+          continue
+        }
+        await s.add({ title, ...patch })
+        added++
+      }
+      return { added, skipped, updated }
+    },
+  }))
+
+  // ── vault_export_bitwarden: Bitwarden-compatible JSON export ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_bitwarden',
+    description: 'Export entries in the Bitwarden JSON format (encrypted:false) so they can be '
+      + 'imported into Bitwarden, Vaultwarden, or other tools that accept that format. Contains '
+      + 'plaintext secrets — write it to a protected file. Returns the output path and count.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute output .json path.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path}` }] },
+    async execute(args) {
+      assertWritable('vault_export_bitwarden')
+      const s = await guardStore()
+      const items: unknown[] = []
+      for (const e of s.list()) {
+        const uris = e.url !== undefined ? [{ match: null, uri: e.url }] : null
+        const login: Record<string, unknown> = {}
+        if (e.username !== undefined) login.username = e.username
+        if (e.email !== undefined && login.username === undefined) login.username = e.email
+        if (e.password !== undefined) login.password = e.password
+        if (e.otpSecret !== undefined) login.totp = e.otpSecret
+        if (uris !== null) login.uris = uris
+        const fields: Array<{ name: string; value: string; type: number }> = []
+        for (const [k, v] of Object.entries(e.fields ?? {})) {
+          if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+            fields.push({ name: k, value: String(v), type: 0 })
+          }
+        }
+        if (e.host !== undefined) fields.push({ name: 'host', value: e.host, type: 0 })
+        if (e.port !== undefined) fields.push({ name: 'port', value: String(e.port), type: 0 })
+        if (e.apiKey !== undefined) fields.push({ name: 'apiKey', value: e.apiKey, type: 0 })
+        if (e.secret !== undefined) fields.push({ name: 'secret', value: e.secret, type: 0 })
+        if (e.accessToken !== undefined) fields.push({ name: 'accessToken', value: e.accessToken, type: 0 })
+        if (e.refreshToken !== undefined) fields.push({ name: 'refreshToken', value: e.refreshToken, type: 0 })
+        if (e.privateKey !== undefined) fields.push({ name: 'privateKey', value: e.privateKey, type: 0 })
+        if (e.rotationDays !== undefined) fields.push({ name: 'rotationDays', value: String(e.rotationDays), type: 0 })
+        if (e.expiresAt !== undefined) fields.push({ name: 'expiresAt', value: String(e.expiresAt), type: 0 })
+        items.push({
+          id: e.id,
+          organizationId: null,
+          folderId: null,
+          type: 1,
+          reprompt: 0,
+          name: e.title,
+          notes: e.notes ?? null,
+          favorite: e.favorite === true,
+          login: Object.keys(login).length > 0 ? login : null,
+          fields: fields.length > 0 ? fields : null,
+          collectionIds: null,
+        })
+      }
+      const doc = { encrypted: false, folders: [], items }
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, JSON.stringify(doc, null, 2), { mode: 0o600 })
+      return { path: args.path, count: items.length }
     },
   }))
 
