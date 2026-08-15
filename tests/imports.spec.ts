@@ -313,6 +313,7 @@ describe('1Password 8 CSV import', () => {
 
 describe('Bitwarden encrypted export', () => {
   const FIXTURE = join(__dirname, 'fixtures', 'bitwarden-encrypted.json')
+  const FIXTURE_ARGON = join(__dirname, 'fixtures', 'bitwarden-encrypted-argon2.json')
 
   it('decrypts a password-protected export (PBKDF2 + HKDF + AES-CBC + HMAC)', () => {
     const plain = decryptBitwardenExport(readFileSync(FIXTURE, 'utf8'), 'ExportPass123')
@@ -333,4 +334,16 @@ describe('Bitwarden encrypted export', () => {
   it('rejects unencrypted exports', () => {
     expect(() => decryptBitwardenExport('{"encrypted":false,"items":[]}', 'x')).toThrow(/not a password-protected export/)
   })
+
+  it('decrypts an Argon2id (kdfType=1) export with the SHA-256-salted key', () => {
+    const plain = decryptBitwardenExport(readFileSync(FIXTURE_ARGON, 'utf8'), 'ArgonExport42')
+    const creds = readBitwardenJson(plain)
+    expect(creds[0]!.title).toBe('Argon Enc Site')
+    expect(creds[0]!.username).toBe('argon-user')
+    expect(creds[0]!.password).toBe('argon-enc-pass')
+  }, 20000)
+
+  it('rejects a wrong password on the Argon2id export', () => {
+    expect(() => decryptBitwardenExport(readFileSync(FIXTURE_ARGON, 'utf8'), 'nope')).toThrow(/wrong password|MAC mismatch/)
+  }, 20000)
 })

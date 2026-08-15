@@ -12,7 +12,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { VaultGateway } from '../src/index'
+import { VaultGateway, resetVaultSwitch } from '../src/index'
 
 async function withGateway<T>(run: (gateway: VaultGateway) => Promise<T>): Promise<T> {
   const ctx = new Context()
@@ -24,6 +24,7 @@ async function withGateway<T>(run: (gateway: VaultGateway) => Promise<T>): Promi
     const gateway = ctx.get('vault') as VaultGateway
     return await run(gateway)
   } finally {
+    resetVaultSwitch()
     ctx.registry.delete(VaultGateway)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)
@@ -311,3 +312,139 @@ test('VaultGateway importBitwardenEncrypted rejects a wrong passphrase', async (
     await expect(gateway.importBitwardenEncrypted(json, 'nope')).rejects.toThrow(/wrong password|MAC mismatch/)
   })
 })
+
+// ── UI-facing gateway remotes: every clickable action in the settings UI ──
+
+test('gateway config / setAccessMode / setAutoCapture round trip', async () => {
+  await withGateway(async gateway => {
+    const c = await gateway.config()
+    expect(['readonly', 'ask', 'auto']).toContain(c.accessMode)
+    const a = await gateway.setAccessMode('auto')
+    expect(a.accessMode).toBe('auto')
+    const cap = await gateway.setAutoCapture(true)
+    expect(cap.autoCapture).toBe(true)
+  })
+})
+
+test('gateway copy action: get returns the secret the UI copies', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'CopyMe', username: 'u', password: 'p', url: 'https://x' })
+    const full = await gateway.get(added.id)
+    expect(full.found).toBe(true)
+    expect(full.entry?.password).toBe('p')
+  })
+})
+
+test('gateway TOTP + TOTP URI (copy code / copy URI buttons)', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'TotpSite', otpSecret: 'JBSWY3DPEHPK3PXP' })
+    const code = await gateway.totp(added.id)
+    expect(code.code).toMatch(/^\d{6}$/)
+    expect(code.secondsRemaining).toBeGreaterThan(0)
+    const uri = await gateway.totpUri(added.id)
+    expect(uri.uri.startsWith('otpauth://totp/')).toBe(true)
+  })
+})
+
+test('gateway touch / lock / stats / recent / history', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'TouchMe' })
+    const t = await gateway.touch(added.id)
+    expect(t.touched).toBe(true)
+    const st = await gateway.stats()
+    expect(st.total).toBeGreaterThanOrEqual(1)
+    const rec = await gateway.recent()
+    expect(Array.isArray(rec.entries)).toBe(true)
+    const hist = await gateway.history()
+    expect(Array.isArray(hist.events)).toBe(true)
+    const locked = await gateway.lock()
+    expect(locked.locked).toBe(true)
+  })
+})
+
+test('gateway switchVault / listVaults', async () => {
+  await withGateway(async gateway => {
+    const sv = await gateway.switchVault('alt')
+    expect(sv.switched).toBe(true)
+    expect(sv.name).toBe('alt')
+    const list = await gateway.listVaults()
+    expect(Array.isArray(list)).toBe(true)
+    await gateway.switchVault('vault')
+    resetVaultSwitch()
+  })
+})
+
+test('gateway templates / saveTemplate / tags / renameTag', async () => {
+  await withGateway(async gateway => {
+    const saved = await gateway.saveTemplate('myssh', 'ssh', { host: '' })
+    expect(saved.saved).toBe(true)
+    const tpl = await gateway.templates()
+    expect(tpl.some(t => t.name === 'myssh')).toBe(true)
+    await gateway.add({ title: 'Tagged', tags: ['old'] })
+    const rn = await gateway.renameTag('old', 'new')
+    expect(rn.renamed).toBe(1)
+    const tags = await gateway.tags()
+    expect(tags.some(t => t.name === 'new')).toBe(true)
+  })
+})
+
+test('gateway trash / restore / undeleteAll', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'TrashMe' })
+    await gateway.delete(added.id)
+    const trash = await gateway.trash()
+    expect(trash.entries.some(e => e.id === added.id)).toBe(true)
+    const restored = await gateway.restore(added.id)
+    expect(restored.restored).toBe(true)
+    const added2 = await gateway.add({ title: 'TrashMe2' })
+    await gateway.delete(added2.id)
+    const all = await gateway.undeleteAll()
+    expect(all.restored).toBe(1)
+  })
+})
+
+test('gateway rotation / health / verifyAll / backupStatus / generatorHistory', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'RotMe', rotationDays: 7 })
+    const rot = await gateway.rotation()
+    expect(Array.isArray(rot.entries)).toBe(true)
+    const health = await gateway.health()
+    expect(typeof health.score).toBe('number')
+    const audit = await gateway.verifyAll()
+    expect(Array.isArray(audit)).toBe(true)
+    const bs = await gateway.backupStatus()
+    expect(typeof bs.backups).toBe('number')
+    await gateway.generatePassword({ length: 16 })
+    await gateway.generateUsername()
+    const gh = await gateway.generatorHistory()
+    expect(Array.isArray(gh)).toBe(true)
+  })
+})
+
+test('gateway strength / duplicates / duplicateGroups / merge', async () => {
+  await withGateway(async gateway => {
+    const s = await gateway.strength('CorrectHorseBatteryStaple!2024')
+    expect(s.score).toBeGreaterThan(60)
+    await gateway.add({ title: 'Dup', username: 'x', password: 'same-pass' })
+    await gateway.add({ title: 'Dup', username: 'y', password: 'same-pass' })
+    const dup = await gateway.duplicates()
+    expect(dup.groups).toBeGreaterThan(0)
+    const groups = await gateway.duplicateGroups()
+    expect(Array.isArray(groups)).toBe(true)
+    const listed = (await gateway.list()).entries
+    const a = listed.find(e => e.title === 'Dup')!
+    const b = listed.find(e => e.title === 'Dup' && e.id !== a.id)!
+    const merged = await gateway.merge(a.id, b.id)
+    expect(merged.found).toBe(true)
+  })
+})
+
+test('gateway searchSystem returns matches without passwords', async () => {
+  // searchSystem scans the real OS stores (Chrome/Keychain); it may legitimately
+  // find nothing on CI, so only assert the shape and that no password leaks.
+  await withGateway(async gateway => {
+    const r = await gateway.searchSystem('zzzz-no-such-site-zzzz')
+    expect(Array.isArray(r.matches)).toBe(true)
+    for (const m of r.matches) expect(m.username).not.toContain(':')
+  })
+}, 20000)

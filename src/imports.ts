@@ -21,7 +21,7 @@
 
 import { readZip, zipEntry } from './zip.ts'
 import { extractEntries as kdbxExtractEntries } from './kdbx.ts'
-import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, pbkdf2Sync } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, pbkdf2Sync } from 'node:crypto'
 import { argon2 } from './argon2.ts'
 
 export interface ImportedCredential {
@@ -520,10 +520,27 @@ interface BitwardenEncryptedExport {
   data?: string
 }
 
-/** HKDF-SHA256 expand (info "enc"/"mac") → 32-byte key (RFC 5869). */
+/** HKDF-SHA256 **expand-only** (RFC 5869 §2.3) → 32-byte key. Bitwarden's
+ * jslib uses CryptoFunctionService.hkdfExpand (no extract step, no salt):
+ * T(i) = HMAC-SHA256(PRK, T(i-1) || info || i). */
 function hkdfExpandSha256(ikm: Buffer, info: string, length = 32): Buffer {
-  const out = hkdfSync('sha256', ikm, Buffer.alloc(0), Buffer.from(info, 'utf8'), length)
-  return Buffer.from(out)
+  const infoBuf = Buffer.from(info, 'utf8')
+  const out = Buffer.alloc(length)
+  let prev = Buffer.alloc(0)
+  let offset = 0
+  let counter = 1
+  while (offset < length) {
+    const mac = createHmac('sha256', ikm)
+    if (prev.length > 0) mac.update(prev)
+    mac.update(infoBuf)
+    mac.update(Buffer.from([counter]))
+    prev = mac.digest()
+    const take = Math.min(prev.length, length - offset)
+    prev.copy(out, offset, 0, take)
+    offset += take
+    counter++
+  }
+  return out
 }
 
 /** Decrypt one `2.|iv|ciphertext|mac` payload. */

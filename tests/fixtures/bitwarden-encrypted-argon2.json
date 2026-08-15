@@ -1,0 +1,11 @@
+{
+  "encrypted": true,
+  "passwordProtected": true,
+  "salt": "argon-salt-for-bw",
+  "kdfType": 1,
+  "kdfIterations": 2,
+  "kdfMemory": 8,
+  "kdfParallelism": 2,
+  "encKeyValidation_DO_NOT_EDIT": "2.iobrhHoMqN3CyX8X7/mYBw==|HXqxPYKSKqx2TOmcQwc8cHADIAbScc6vHeEopxsq2J8=|3K2xWh90TAI7TfunYcIIqNfvWQRz9dPyUIb74z+AV60=",
+  "data": "2.nOdVJO6uD2jFfGn9OR0a1A==|x8OA0/vi3CE7bm29Z0kLTl08HYdamPOvB0+YB+aUjmcTt+1+ByPfZldNm+yt8Xpl80q7t0SCv4YmT2g+t2uQ9ogYqgclSIYV4V+5Jkwq01ouMoiTbYbzAiSxnEu9gmChiwoHC/6Rj7vPYWVTpVq1fTBZEgSFL6XImxbKiWW4AeqKrQcsZ2uEZ+nNeckuH9w96afaV2hMtLuWAZOqVJ5pyVsXvd2tU9IYGF+CHuzoh9zijSGwXmTPy/JD+d5yKdm2|nuq50DWPIwN6m6eWWhTattpmBw7P7WSO6zTC8y+QlOE="
+}
