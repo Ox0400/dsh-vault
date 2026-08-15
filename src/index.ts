@@ -1352,6 +1352,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       secret: { type: 'string', required: true, description: 'The secret value to store.' },
       note: { type: 'string', description: 'Optional context note.' },
+      title: { type: 'string', description: 'Optional explicit title; defaults to secret-YYYY-MM-DD-NNNN.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind (default secret).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, title: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `saved as "${v.title}" (id: ${v.id})` }] },
     async execute(args) {
@@ -1359,10 +1361,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (!args.secret || args.secret.length === 0) throw new Error('vault_note_secret: secret is required')
       const s = await guardStore()
       const stamp = new Date().toISOString().slice(0, 10)
-      const title = `secret-${stamp}-${Math.floor(Math.random() * 9000 + 1000)}`
+      const title = typeof args.title === 'string' && args.title.trim().length > 0
+        ? args.title.trim()
+        : `secret-${stamp}-${Math.floor(Math.random() * 9000 + 1000)}`
       const entry = await s.add({
         title,
-        kind: 'secret',
+        kind: args.kind ?? 'secret',
         secret: args.secret,
         ...(args.note !== undefined ? { notes: args.note } : {}),
       })
@@ -1577,7 +1581,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     name: 'vault_import_browser',
     description: 'Import a browser password-manager CSV (name,url,username,password — Chrome/Firefox/'
       + 'Edge export format). Rows without a name are skipped; returns added/skipped counts.',
-    parameters: { path: { type: 'string', required: true, description: 'Absolute path of the browser CSV.' } },
+    parameters: {
+      path: { type: 'string', required: true, description: 'Absolute path of the browser CSV.' },
+      overwrite: { type: 'boolean', description: 'Update existing entries with the same name instead of skipping (default false).' },
+    },
     output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_browser')
@@ -1612,12 +1619,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           ...(idx.username >= 0 && idx.username < row.length && row[idx.username] ? { username: row[idx.username] } : {}),
           ...(idx.password >= 0 && idx.password < row.length && row[idx.password] ? { password: row[idx.password] } : {}),
         }
-        if (s.list().some(e => e.title === name)) { skipped++; continue }
+        const existing = s.list().find(e => e.title === name)
+        if (existing && !args.overwrite) { skipped++; continue }
+        if (existing && args.overwrite) {
+          const patch: VaultEntryPatch = {}
+          if (entry.url !== undefined) patch.url = entry.url
+          if (entry.username !== undefined) patch.username = entry.username
+          if (entry.password !== undefined) patch.password = entry.password
+          await s.update(existing.id, patch)
+          updated++
+          continue
+        }
         s.insertDirect(entry)
         added++
       }
       await s.persist()
-      return { added, skipped, updated: 0 }
+      return { added, skipped, updated }
     },
   }))
 
@@ -2013,13 +2030,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       const s = await guardStore()
       const needle = args.target.trim().toLowerCase()
-      for (const entry of s.list()) {
-        const haystack = [entry.title, entry.host, entry.url, entry.username, entry.email].filter(Boolean).join(' ').toLowerCase()
-        if (needle.length > 0 && haystack.includes(needle)) {
-          return { found: true, entry: stripTimestamps(entry) }
-        }
+      if (needle.length === 0) return { found: false }
+      const scoreOf = (entry: VaultEntry): number => {
+        const host = (entry.host ?? '').toLowerCase()
+        const url = (entry.url ?? '').toLowerCase()
+        const title = entry.title.toLowerCase()
+        const username = (entry.username ?? '').toLowerCase()
+        const email = (entry.email ?? '').toLowerCase()
+        const hostBase = host.split(':')[0] ?? ''
+        if (hostBase !== '' && hostBase === needle) return 6
+        if (url !== '' && url === needle) return 5
+        if (title === needle) return 4
+        if (hostBase !== '' && hostBase.includes(needle)) return 3
+        if (url.includes(needle)) return 2
+        if (title.includes(needle) || username.includes(needle) || email.includes(needle)) return 1
+        return 0
       }
-      return { found: false }
+      let best: VaultEntry | undefined
+      let bestScore = 0
+      for (const entry of s.list()) {
+        const score = scoreOf(entry)
+        if (score > bestScore) { best = entry; bestScore = score }
+      }
+      return best === undefined ? { found: false } : { found: true, entry: stripTimestamps(best) }
     },
   }))
 
@@ -2361,12 +2394,14 @@ export class VaultGateway extends TypertRemoteService {
   private readonly vaultName: string | undefined
   private readonly accessPolicy: AccessPolicy
   private readonly backupRetention: number
+  private activeName: string | undefined
 
   constructor(ctx: Context, config: Config & { accessPolicy?: AccessPolicy }) {
     super(ctx, 'vault')
     this.masterPassword = config.masterPassword ?? resolveMasterPassword(config)
     this.vaultPath = config.path
     this.vaultName = config.name
+    this.activeName = config.name
     this.accessPolicy = config.accessPolicy ?? { mode: config.accessMode ?? 'ask', autoCapture: config.autoCapture ?? false }
     this.backupRetention = config.backupRetention ?? 10
   }
@@ -2374,7 +2409,7 @@ export class VaultGateway extends TypertRemoteService {
   private async ensureStore(): Promise<VaultStore> {
     return sharedVaultStore(this.masterPassword, {
       ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}),
-      ...(this.vaultName !== undefined ? { name: this.vaultName } : {}),
+      ...(this.activeName !== undefined ? { name: this.activeName } : {}),
     })
   }
 
@@ -2563,6 +2598,42 @@ export class VaultGateway extends TypertRemoteService {
   async status(): Promise<{ locked: boolean; entries: number }> {
     const store = await this.ensureStore()
     return { locked: store.isLocked, entries: store.isLocked ? 0 : store.list().length }
+  }
+
+  /** Switch the active vault by name (same master password), then re-open. */
+  @Remote('switchVault')
+  async switchVault(name: string): Promise<{ switched: boolean; name: string }> {
+    if (typeof name !== 'string' || name.trim().length === 0 || /[^A-Za-z0-9._-]/.test(name)) {
+      throw new Error('vault: invalid vault name')
+    }
+    this.activeName = name.trim()
+    await this.ensureStore()
+    return { switched: true, name: this.activeName }
+  }
+
+  /** List available vault files (one .json per vault, excluding access/meta/exports). */
+  @Remote('listVaults')
+  async listVaults(): Promise<Array<{ name: string; active: boolean }>> {
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
+    const names: string[] = []
+    try {
+      const entries = await readdir(dir)
+      for (const entry of entries) {
+        const m = /^(.*)\.json$/.exec(entry)
+        if (!m) continue
+        if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-')) continue
+        names.push(m[1]!)
+      }
+    } catch { /* no dir yet */ }
+    return names.sort().map(name => ({ name, active: name === this.activeName }))
+  }
+
+  /** Mark an entry as recently used (touches updatedAt). */
+  @Remote('touch')
+  async touch(id: string): Promise<{ touched: boolean }> {
+    const store = await this.ensureStore()
+    const updated = await store.markUsed(id)
+    return { touched: updated !== undefined }
   }
 
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */

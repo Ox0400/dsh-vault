@@ -1953,3 +1953,44 @@ test('vault_rotation sorts expired before soon', async () => {
     assert.ok(idxExpired < idxSoon, 'expired listed before soon')
   })
 })
+
+test('vault_note_secret accepts an explicit title and kind', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_note_secret', { secret: 's3cret', title: 'MyNote', kind: 'custom' }) as { id: string; title: string }
+    assert.equal(r.title, 'MyNote')
+    const full = await call(ctx, 'vault_get', { id: r.id }) as { entry: { kind: string; secret: string } }
+    assert.equal(full.entry.kind, 'custom')
+    assert.equal(full.entry.secret, 's3cret')
+  })
+})
+
+test('vault_fill prefers exact host match over title substring', async () => {
+  await withContext(async ctx => {
+    const exact = await call(ctx, 'vault_add', { title: 'Prod', host: 'api.example.com', username: 'svc' }) as { id: string }
+    await call(ctx, 'vault_add', { title: 'Prod Backend', host: 'other.example.com', username: 'svc' })
+    const r = await call(ctx, 'vault_fill', { target: 'api.example.com' }) as { found: boolean; entry: { id: string; title: string } }
+    assert.equal(r.found, true)
+    assert.equal(r.entry.id, exact.id, 'exact host match wins')
+  })
+})
+
+test('vault_import_browser overwrite updates existing names', async () => {
+  await withContext(async ctx => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-brw-'))
+    const file = join(dir, 'b.csv')
+    await writeFile(file, 'name,url,username,password\n"site","https://site","u1","pw1"\n')
+    await call(ctx, 'vault_import_browser', { path: file })
+    await writeFile(file, 'name,url,username,password\n"site","https://site","u2","pw2"\n')
+    const r = await call(ctx, 'vault_import_browser', { path: file, overwrite: true }) as { added: number; updated: number }
+    assert.equal(r.added, 0)
+    assert.equal(r.updated, 1)
+    const found = await call(ctx, 'vault_search', { query: 'site' }) as { results: Array<{ id: string }> }
+    const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { username: string; password: string } }
+    assert.equal(full.entry.username, 'u2')
+    assert.equal(full.entry.password, 'pw2')
+    await rm(dir, { recursive: true, force: true })
+  })
+})

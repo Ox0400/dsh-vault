@@ -80,6 +80,9 @@ export interface VaultSectionInjected {
   duplicates: () => Promise<{ groups: number }>
   duplicateGroups: () => Promise<Array<Array<{ id: string; title: string }>>>
   status: () => Promise<{ locked: boolean; entries: number }>
+  switchVault: (name: string) => Promise<{ switched: boolean; name: string }>
+  listVaults: () => Promise<Array<{ name: string; active: boolean }>>
+  touch: (id: string) => Promise<{ touched: boolean }>
   merge: (fromId: string, toId: string, keepSource?: boolean) => Promise<{ found: boolean }>
   restore: (id: string) => Promise<{ restored: boolean }>
   undeleteAll: () => Promise<{ restored: number }>
@@ -176,7 +179,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -206,8 +209,26 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [dupGroups, setDupGroups] = useState<number>(0)
   const [dupList, setDupList] = useState<Array<Array<{ id: string; title: string }>>>([])
   const [locked, setLocked] = useState(false)
+  const [vaults, setVaults] = useState<Array<{ name: string; active: boolean }>>([])
 
   const readonly = policy?.accessMode === 'readonly'
+
+  /** Switch the active vault and reload everything. */
+  async function switchVaultTo(name: string): Promise<void> {
+    setBusy(true)
+    setMessage(null)
+    try {
+      await switchVault(name)
+      await listVaults().then(setVaults)
+      setQuery('')
+      void refresh()
+      status().then(value => setLocked(value.locked)).catch(() => {})
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   /** Merge one duplicate into another (first keeps gaps filled), then refresh. */
   async function mergeEntries(group: Array<{ id: string; title: string }>): Promise<void> {
@@ -252,8 +273,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       value => { if (current) setLocked(value.locked) },
       () => { /* ignore */ },
     )
+    void listVaults().then(setVaults).catch(() => {})
     return () => { current = false }
-  }, [config, status])
+  }, [config, status, listVaults])
 
   const refresh = useMemo(() => async () => {
     setState({ status: 'loading' })
@@ -528,6 +550,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
 
       <div className={css.toolbar}>
+        {vaults.length > 0 && (
+          <select
+            className={css.kindFilter}
+            value={vaults.find(v => v.active)?.name ?? ''}
+            onChange={event => void switchVaultTo(event.target.value)}
+            aria-label={t('vaultSelect')}
+          >
+            {vaults.map(v => (
+              <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}</option>
+            ))}
+          </select>
+        )}
         <label className={css.searchBox}>
           <span className="sr-only">{t('searchPlaceholder')}</span>
           <input
@@ -834,6 +868,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   {code !== undefined && (
                     <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy}>{t('copyCode')}</button>
                   )}
+                  <button type="button" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly} title={t('touchHint')}>{t('touch')}</button>
                   <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly}>{t('edit')}</button>
                   <button
                     type="button"
