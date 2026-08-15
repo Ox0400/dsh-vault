@@ -54,7 +54,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_generate_password` | Generate a strong random password (length/classes/grouping) **or a memorable passphrase** (`passphrase: true`, EFF-style word list, `words`/`separator`/`wordDigits`) |
 | `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
-| `vault_backup` | Timestamped encrypted backup with retention: prunes old copies beyond `maxBackups` (default 10) |
+| `vault_backup` | Timestamped encrypted backup with retention; optional `note` |
 | `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
 | `vault_apply_tags` | Bulk add/remove/replace tags on every entry matching a query (dry-run supported, no secrets) |
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
@@ -62,6 +62,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials; `soonWindowDays` (1-90, default 7) tunes the soon horizon (no secrets) |
 | `vault_health` | Vault health scan: weak/reused passwords, missing 2FA, insecure http:// sites, and an overall security score (0–100) |
 | `vault_breach_check` | Watchtower-style breach scan against Have I Been Pwned (k-anonymity: only the SHA-1 prefix leaves the machine), with an offline common-password fallback |
+| `vault_integrity` | Verify the on-disk vault file decrypts correctly and matches the in-memory store |
 | `vault_integrity` | Verify the on-disk vault file decrypts correctly and matches the in-memory store |
 | `vault_merge` | Merge one entry into another; `keepSource: true` keeps the source after merging |
 | `vault_quick_add` | Fast capture (title + one secret) with optional tags/notes |
@@ -73,7 +74,9 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
-| `vault_templates` | List recommended fields for a credential kind (ssh / api-key / oauth / …) |
+| `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON interop (full field mapping, overwrite support) |
+| `vault_copy` | Copy an entry (secrets included) into another named vault |
+| `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
 
 **Typical workflows**: store an SSH credential (`kind: ssh` + host/port/username/password or privateKey) and have the model `vault_search` for the host then `vault_get` the connection details; keep `api-key`/`oauth` entries for API-gateway access/refresh token rotation.
 

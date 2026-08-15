@@ -61,6 +61,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_health` | 保险库健康扫描：弱密码/复用凭据、未启用 2FA、不安全的 http:// 站点,以及整体安全评分（0–100） |
 | `vault_breach_check` | Watchtower 风格泄露扫描：对接 Have I Been Pwned（k-anonymity,仅发送 SHA-1 前缀）,附离线常见密码兜底 |
 | `vault_integrity` | 校验磁盘上的保险库文件可正确解密并与内存中的 store 一致 |
+| `vault_integrity` | 校验磁盘上的保险库文件可正确解密并与内存中的 store 一致 |
 | `vault_merge` | 合并一个条目到另一个；`keepSource: true` 保留源条目 |
 | `vault_quick_add` | 快速录入（标题 + 一个密钥），支持 tags/notes |
 | `vault_expiry` | 设置/清除过期（`expiresAt: 0` 移除） |
@@ -71,7 +72,9 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
 | `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
 | `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 |
-| `vault_templates` | 返回某类凭据（ssh/api-key/oauth 等）的推荐字段 |
+| `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON 互通（完整字段映射,支持覆盖） |
+| `vault_copy` | 复制条目（含密钥）到另一个命名保险库 |
+| `vault_templates` | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格） |
 
 **典型开发场景**：存一条 SSH 凭据（`kind: ssh` + host/port/username/password 或 privateKey），开发时让模型 `vault_search` 找主机、`vault_get` 取连接信息；存 API 网关的 `api-key`/`oauth` 条目管理 access/refresh token 轮换。
 
