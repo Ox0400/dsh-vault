@@ -850,6 +850,104 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_attach: attach a file to an entry ────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_attach',
+    description: 'Attach a file to an entry (1Password/KeePass-style). The file is read from disk '
+      + 'and stored base64 inside the encrypted entry, so attachments are encrypted at rest. Useful '
+      + 'for private keys, certificates, config files, recovery codes, etc. Attachments are exposed '
+      + 'to search (names only). Returns the attachment name and size.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      path: { type: 'string', required: true, description: 'Absolute path of the file to attach.' },
+      name: { type: 'string', description: 'Attachment name (default: the file base name).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { attached: { type: 'boolean', required: true }, name: { type: 'string' }, size: { type: 'integer' }, attachments: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: v.attached ? `attached "${v.name}" (${v.size} bytes, ${v.attachments} total)` : 'entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_attach')
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) return { attached: false }
+      const data = await readFile(args.path)
+      const name = typeof args.name === 'string' && args.name.trim().length > 0
+        ? args.name.trim() : basename(args.path)
+      const attachments = { ...(entry.attachments ?? {}) }
+      attachments[name] = {
+        data: data.toString('base64'),
+        name,
+        size: data.length,
+      }
+      await s.update(args.id, { attachments })
+      emitAudit('write', 'vault_attach', entry.id, entry.title)
+      return { attached: true, name, size: data.length, attachments: Object.keys(attachments).length }
+    },
+  }))
+
+  // ── vault_attachments: list an entry's attachments ─────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_attachments',
+    description: 'List the files attached to an entry (names and sizes only — never the content). '
+      + 'Use vault_attachment with the entry id and a name to read the content, or vault_detach to '
+      + 'remove one.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { attachments: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} attachment(s)` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      const list = entry?.attachments === undefined ? [] : Object.entries(entry.attachments).map(([name, a]) => ({ name, size: a.size, ...(a.mime !== undefined ? { mime: a.mime } : {}) }))
+      return { attachments: list as unknown as JsonValue[], count: list.length }
+    },
+  }))
+
+  // ── vault_attachment: read an attachment's content ─────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_attachment',
+    description: 'Read the content of one attached file: returns the base64 data, decoded bytes '
+      + 'count, and MIME type. Prefer decoding the base64 to the target format (e.g. write to a '
+      + 'file) — the content is sensitive, handle it as a secret.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      name: { type: 'string', required: true, description: 'Attachment name (see vault_attachments).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, data: { type: 'string' }, size: { type: 'integer' }, mime: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.found ? `attachment (${v.size} bytes, base64 below)` : 'attachment not found' }] },
+    async execute(args) {
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      const att = entry?.attachments?.[args.name]
+      if (att === undefined) return { found: false }
+      return {
+        found: true,
+        data: att.data,
+        size: att.size,
+        ...(att.mime !== undefined ? { mime: att.mime } : {}),
+      }
+    },
+  }))
+
+  // ── vault_detach: remove an attachment ─────────────────────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_detach',
+    description: 'Remove one attached file from an entry.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      name: { type: 'string', required: true, description: 'Attachment name to remove.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { detached: { type: 'boolean', required: true }, remaining: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: v.detached ? `detached (${v.remaining} remaining)` : 'attachment not found' }] },
+    async execute(args) {
+      assertWritable('vault_detach')
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry || entry.attachments?.[args.name] === undefined) return { detached: false }
+      const attachments = { ...entry.attachments }
+      delete attachments[args.name]
+      await s.update(args.id, { attachments })
+      emitAudit('write', 'vault_detach', entry.id, entry.title)
+      return { detached: true, remaining: Object.keys(attachments).length }
+    },
+  }))
+
   // ── vault_expiry: set/update an entry's expiry ──────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_expiry',
@@ -1569,6 +1667,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(entry.rotationDays !== undefined ? { rotationDays: entry.rotationDays } : {}),
         ...(entry.fields !== undefined ? { fields: entry.fields } : {}),
         ...(entry.cookies !== undefined ? { cookies: entry.cookies } : {}),
+        ...(entry.attachments !== undefined ? { attachments: entry.attachments } : {}),
       }
       if (existing) {
         await target.update(existing.id, patch)
@@ -5896,6 +5995,7 @@ function stripFieldsForPatch(entry: VaultEntry): VaultEntryPatch {
     ...(entry.rotationDays !== undefined ? { rotationDays: entry.rotationDays } : {}),
     ...(entry.fields !== undefined ? { fields: entry.fields } : {}),
     ...(entry.cookies !== undefined ? { cookies: entry.cookies } : {}),
+    ...(entry.attachments !== undefined ? { attachments: entry.attachments } : {}),
   }
   return patch
 }

@@ -55,6 +55,19 @@ export interface CookieData {
   sameSite?: 'Strict' | 'Lax' | 'None'
 }
 
+/** One file attached to an entry (1Password/KeePass-style). Data is stored
+ * base64 inside the encrypted entry, so attachments are encrypted at rest. */
+export interface AttachmentData {
+  /** Base64-encoded file content. */
+  data: string
+  /** File name (from the path). */
+  name: string
+  /** File size in bytes. */
+  size: number
+  /** MIME type when known (e.g. application/x-pem-file). */
+  mime?: string
+}
+
 /** Entry categories: general login vs. developer credentials. */
 export type VaultEntryKind =
   /** Web/account login (username, email, phone, password). */
@@ -145,6 +158,8 @@ export interface VaultEntry {
   /** Password history (1Password/Bitwarden-style): previous passwords with
    * the epoch millis when each was superseded. Newest first, capped. */
   passwordHistory?: Array<{ password: string; at: number }>
+  /** Files attached to the entry, keyed by file name (encrypted at rest). */
+  attachments?: Record<string, AttachmentData>
   /** Arbitrary additional key/value fields (e.g. region, username hint). */
   fields?: Record<string, FieldValue>
   /** Creation epoch millis. */
@@ -1161,6 +1176,17 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
           || typeof (h as { password?: unknown }).password !== 'string'
           || typeof (h as { at?: unknown }).at !== 'number')) {
           throw new Error('vault: passwordHistory must be an array of { password, at }')
+        }
+        break
+      case 'attachments':
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+          throw new Error('vault: attachments must be an object')
+        }
+        for (const [name, att] of Object.entries(value as Record<string, unknown>)) {
+          const a = att as { data?: unknown; size?: unknown }
+          if (typeof att !== 'object' || att === null || typeof a.data !== 'string' || typeof a.size !== 'number') {
+            throw new Error(`vault: attachment "${name}" must be { data, size, … }`)
+          }
         }
         break
       case 'fields':

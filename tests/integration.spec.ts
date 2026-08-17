@@ -96,6 +96,9 @@ test('dsh-vault registers all tools in the registry', async () => {
     assert.deepEqual(names, [
       'vault_add',
       'vault_apply_tags',
+      'vault_attach',
+      'vault_attachment',
+      'vault_attachments',
       'vault_autofill_check',
       'vault_backup',
       'vault_backup_now',
@@ -110,6 +113,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_count',
       'vault_delete',
       'vault_describe',
+      'vault_detach',
       'vault_duplicates',
       'vault_env',
       'vault_expiry',
@@ -3144,6 +3148,40 @@ test('vault_export_1password produces a 1PUX archive that re-imports', async () 
       const card = items.find((i: { title: string }) => i.title === 'Card1')
       assert.equal(card.category, 'CREDIT_CARD')
       assert.equal(card.details.fields.find((f: { designation: string }) => f.designation === 'cc-number').value, '4111111111111111')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('vault_attach / vault_attachments / vault_attachment / vault_detach round trip', async () => {
+  await withContext(async ctx => {
+    const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-att-'))
+    const file = join(dir, 'key.pem')
+    await writeFile(file, '-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----\n')
+    try {
+      const a = await call(ctx, 'vault_add', { title: 'WithAtt', username: 'u', password: 'pw' }) as { id: string }
+      const attached = await call(ctx, 'vault_attach', { id: a.id, path: file }) as { attached: boolean; name: string; size: number }
+      assert.equal(attached.attached, true)
+      assert.equal(attached.name, 'key.pem')
+
+      const list = await call(ctx, 'vault_attachments', { id: a.id }) as { count: number; attachments: Array<{ name: string; size: number }> }
+      assert.equal(list.count, 1)
+      assert.equal(list.attachments[0]!.name, 'key.pem')
+
+      const read = await call(ctx, 'vault_attachment', { id: a.id, name: 'key.pem' }) as { found: boolean; data: string }
+      assert.equal(read.found, true)
+      const decoded = Buffer.from(read.data, 'base64').toString('utf8')
+      assert.ok(decoded.includes('BEGIN PRIVATE KEY'))
+
+      const detach = await call(ctx, 'vault_detach', { id: a.id, name: 'key.pem' }) as { detached: boolean; remaining: number }
+      assert.equal(detach.detached, true)
+      assert.equal(detach.remaining, 0)
+      const after = await call(ctx, 'vault_attachments', { id: a.id }) as { count: number }
+      assert.equal(after.count, 0)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
