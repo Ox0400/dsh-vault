@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'watchtower',
     ])
   })
@@ -721,5 +721,31 @@ test('VaultGateway watchtower rates entries without leaking secrets', async () =
     // No secrets in the report.
     expect(JSON.stringify(report)).not.toContain('qwerty123')
     expect(JSON.stringify(report)).not.toContain('X9!kQm2')
+  })
+})
+
+test('VaultGateway export1pux / exportBitwarden write archives', async () => {
+  await withGateway(async gateway => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'gw-export-'))
+    await gateway.add({ title: 'GWExport', username: 'u', password: 'pw' })
+    try {
+      const pux = join(dir, 'out.1pux')
+      const r1 = await gateway.export1pux(pux)
+      expect(r1.count).toBe(1)
+      const { readZip } = await import('../src/zip')
+      const entries = readZip(await readFile(pux))
+      expect(entries.some(e => e.name === 'export.data')).toBe(true)
+
+      const bw = join(dir, 'out.json')
+      const r2 = await gateway.exportBitwarden(bw)
+      expect(r2.count).toBe(1)
+      const doc = JSON.parse(await readFile(bw, 'utf8'))
+      expect(doc.items[0].name).toBe('GWExport')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

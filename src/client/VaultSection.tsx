@@ -127,6 +127,8 @@ export interface VaultSectionInjected {
   vaultRename: (from: string, to: string) => Promise<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
   vaultDelete: (name: string, confirm: boolean) => Promise<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
   watchtower: () => Promise<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>
+  export1pux: (path: string) => Promise<{ path: string; count: number }>
+  exportBitwarden: (path: string) => Promise<{ path: string; count: number }>
 }
 
 /** Type-level alias so consumers can reference the wire shapes without values. */
@@ -245,7 +247,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -636,6 +638,38 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importKdbx(path.trim(), password, '', false)
       setMessage(r.note)
       void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Export the vault as a 1Password 1PUX archive. */
+  async function runExport1pux(): Promise<void> {
+    const path = window.prompt(t('export1puxPrompt'))
+    if (path === null || path.trim() === '') return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await export1pux(path.trim())
+      setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}) — ${r.path}`)
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Export the vault as a Bitwarden JSON document. */
+  async function runExportBitwarden(): Promise<void> {
+    const path = window.prompt(t('exportBitwardenPrompt'))
+    if (path === null || path.trim() === '') return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await exportBitwarden(path.trim())
+      setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}) — ${r.path}`)
     } catch {
       setMessage(t('error'))
     } finally {
@@ -1554,6 +1588,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importKdbxDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportKdbx()} disabled={busy || readonly || locked}>{t('importKdbx')}</button>
+        </div>
+      </div>
+
+      <div className={css.reportBox}>
+        <p className={css.reportTitle}>{t('exportTitle')}</p>
+        <p className={css.reportSub}>{t('exportHint')}</p>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('export1puxDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runExport1pux()} disabled={busy || readonly || locked}>{t('export1pux')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('exportBitwardenDesc')}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void runExportBitwarden()} disabled={busy || readonly || locked}>{t('exportBitwarden')}</button>
         </div>
       </div>
       </div>)}

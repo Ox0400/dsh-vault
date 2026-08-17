@@ -3599,48 +3599,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       assertWritable('vault_export_bitwarden')
       const s = await guardStore()
-      const items: unknown[] = []
-      for (const e of s.list()) {
-        const uris = e.url !== undefined ? [{ match: null, uri: e.url }] : null
-        const login: Record<string, unknown> = {}
-        if (e.username !== undefined) login.username = e.username
-        if (e.email !== undefined && login.username === undefined) login.username = e.email
-        if (e.password !== undefined) login.password = e.password
-        if (e.otpSecret !== undefined) login.totp = e.otpSecret
-        if (uris !== null) login.uris = uris
-        const fields: Array<{ name: string; value: string; type: number }> = []
-        for (const [k, v] of Object.entries(e.fields ?? {})) {
-          if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-            fields.push({ name: k, value: String(v), type: 0 })
-          }
-        }
-        if (e.host !== undefined) fields.push({ name: 'host', value: e.host, type: 0 })
-        if (e.port !== undefined) fields.push({ name: 'port', value: String(e.port), type: 0 })
-        if (e.apiKey !== undefined) fields.push({ name: 'apiKey', value: e.apiKey, type: 0 })
-        if (e.secret !== undefined) fields.push({ name: 'secret', value: e.secret, type: 0 })
-        if (e.accessToken !== undefined) fields.push({ name: 'accessToken', value: e.accessToken, type: 0 })
-        if (e.refreshToken !== undefined) fields.push({ name: 'refreshToken', value: e.refreshToken, type: 0 })
-        if (e.privateKey !== undefined) fields.push({ name: 'privateKey', value: e.privateKey, type: 0 })
-        if (e.rotationDays !== undefined) fields.push({ name: 'rotationDays', value: String(e.rotationDays), type: 0 })
-        if (e.expiresAt !== undefined) fields.push({ name: 'expiresAt', value: String(e.expiresAt), type: 0 })
-        items.push({
-          id: e.id,
-          organizationId: null,
-          folderId: null,
-          type: (e.kind ?? 'login') === 'card' ? 3 : 1,
-          reprompt: 0,
-          name: e.title,
-          notes: e.notes ?? null,
-          favorite: e.favorite === true,
-          ...((e.kind ?? 'login') === 'card' ? { card: buildBitwardenCard(e) } : {}),
-          login: (e.kind ?? 'login') === 'card' ? {} : (Object.keys(login).length > 0 ? login : {}),
-          fields: fields.length > 0 ? fields : null,
-          collectionIds: null,
-        })
-      }
-      const doc = { encrypted: false, folders: [], items }
+      const doc = buildBitwardenExport(s.list())
       await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
-      await writeFile(args.path, JSON.stringify(doc, null, 2), { mode: 0o600 })
+      await writeFile(args.path, doc, { mode: 0o600 })
+      const items = JSON.parse(doc).items as unknown[]
       return { path: args.path, count: items.length }
     },
   }))
@@ -4435,6 +4397,29 @@ export class VaultGateway extends TypertRemoteService {
       else { await store.add({ title, ...patch }); added++ }
     }
     return { added, skipped, updated, note: `1Password import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
+  }
+
+  /** Export the vault as a 1Password 1PUX archive (UI). */
+  @Remote('export1pux')
+  async export1pux(path: string): Promise<{ path: string; count: number }> {
+    this.assertWritable('export1pux')
+    const store = await this.guardedStore()
+    const doc = buildOnePasswordPux(store.list())
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    await writeFile(path, doc, { mode: 0o600 })
+    return { path, count: store.list().length }
+  }
+
+  /** Export the vault as a Bitwarden JSON document (UI). */
+  @Remote('exportBitwarden')
+  async exportBitwarden(path: string): Promise<{ path: string; count: number }> {
+    this.assertWritable('exportBitwarden')
+    const store = await this.guardedStore()
+    const doc = buildBitwardenExport(store.list())
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    await writeFile(path, doc, { mode: 0o600 })
+    const items = JSON.parse(doc).items as unknown[]
+    return { path, count: items.length }
   }
 
   /** Import a password-manager CSV (Dashlane/NordPass/Keeper auto-detected). */
@@ -5472,6 +5457,50 @@ function buildBitwardenCard(e: VaultEntry): Record<string, unknown> {
     }
   }
   return card
+}
+
+/** Build the Bitwarden JSON export document (encrypted:false) from entries. */
+function buildBitwardenExport(entries: VaultEntry[]): string {
+  const items: unknown[] = []
+  for (const e of entries) {
+    const uris = e.url !== undefined ? [{ match: null, uri: e.url }] : null
+    const login: Record<string, unknown> = {}
+    if (e.username !== undefined) login.username = e.username
+    if (e.email !== undefined && login.username === undefined) login.username = e.email
+    if (e.password !== undefined) login.password = e.password
+    if (e.otpSecret !== undefined) login.totp = e.otpSecret
+    if (uris !== null) login.uris = uris
+    const fields: Array<{ name: string; value: string; type: number }> = []
+    for (const [k, v] of Object.entries(e.fields ?? {})) {
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+        fields.push({ name: k, value: String(v), type: 0 })
+      }
+    }
+    if (e.host !== undefined) fields.push({ name: 'host', value: e.host, type: 0 })
+    if (e.port !== undefined) fields.push({ name: 'port', value: String(e.port), type: 0 })
+    if (e.apiKey !== undefined) fields.push({ name: 'apiKey', value: e.apiKey, type: 0 })
+    if (e.secret !== undefined) fields.push({ name: 'secret', value: e.secret, type: 0 })
+    if (e.accessToken !== undefined) fields.push({ name: 'accessToken', value: e.accessToken, type: 0 })
+    if (e.refreshToken !== undefined) fields.push({ name: 'refreshToken', value: e.refreshToken, type: 0 })
+    if (e.privateKey !== undefined) fields.push({ name: 'privateKey', value: e.privateKey, type: 0 })
+    if (e.rotationDays !== undefined) fields.push({ name: 'rotationDays', value: String(e.rotationDays), type: 0 })
+    if (e.expiresAt !== undefined) fields.push({ name: 'expiresAt', value: String(e.expiresAt), type: 0 })
+    items.push({
+      id: e.id,
+      organizationId: null,
+      folderId: null,
+      type: (e.kind ?? 'login') === 'card' ? 3 : 1,
+      reprompt: 0,
+      name: e.title,
+      notes: e.notes ?? null,
+      favorite: e.favorite === true,
+      ...((e.kind ?? 'login') === 'card' ? { card: buildBitwardenCard(e) } : {}),
+      login: (e.kind ?? 'login') === 'card' ? {} : (Object.keys(login).length > 0 ? login : {}),
+      fields: fields.length > 0 ? fields : null,
+      collectionIds: null,
+    })
+  }
+  return JSON.stringify({ encrypted: false, folders: [], items }, null, 2)
 }
 
 /** Heuristic card brand from the first digits (Visa/Mastercard/Amex/Discover). */
