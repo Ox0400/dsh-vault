@@ -165,6 +165,8 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_purge',
       'vault_quick_add',
       'vault_recent',
+      'vault_recovery_code',
+      'vault_recovery_status',
       'vault_rekey',
       'vault_rename',
       'vault_report',
@@ -201,6 +203,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_vault_delete',
       'vault_vault_rename',
       'vault_verify',
+      'vault_verify_recovery',
       'vault_watchtower',
     ])
   })
@@ -3185,5 +3188,22 @@ test('vault_attach / vault_attachments / vault_attachment / vault_detach round t
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+test('vault_recovery_code / vault_verify_recovery / vault_recovery_status round trip', async () => {
+  await withContext(async ctx => {
+    const status0 = await call(ctx, 'vault_recovery_status', {}) as { set: boolean }
+    assert.equal(status0.set, false)
+    const r = await call(ctx, 'vault_recovery_code', {}) as { code: string }
+    assert.equal(r.code.length, 32)
+    // The plaintext must not be recoverable from status.
+    const status1 = await call(ctx, 'vault_recovery_status', {}) as { set: boolean; issuedAt?: number }
+    assert.equal(status1.set, true)
+    assert.equal(typeof status1.issuedAt, 'number')
+    const ok = await call(ctx, 'vault_verify_recovery', { code: r.code }) as { verified: boolean }
+    assert.equal(ok.verified, true)
+    const bad = await call(ctx, 'vault_verify_recovery', { code: 'nope-nope' }) as { verified: boolean }
+    assert.equal(bad.verified, false)
   })
 })

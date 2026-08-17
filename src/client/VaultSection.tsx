@@ -129,6 +129,9 @@ export interface VaultSectionInjected {
   watchtower: () => Promise<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>
   export1pux: (path: string) => Promise<{ path: string; count: number }>
   exportBitwarden: (path: string) => Promise<{ path: string; count: number }>
+  recoveryCode: () => Promise<{ code: string; note: string }>
+  verifyRecovery: (code: string) => Promise<{ verified: boolean }>
+  recoveryStatus: () => Promise<{ set: boolean; issuedAt?: number }>
 }
 
 /** Type-level alias so consumers can reference the wire shapes without values. */
@@ -247,7 +250,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -900,6 +903,38 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const result = await sessionPrune(id, false)
       setMessage(result.note)
       refreshSessions()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Generate a one-time recovery code and show it once (confirm first). */
+  async function runRecoveryCode(): Promise<void> {
+    if (!window.confirm(t('recoveryCodeConfirm'))) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await recoveryCode()
+      window.alert(`${t('recoveryCodeAlert')}\n\n${r.code}\n\n${r.note}`)
+      setMessage(t('recoveryCodeSet'))
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Verify a recovery code typed by the user. */
+  async function runVerifyRecovery(): Promise<void> {
+    const code = window.prompt(t('recoveryCodeVerifyPrompt'))
+    if (code === null || code.trim() === '') return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await verifyRecovery(code.trim())
+      setMessage(r.verified ? t('recoveryVerified') : t('recoveryNotVerified'))
     } catch {
       setMessage(t('error'))
     } finally {
@@ -2151,6 +2186,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           </button>
           <button type="button" className={css.backupButton} onClick={() => void lockNow()} disabled={busy || locked}>
             {t('lock')}
+          </button>
+          <button type="button" className={css.backupButton} onClick={() => void runRecoveryCode()} disabled={busy || locked}>
+            {t('recoveryCode')}
+          </button>
+          <button type="button" className={css.backupButton} onClick={() => void runVerifyRecovery()} disabled={busy || locked}>
+            {t('recoveryVerify')}
           </button>
         </div>
       )}

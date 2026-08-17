@@ -22,7 +22,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { readFile, writeFile, mkdir, readdir, unlink, rename as renameFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -945,6 +945,69 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await s.update(args.id, { attachments })
       emitAudit('write', 'vault_detach', entry.id, entry.title)
       return { detached: true, remaining: Object.keys(attachments).length }
+    },
+  }))
+
+  // ── vault_recovery_code: generate a one-time recovery code ────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_recovery_code',
+    description: 'Generate a one-time vault recovery code (1Password/Bitwarden recovery-code style): '
+      + 'a high-entropy code shown ONCE and printed to the caller — store it somewhere safe (e.g. a '
+      + 'printed backup). Only its SHA-256 hash is persisted, never the plaintext. Use '
+      + 'vault_verify_recovery to prove possession of the code later (e.g. when the master password '
+      + 'is lost) and vault_recovery_status to check whether one is set. Re-running regenerates '
+      + '(the old code becomes invalid).',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { code: { type: 'string', required: true }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: `recovery code (show once, store it safely): ${v.code}\n${v.note}` }] },
+    async execute() {
+      assertWritable('vault_recovery_code')
+      await guardStore()
+      // 32 chars from a URL-safe alphabet (~192 bits of entropy).
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+      const bytes = randomBytes(32)
+      let code = ''
+      for (let i = 0; i < 32; i++) code += alphabet[bytes[i]! % alphabet.length]
+      const hash = createHash('sha256').update(code).digest('hex')
+      const meta = await readMeta(config)
+      meta.recoveryHash = hash
+      meta.recoveryIssuedAt = Date.now()
+      await writeMeta(config, meta)
+      return {
+        code,
+        note: 'Shown only once. Only its hash is stored — if you lose it, generate a new one.',
+      }
+    },
+  }))
+
+  // ── vault_verify_recovery: prove possession of the recovery code ──────────
+  ctx.tools.register(defineTool({
+    name: 'vault_verify_recovery',
+    description: 'Verify a recovery code against the stored hash (proves you hold the code issued by '
+      + 'vault_recovery_code — e.g. as a second factor when the master password is unavailable). '
+      + 'Returns whether it matches; the code itself is never stored or returned.',
+    parameters: { code: { type: 'string', required: true, description: 'The recovery code to verify.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { verified: { type: 'boolean', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.verified ? 'recovery code verified' : 'recovery code does not match' }] },
+    async execute(args) {
+      const meta = await readMeta(config)
+      if (meta.recoveryHash === undefined) return { verified: false }
+      const hash = createHash('sha256').update(args.code.trim()).digest('hex')
+      return { verified: hash === meta.recoveryHash }
+    },
+  }))
+
+  // ── vault_recovery_status: whether a recovery code is set ─────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_recovery_status',
+    description: 'Report whether a one-time recovery code has been issued (vault_recovery_code) and '
+      + 'when. Never returns the code itself.',
+    parameters: {},
+    output: { schema: { type: 'object', additionalProperties: false, properties: { set: { type: 'boolean', required: true }, issuedAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: v.set ? `recovery code set (${new Date(v.issuedAt ?? 0).toLocaleString()})` : 'no recovery code set' }] },
+    async execute() {
+      const meta = await readMeta(config)
+      return {
+        set: meta.recoveryHash !== undefined,
+        ...(meta.recoveryIssuedAt !== undefined ? { issuedAt: meta.recoveryIssuedAt } : {}),
+      }
     },
   }))
 
@@ -4864,6 +4927,39 @@ export class VaultGateway extends TypertRemoteService {
     return { locked: store.isLocked }
   }
 
+  /** Generate a one-time recovery code (returns the plaintext once). */
+  @Remote('recoveryCode')
+  async recoveryCode(): Promise<{ code: string; note: string }> {
+    this.assertWritable('recoveryCode')
+    await this.guardedStore()
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    const bytes = randomBytes(32)
+    let code = ''
+    for (let i = 0; i < 32; i++) code += alphabet[bytes[i]! % alphabet.length]
+    const hash = createHash('sha256').update(code).digest('hex')
+    const meta = await readMeta({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}), ...(this.activeName !== undefined ? { name: this.activeName } : {}) })
+    meta.recoveryHash = hash
+    meta.recoveryIssuedAt = Date.now()
+    await writeMeta({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}), ...(this.activeName !== undefined ? { name: this.activeName } : {}) }, meta)
+    return { code, note: 'Shown only once. Only its hash is stored.' }
+  }
+
+  /** Verify a recovery code against the stored hash. */
+  @Remote('verifyRecovery')
+  async verifyRecovery(code: string): Promise<{ verified: boolean }> {
+    const meta = await readMeta({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}), ...(this.activeName !== undefined ? { name: this.activeName } : {}) })
+    if (meta.recoveryHash === undefined) return { verified: false }
+    const hash = createHash('sha256').update(code.trim()).digest('hex')
+    return { verified: hash === meta.recoveryHash }
+  }
+
+  /** Recovery-code status (set + issuedAt). */
+  @Remote('recoveryStatus')
+  async recoveryStatus(): Promise<{ set: boolean; issuedAt?: number }> {
+    const meta = await readMeta({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}), ...(this.activeName !== undefined ? { name: this.activeName } : {}) })
+    return { set: meta.recoveryHash !== undefined, ...(meta.recoveryIssuedAt !== undefined ? { issuedAt: meta.recoveryIssuedAt } : {}) }
+  }
+
   /** Vault lock/entry status for the UI banner. */
   @Remote('status')
   async status(): Promise<{ locked: boolean; entries: number }> {
@@ -5358,6 +5454,10 @@ async function sharedAccessPolicy(config: Config): Promise<AccessPolicy> {
 interface VaultMeta {
   failedAttempts: number
   lockedUntil?: number
+  /** SHA-256 hash of the one-time recovery code (never the plaintext). */
+  recoveryHash?: string
+  /** Epoch millis when the recovery code was issued. */
+  recoveryIssuedAt?: number
 }
 
 const MAX_ATTEMPTS = 5

@@ -56,6 +56,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_password_history` | List an entry's previous passwords (1Password/Bitwarden-style, newest first, capped at 10; current password excluded) |
 | `kind: card` | Bank/credit-card entries: `cardNumber`/`cardExpiry` (MM/YY)/`cardCvv`/`cardHolder`; search summaries expose expiry + holder only (never the number or CVV); Bitwarden JSON export maps to a `card` item (type 3, brand inferred) |
 | `vault_password_rollback` | Restore an entry password to a stored history entry (current password is archived first, so it is reversible) |
+| `vault_recovery_code` / `vault_verify_recovery` / `vault_recovery_status` | One-time vault recovery code (1Password/Bitwarden-style): 32-char code shown once, only its SHA-256 hash is stored; verify possession of the code; check whether one is set |
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
 | `vault_backup` | Timestamped encrypted backup with retention; optional `note` |
 | `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |

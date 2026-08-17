@@ -119,6 +119,9 @@ export function apply(ctx: ClientContext): void {
     watchtower: () => invoke<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>('watchtower'),
     export1pux: (path) => invoke<{ path: string; count: number }>('export1pux', { path }),
     exportBitwarden: (path) => invoke<{ path: string; count: number }>('exportBitwarden', { path }),
+    recoveryCode: () => invoke<{ code: string; note: string }>('recoveryCode'),
+    verifyRecovery: (code) => invoke<{ verified: boolean }>('verifyRecovery', { code }),
+    recoveryStatus: () => invoke<{ set: boolean; issuedAt?: number }>('recoveryStatus'),
     vaultRename: (from, to) => invoke<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>('vaultRename', { from, to }),
     vaultDelete: (name, confirm) => invoke<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>('vaultDelete', { name, confirm }),
   })

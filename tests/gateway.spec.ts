@@ -36,8 +36,8 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
-      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'watchtower',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
 })
@@ -747,5 +747,21 @@ test('VaultGateway export1pux / exportBitwarden write archives', async () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+test('VaultGateway recovery code generate → verify → status', async () => {
+  await withGateway(async gateway => {
+    const status0 = await gateway.recoveryStatus()
+    expect(status0.set).toBe(false)
+    const r = await gateway.recoveryCode()
+    expect(r.code.length).toBe(32)
+    // The plaintext code is NOT in the meta (only its hash).
+    const verified = await gateway.verifyRecovery(r.code)
+    expect(verified.verified).toBe(true)
+    expect((await gateway.verifyRecovery('wrong-code')).verified).toBe(false)
+    const status1 = await gateway.recoveryStatus()
+    expect(status1.set).toBe(true)
+    expect(typeof status1.issuedAt).toBe('number')
   })
 })

@@ -54,6 +54,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_password_history` | 列出条目的历史密码(1Password/Bitwarden 风格,最新在前,上限 10 条;不含当前密码) |
 | `kind: card` | 银行卡/信用卡条目:`cardNumber`/`cardExpiry`(MM/YY)/`cardCvv`/`cardHolder`;搜索摘要只暴露有效期和持卡人(绝不显示卡号和 CVV);Bitwarden JSON 导出映射为 card 条目(type 3,自动识别卡品牌) |
 | `vault_password_rollback` | 将条目密码回滚到某条历史记录(当前密码先归档,可逆) |
+| `vault_recovery_code` / `vault_verify_recovery` / `vault_recovery_status` | 一次性保险库恢复码（1Password/Bitwarden 风格）:32 位代码仅显示一次,只保存其 SHA-256 哈希;可验证代码持有;查询是否已设置 |
 | `vault_rekey` | 原地升级 scrypt KDF 参数并重加密 |
 | `vault_backup` | 带时间戳的加密备份，支持保留策略：超过 `maxBackups`（默认 10）的旧备份自动清理 |
 | `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields；`overwrite: true` 合并字段到已有条目，不再产生重复） |
