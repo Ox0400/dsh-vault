@@ -126,6 +126,7 @@ export interface VaultSectionInjected {
   sessionPrune: (id: string, preview?: boolean) => Promise<{ pruned: number; remaining: number; note: string }>
   vaultRename: (from: string, to: string) => Promise<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
   vaultDelete: (name: string, confirm: boolean) => Promise<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
+  watchtower: () => Promise<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>
 }
 
 /** Type-level alias so consumers can reference the wire shapes without values. */
@@ -244,7 +245,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -263,6 +264,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [sessionUrl, setSessionUrl] = useState('')
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionDetail, setSessionDetail] = useState<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string } | null>(null)
+  const [watchMap, setWatchMap] = useState<Record<string, { score: number; verdict: string; flags: string[] }>>({})
   const [sessionPaste, setSessionPaste] = useState('')
   const [sessionPasteTitle, setSessionPasteTitle] = useState('')
   const [sysQuery, setSysQuery] = useState('')
@@ -941,6 +943,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     )
     void listVaults().then(setVaults).catch(() => {})
     void templates().then(setTplList).catch(() => {})
+    void watchtower().then(list => {
+      const map: Record<string, { score: number; verdict: string; flags: string[] }> = {}
+      for (const w of list) map[w.id] = { score: w.score, verdict: w.verdict, flags: w.flags }
+      setWatchMap(map)
+    }).catch(() => {})
     refreshSessions()
     return () => { current = false }
   }, [config, status, listVaults, templates, refreshSessions])
@@ -1941,6 +1948,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     )}
                     {passwordAge(entry) !== '' && (
                       <span className={css.dueBadge} title={t('ageHint')}>{passwordAge(entry)}</span>
+                    )}
+                    {watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good' && (
+                      <span className={`${css.dueBadge} ${watchMap[entry.id]!.verdict === 'poor' ? css.badgeDanger : css.badgeWarn}`} title={watchMap[entry.id]!.flags.join(', ')}>
+                        {watchMap[entry.id]!.verdict === 'poor' ? t('watchPoor') : t('watchWarn')}
+                      </span>
                     )}
                   </span>
                   <span className={css.identity}>{identityLine(entry)}</span>

@@ -37,7 +37,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
-      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll',
+      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'watchtower',
     ])
   })
 })
@@ -704,5 +704,22 @@ test('VaultGateway card entries round trip and verify', async () => {
     expect(audit.some(a => a.id === added.id)).toBe(false) // complete card, no issues
     const partialAudit = audit.find(a => a.id === partial.id)
     expect(partialAudit?.issues.some(i => i.includes('card'))).toBe(true)
+  })
+})
+
+test('VaultGateway watchtower rates entries without leaking secrets', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'Weak', username: 'u', password: 'qwerty123' })
+    await gateway.add({ title: 'Strong', username: 'u', password: 'X9!kQm2#vLp7$rTz' })
+    const report = await gateway.watchtower()
+    expect(report).toHaveLength(2)
+    const weak = report.find(r => r.title === 'Weak')!
+    expect(weak.verdict).not.toBe('good')
+    expect(weak.flags.length).toBeGreaterThan(0)
+    const strong = report.find(r => r.title === 'Strong')!
+    expect(strong.verdict).toBe('good')
+    // No secrets in the report.
+    expect(JSON.stringify(report)).not.toContain('qwerty123')
+    expect(JSON.stringify(report)).not.toContain('X9!kQm2')
   })
 })

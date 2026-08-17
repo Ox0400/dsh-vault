@@ -116,6 +116,7 @@ export function apply(ctx: ClientContext): void {
     sessionExport: (id, format) => invoke<{ text: string; cookieCount: number; domains: string[] }>('sessionExport', { id, format: format ?? 'header' }),
     sessionGet: (id) => invoke<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>('sessionGet', { id }),
     sessionPrune: (id, preview) => invoke<{ pruned: number; remaining: number; note: string }>('sessionPrune', { id, preview: preview ?? false }),
+    watchtower: () => invoke<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>('watchtower'),
     vaultRename: (from, to) => invoke<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>('vaultRename', { from, to }),
     vaultDelete: (name, confirm) => invoke<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>('vaultDelete', { name, confirm }),
   })

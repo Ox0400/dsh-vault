@@ -32,6 +32,7 @@ import { generatePassword, generatePassphrase } from './password.ts'
 import { checkPassword } from './breach.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
+import { analyzeVault, analyzeEntry } from './watchtower.ts'
 import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar, pruneExpiredCookies, countExpiredCookies, countExpiringCookies } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx, describeKdbxKdf } from './kdbx.ts'
@@ -2346,6 +2347,31 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_watchtower: per-entry risk analysis (1Password Watchtower-style) ─
+  ctx.tools.register(defineTool({
+    name: 'vault_watchtower',
+    description: 'Watchtower-style per-entry risk analysis (inspired by 1Password Watchtower / '
+      + 'Bitwarden reports): every active entry is rated with concrete risk flags — short or weak '
+      + 'password, repeated characters, keyboard sequences (qwerty/1234), embedded year, common '
+      + 'password, reused across entries, http:// site, missing 2FA, expired. Returns a 0–100 score '
+      + 'and a good/warn/poor verdict per entry (no secrets).',
+    parameters: {
+      minScore: { type: 'integer', description: 'Only return entries with score below this (default 100 = all).' },
+      limit: { type: 'integer', description: 'Max entries (default 100).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true }, atRisk: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.atRisk} of ${v.count} entries at risk` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const limit = args.limit === undefined ? 100 : args.limit
+      const minScore = args.minScore === undefined ? 100 : args.minScore
+      const analyzed = analyzeVault(s.list())
+        .filter(e => e.score < minScore)
+        .slice(0, limit)
+      const atRisk = analyzed.filter(e => e.verdict !== 'good').length
+      return { entries: analyzed as unknown as JsonValue[], count: analyzed.length, atRisk }
+    },
+  }))
+
   // ── vault_restore / vault_purge: trash management ──────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_restore',
@@ -4159,6 +4185,13 @@ export class VaultGateway extends TypertRemoteService {
   async health(): Promise<{ weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number }; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string }> {
     const store = await this.guardedStore()
     return store.health()
+  }
+
+  /** Watchtower per-entry risk analysis for the UI badges. */
+  @Remote('watchtower')
+  async watchtower(): Promise<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>> {
+    const store = await this.guardedStore()
+    return analyzeVault(store.list())
   }
 
   /** Watchtower-style breach scan for the UI (k-anonymity; offline fallback). */

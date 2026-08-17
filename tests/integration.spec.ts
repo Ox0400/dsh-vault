@@ -196,6 +196,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_vault_delete',
       'vault_vault_rename',
       'vault_verify',
+      'vault_watchtower',
     ])
   })
 })
@@ -3099,5 +3100,20 @@ test('vault_add card entry, search summary hides secrets, export_bitwarden maps 
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+test('vault_watchtower rates entries and filters by minScore', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'WeakWT', username: 'u', password: 'password123' })
+    await call(ctx, 'vault_add', { title: 'GoodWT', username: 'u', password: 'R8!kVn3#mQx9$zLp' })
+    const all = await call(ctx, 'vault_watchtower', {}) as { count: number; atRisk: number; entries: Array<{ title: string; verdict: string; flags: string[] }> }
+    expect(all.count).toBe(2)
+    const weak = all.entries.find(e => e.title === 'WeakWT')!
+    expect(weak.verdict).not.toBe('good')
+    expect(weak.flags).toContain('common-password')
+    // minScore filter keeps only entries below the threshold.
+    const risky = await call(ctx, 'vault_watchtower', { minScore: 50 }) as { entries: Array<{ title: string }> }
+    expect(risky.entries.some(e => e.title === 'GoodWT')).toBe(false)
   })
 })

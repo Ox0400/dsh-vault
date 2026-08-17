@@ -64,6 +64,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials; `soonWindowDays` (1-90, default 7) tunes the soon horizon (no secrets) |
 | `vault_health` | Vault health scan: weak/reused passwords, missing 2FA, insecure http:// sites, and an overall security score (0–100) |
+| `vault_watchtower` | Watchtower-style per-entry risk analysis (1Password/Bitwarden-inspired): flags short/weak passwords, keyboard sequences, embedded years, common passwords, reuse, http:// sites, missing 2FA, expiry — with a 0–100 score and good/warn/poor verdict (no secrets); entry rows show ⚠ badges |
 | `vault_breach_check` | Watchtower-style breach scan against Have I Been Pwned (k-anonymity: only the SHA-1 prefix leaves the machine), with an offline common-password fallback |
 | `vault_integrity` | Verify the on-disk vault file decrypts correctly and matches the in-memory store |
 | `vault_merge` | Merge one entry into another; `keepSource: true` keeps the source after merging |
