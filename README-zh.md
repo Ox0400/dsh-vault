@@ -66,6 +66,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_breach_check` | Watchtower 风格泄露扫描：对接 Have I Been Pwned（k-anonymity,仅发送 SHA-1 前缀）,附离线常见密码兜底 |
 | `vault_integrity` | 校验磁盘上的保险库文件可正确解密并与内存中的 store 一致 |
 | `vault_merge` | 合并一个条目到另一个；`keepSource: true` 保留源条目 |
+| `vault_attach` / `vault_attachments` / `vault_attachment` / `vault_detach` | 给条目附加文件（私钥、证书、配置、恢复码）——base64 存于加密条目内随库加密;列出/读取/移除 |
 | `vault_quick_add` | 快速录入（标题 + 一个密钥），支持 tags/notes |
 | `vault_expiry` | 设置/清除过期（`expiresAt: 0` 移除） |
 | `vault_stats` | 概览计数，含 `trashCount`（不含密钥） |

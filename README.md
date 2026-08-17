@@ -68,6 +68,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_breach_check` | Watchtower-style breach scan against Have I Been Pwned (k-anonymity: only the SHA-1 prefix leaves the machine), with an offline common-password fallback |
 | `vault_integrity` | Verify the on-disk vault file decrypts correctly and matches the in-memory store |
 | `vault_merge` | Merge one entry into another; `keepSource: true` keeps the source after merging |
+| `vault_attach` / `vault_attachments` / `vault_attachment` / `vault_detach` | Attach files to entries (private keys, certs, configs, recovery codes) — stored base64 inside the encrypted entry, encrypted at rest; list names/sizes, read content, remove |
 | `vault_quick_add` | Fast capture (title + one secret) with optional tags/notes |
 | `vault_expiry` | Set/clear expiry (`expiresAt: 0` removes it) |
 | `vault_stats` | Overview counts incl. `trashCount` (no secrets) |
