@@ -1433,6 +1433,58 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_bulk_delete: soft-delete entries matching a filter ───────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_bulk_delete',
+    description: 'Soft-delete (move to trash) the entries matching a filter: a search query, a kind, '
+      + 'a tag, or an explicit list of ids. Pass confirm: true to actually delete — otherwise it only '
+      + 'reports how many would be deleted. Trashed entries can be restored with vault_restore / '
+      + 'vault_undelete_all. Returns how many were moved to trash.',
+    parameters: {
+      query: { type: 'string', description: 'Search text selecting entries (title/username/email/host/url/notes/tags). Omit to match by kind/tag/ids.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Only delete entries of this kind.' },
+      tag: { type: 'string', description: 'Only delete entries carrying this tag.' },
+      ids: { type: 'array', items: { type: 'string' }, description: 'Explicit entry ids to delete (ignores query/kind/tag when provided).' },
+      confirm: { type: 'boolean', description: 'Must be true to move entries to trash (default false = dry run).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { matched: { type: 'integer', required: true }, deleted: { type: 'integer', required: true }, note: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: v.note }] },
+    async execute(args) {
+      const s = await guardStore()
+      const all = s.list()
+      let targets: VaultEntry[]
+      if (Array.isArray(args.ids) && args.ids.length > 0) {
+        const idSet = new Set(args.ids)
+        targets = all.filter(e => idSet.has(e.id))
+      } else {
+        const query = typeof args.query === 'string' ? args.query.trim() : ''
+        let filtered = all
+        if (args.kind !== undefined) filtered = filtered.filter(e => (e.kind ?? 'login') === args.kind)
+        if (typeof args.tag === 'string' && args.tag.trim().length > 0) {
+          const tag = args.tag.trim()
+          filtered = filtered.filter(e => (e.tags ?? []).includes(tag))
+        }
+        if (query.length > 0) {
+          filtered = filtered.filter(e => {
+            const haystack = [e.title, e.username, e.email, e.phone, e.host, e.url, ...(e.tags ?? [])]
+              .filter((v): v is string => v !== undefined)
+              .join('\n').toLowerCase()
+            return haystack.includes(query.toLowerCase())
+          })
+        }
+        targets = filtered
+      }
+      if (args.confirm !== true) {
+        return { matched: targets.length, deleted: 0, note: `bulk delete dry run: ${targets.length} entry/ies would be moved to trash — pass confirm: true to proceed` }
+      }
+      assertWritable('vault_bulk_delete')
+      let deleted = 0
+      for (const e of targets) {
+        if (await s.delete(e.id)) deleted++
+      }
+      return { matched: targets.length, deleted, note: `bulk delete: ${deleted} entry/ies moved to trash (${targets.length} matched)` }
+    },
+  }))
+
   // ── vault_generate_username: random username/email suggestion ───────────────
   ctx.tools.register(defineTool({
     name: 'vault_generate_username',

@@ -60,6 +60,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
 | `vault_backup` | Timestamped encrypted backup with retention; optional `note` |
 | `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
+| `vault_bulk_delete` | Soft-delete entries matching a query/kind/tag or explicit ids; `confirm: true` required (dry-run by default); trashed entries are restorable |
 | `vault_apply_tags` | Bulk add/remove/replace tags on every entry matching a query (dry-run supported, no secrets) |
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
 | `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |

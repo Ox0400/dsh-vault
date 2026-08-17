@@ -105,6 +105,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_backup_status',
       'vault_backups',
       'vault_breach_check',
+      'vault_bulk_delete',
       'vault_bulk_export',
       'vault_changes',
       'vault_clipboard',
@@ -3230,5 +3231,27 @@ test('vault_templates action=list returns an array of custom templates', async (
   await withContext(async ctx => {
     const r = await call(ctx, 'vault_templates', { action: 'list' }) as { templates: unknown[] }
     assert.ok(Array.isArray(r.templates))
+  })
+})
+
+test('vault_bulk_delete dry-runs then deletes by query/kind/tag/ids', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'DelA', username: 'a', password: 'pw', tags: ['cleanup'] })
+    await call(ctx, 'vault_add', { title: 'DelB', username: 'b', password: 'pw', tags: ['cleanup'] })
+    await call(ctx, 'vault_add', { title: 'Keep', username: 'c', password: 'pw' })
+    // Dry run reports but does not delete.
+    const dry = await call(ctx, 'vault_bulk_delete', { tag: 'cleanup' }) as { matched: number; deleted: number }
+    assert.equal(dry.matched, 2)
+    assert.equal(dry.deleted, 0)
+    assert.equal((await call(ctx, 'vault_search', {}) as { total: number }).total, 3)
+    // Confirm deletes the two tagged entries; the untagged one survives.
+    const run = await call(ctx, 'vault_bulk_delete', { tag: 'cleanup', confirm: true }) as { deleted: number }
+    assert.equal(run.deleted, 2)
+    const list = await call(ctx, 'vault_search', {}) as { results: Array<{ title: string }>; total: number }
+    assert.equal(list.total, 1)
+    assert.equal(list.results[0]!.title, 'Keep')
+    // Trash now holds the deleted ones.
+    const trash = await call(ctx, 'vault_search_history', { query: 'Del' }) as { results: Array<{ deleted: boolean }> }
+    assert.ok(trash.results.length >= 2)
   })
 })
