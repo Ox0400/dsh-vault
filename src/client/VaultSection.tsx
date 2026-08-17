@@ -159,6 +159,10 @@ type FormFields = {
   accessToken?: string | undefined
   refreshToken?: string | undefined
   otpSecret?: string | undefined
+  cardNumber?: string | undefined
+  cardExpiry?: string | undefined
+  cardCvv?: string | undefined
+  cardHolder?: string | undefined
   url?: string | undefined
   notes?: string | undefined
   icon?: string | undefined
@@ -183,6 +187,10 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'accessToken', label: 'fieldAccessToken' },
   { key: 'refreshToken', label: 'fieldRefreshToken' },
   { key: 'otpSecret', label: 'fieldOtpSecret' },
+  { key: 'cardNumber', label: 'fieldCardNumber' },
+  { key: 'cardExpiry', label: 'fieldCardExpiry' },
+  { key: 'cardCvv', label: 'fieldCardCvv' },
+  { key: 'cardHolder', label: 'fieldCardHolder' },
   { key: 'url', label: 'fieldUrl' },
   { key: 'notes', label: 'fieldNotes' },
   { key: 'expiresAt', label: 'fieldExpiresAt' },
@@ -216,6 +224,7 @@ const KIND_KEYS: Record<string, VaultLocaleKey> = {
   secret: 'kindSecret',
   oauth: 'kindOauth',
   cookie: 'kindCookie',
+  card: 'kindCard',
   custom: 'kindCustom',
 }
 
@@ -1240,6 +1249,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       case 'oauth': return '🔐'
       case 'secret': return '🤫'
       case 'cookie': return '🍪'
+      case 'card': return '💳'
       case 'custom': return '🧩'
       default: return '👤'
     }
@@ -2129,7 +2139,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 <button type="button" className={css.retryButton} onClick={() => void saveAsTemplate()} disabled={busy}>{t('tplSave')}</button>
               )}
             </div>
-            {FORM_FIELDS.map(field => (
+            {FORM_FIELDS.filter(f => {
+              const kind = form.kind ?? 'login'
+              // Card-only fields show only for the card kind; everything else
+              // is hidden when a card is selected (keeps the form focused).
+              if (f.key === 'cardNumber' || f.key === 'cardExpiry' || f.key === 'cardCvv' || f.key === 'cardHolder') {
+                return kind === 'card'
+              }
+              return kind !== 'card' || f.key === 'title' || f.key === 'kind' || f.key === 'notes' || f.key === 'icon' || f.key === 'color'
+            }).map(field => (
               <label key={field.key} className={css.field}>
                 <span>{t(field.label)}</span>
                 {field.key === 'kind' ? (

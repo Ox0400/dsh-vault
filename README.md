@@ -54,6 +54,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_generate_password` | Generate a strong random password (length/classes/grouping) **or a memorable passphrase** (`passphrase: true`, EFF-style word list, `words`/`separator`/`wordDigits`) |
 | `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
 | `vault_password_history` | List an entry's previous passwords (1Password/Bitwarden-style, newest first, capped at 10; current password excluded) |
+| `kind: card` | Bank/credit-card entries: `cardNumber`/`cardExpiry` (MM/YY)/`cardCvv`/`cardHolder`; search summaries expose expiry + holder only (never the number or CVV); Bitwarden JSON export maps to a `card` item (type 3, brand inferred) |
 | `vault_password_rollback` | Restore an entry password to a stored history entry (current password is archived first, so it is reversible) |
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
 | `vault_backup` | Timestamped encrypted backup with retention; optional `note` |

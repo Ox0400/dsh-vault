@@ -246,6 +246,10 @@ export const en = {
   fieldRefreshToken: 'Refresh token',
   fieldOtpSecret: 'OTP secret',
   fieldUrl: 'URL',
+  fieldCardNumber: 'Card number',
+  fieldCardExpiry: 'Expiry (MM/YY)',
+  fieldCardCvv: 'CVV',
+  fieldCardHolder: 'Card holder',
   fieldNotes: 'Notes',
   fieldTags: 'Tags',
   fieldIcon: 'Icon (emoji)',
@@ -266,6 +270,7 @@ export const en = {
   kindSecret: 'Secret',
   kindOauth: 'OAuth',
   kindCookie: 'Session cookies',
+  kindCard: 'Card',
   kindCustom: 'Custom',
 } as const
 
@@ -517,6 +522,10 @@ export const zh: Record<VaultLocaleKey, string> = {
   fieldRefreshToken: '刷新令牌',
   fieldOtpSecret: 'TOTP 密钥',
   fieldUrl: 'URL',
+  fieldCardNumber: '卡号',
+  fieldCardExpiry: '有效期（MM/YY）',
+  fieldCardCvv: 'CVV',
+  fieldCardHolder: '持卡人',
   fieldNotes: '备注',
   fieldTags: '标签',
   fieldIcon: '图标（emoji）',
@@ -537,5 +546,6 @@ export const zh: Record<VaultLocaleKey, string> = {
   kindSecret: 'Secret',
   kindOauth: 'OAuth',
   kindCookie: '会话 Cookies',
+  kindCard: '银行卡',
   kindCustom: '自定义',
 }

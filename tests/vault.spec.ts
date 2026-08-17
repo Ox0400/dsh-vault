@@ -618,3 +618,27 @@ test('store: password history caps at 10 and persists', async () => {
   expect(reloaded).toHaveLength(10)
   await rm(dir, { recursive: true, force: true })
 })
+
+test('store: card entries persist card fields and survive reload', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-card-'))
+  const { openVault } = await import('../src/store')
+  const path = join(dir, 'vault.json')
+  const store = await openVault({ masterPassword: 'pw', path })
+  const entry = await store.add({
+    title: 'Visa', kind: 'card',
+    cardNumber: '4111 1111 1111 1111', cardExpiry: '12/28', cardCvv: '123', cardHolder: 'Ada L',
+  })
+  expect(entry.kind).toBe('card')
+  const reloaded = await openVault({ masterPassword: 'pw', path })
+  const got = reloaded.get(entry.id)
+  expect(got?.cardNumber).toBe('4111 1111 1111 1111')
+  expect(got?.cardExpiry).toBe('12/28')
+  expect(got?.cardCvv).toBe('123')
+  expect(got?.cardHolder).toBe('Ada L')
+  // Summary never carries the number or CVV.
+  const sum = reloaded.search('Visa')[0]
+  expect(sum?.cardExpiry).toBe('12/28')
+  expect((sum as { cardNumber?: unknown }).cardNumber).toBeUndefined()
+  expect((sum as { cardCvv?: unknown }).cardCvv).toBeUndefined()
+  await rm(dir, { recursive: true, force: true })
+})

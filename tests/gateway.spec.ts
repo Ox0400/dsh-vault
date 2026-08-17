@@ -681,3 +681,28 @@ test('VaultGateway passwordHistory / passwordRollback round trip', async () => {
     expect(missing.rolledBack).toBe(false)
   })
 })
+
+test('VaultGateway card entries round trip and verify', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({
+      title: 'Amex', kind: 'card',
+      cardNumber: '3782 822463 10005', cardExpiry: '09/29', cardCvv: '4567', cardHolder: 'Grace H',
+    })
+    expect(added.kind).toBe('card')
+    const full = await gateway.get(added.id)
+    expect(full.entry?.cardNumber).toBe('3782 822463 10005')
+    expect(full.entry?.cardCvv).toBe('4567')
+    // Summaries (list/search) do not leak card secrets.
+    const list = await gateway.list()
+    const sum = list.entries.find(e => e.id === added.id)
+    expect(sum?.cardExpiry).toBe('09/29')
+    expect((sum as { cardNumber?: unknown }).cardNumber).toBeUndefined()
+    // verifyAll flags an incomplete card but not a complete one (it only
+    // returns entries with issues).
+    const partial = await gateway.add({ title: 'Incomplete', kind: 'card' })
+    const audit = await gateway.verifyAll()
+    expect(audit.some(a => a.id === added.id)).toBe(false) // complete card, no issues
+    const partialAudit = audit.find(a => a.id === partial.id)
+    expect(partialAudit?.issues.some(i => i.includes('card'))).toBe(true)
+  })
+})

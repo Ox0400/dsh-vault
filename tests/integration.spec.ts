@@ -3063,3 +3063,41 @@ test('vault_password_history and vault_password_rollback round trip', async () =
     assert.equal(bad.rolledBack, false)
   })
 })
+
+test('vault_add card entry, search summary hides secrets, export_bitwarden maps card', async () => {
+  await withContext(async ctx => {
+    const added = await call(ctx, 'vault_add', {
+      title: 'Visa Gold', kind: 'card',
+      cardNumber: '4111 1111 1111 1111', cardExpiry: '08/30', cardCvv: '999', cardHolder: 'Ada L',
+    }) as { id: string }
+    // Search summary exposes expiry/holder but never the number/CVV.
+    const search = await call(ctx, 'vault_search', { query: 'Visa' }) as { results: Array<Record<string, unknown>> }
+    expect(search.results[0]!.cardExpiry).toBe('08/30')
+    expect(search.results[0]!.cardHolder).toBe('Ada L')
+    expect((search.results[0] as Record<string, unknown>).cardNumber).toBeUndefined()
+    expect((search.results[0] as Record<string, unknown>).cardCvv).toBeUndefined()
+    // Full get returns the secrets.
+    const full = await call(ctx, 'vault_get', { id: added.id }) as { entry: { cardNumber?: string; cardCvv?: string } }
+    expect(full.entry.cardNumber).toBe('4111 1111 1111 1111')
+    expect(full.entry.cardCvv).toBe('999')
+    // Bitwarden JSON export maps the card item (type 3 with a card object).
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-bwcard-'))
+    const out = join(dir, 'bw.json')
+    try {
+      await call(ctx, 'vault_export_bitwarden', { path: out })
+      const doc = JSON.parse(await readFile(out, 'utf8'))
+      const item = doc.items.find((i: { name: string }) => i.name === 'Visa Gold')
+      expect(item.type).toBe(3)
+      expect(item.card.number).toBe('4111 1111 1111 1111')
+      expect(item.card.cardholderName).toBe('Ada L')
+      expect(item.card.brand).toBe('Visa')
+      expect(item.card.expMonth).toBe(8)
+      expect(item.card.expYear).toBe(2030)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

@@ -69,6 +69,8 @@ export type VaultEntryKind =
   | 'oauth'
   /** Browser session cookies collected after a login (cookies + url). */
   | 'cookie'
+  /** Bank/credit card (cardNumber, cardExpiry, cardCvv, cardHolder). */
+  | 'card'
   /** Generic key/value record via `fields`. */
   | 'custom'
 
@@ -123,6 +125,14 @@ export interface VaultEntry {
   expiresAt?: number
   /** TOTP secret: bare Base32 or an otpauth:// URI. */
   otpSecret?: string
+  /** Bank/credit card number (kind `card`). */
+  cardNumber?: string
+  /** Card expiry as `MM/YY` or `MM/YYYY` (kind `card`). */
+  cardExpiry?: string
+  /** Card CVV/CVC (kind `card`). */
+  cardCvv?: string
+  /** Card holder name (kind `card`). */
+  cardHolder?: string
   /** Associated URL (login page, service home). */
   url?: string
   /** Free-form notes. */
@@ -147,7 +157,7 @@ export interface VaultEntry {
 export type VaultEntrySummary = Pick<
   VaultEntry,
   'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags' | 'icon' | 'color'
-> & { updatedAt?: number; createdAt?: number; cookieCount?: number }
+> & { updatedAt?: number; createdAt?: number; cookieCount?: number; cardExpiry?: string; cardHolder?: string }
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
 export type VaultEntryPatch = Partial<Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt'>>
@@ -1080,6 +1090,8 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
     ...(entry.port !== undefined ? { port: entry.port } : {}),
     ...(entry.url !== undefined ? { url: entry.url } : {}),
     ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
+    ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
+    ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
     ...(Array.isArray(entry.cookies) ? { cookieCount: entry.cookies.length } : {}),
   }
 }
@@ -1093,7 +1105,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
  * argument can never corrupt an entry. Empty strings are allowed (they mean
  * "clear this field"); absent fields are skipped. */
 function validatePatchTypes(patch: Record<string, unknown>): void {
-  const kindSet = new Set(['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'custom'])
+  const kindSet = new Set(['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'])
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined || value === '') continue
     switch (key) {
@@ -1125,6 +1137,10 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
         break
       case 'icon':
       case 'color':
+      case 'cardNumber':
+      case 'cardExpiry':
+      case 'cardCvv':
+      case 'cardHolder':
         if (typeof value !== 'string') throw new Error(`vault: ${key} must be a string`)
         break
       case 'tags':

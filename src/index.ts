@@ -258,8 +258,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       title: { type: 'string', required: true, description: 'Human title, e.g. "GitHub personal" or "prod-db ssh".' },
       kind: {
         type: 'string',
-        description: 'Entry category: login (default), ssh, api-key, secret, oauth, or custom.',
-        enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'],
+        description: 'Entry category: login (default), ssh, api-key, secret, oauth, cookie, card, or custom.',
+        enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'],
       },
       sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
       rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
@@ -278,6 +278,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       refreshToken: { type: 'string', description: 'OAuth refresh token.' },
       expiresAt: { type: 'integer', description: 'Token/credential expiry epoch millis.' },
       otpSecret: { type: 'string', description: 'TOTP secret: bare Base32 or an otpauth:// URI.' },
+      cardNumber: { type: 'string', description: 'Bank/credit card number (kind card).' },
+      cardExpiry: { type: 'string', description: 'Card expiry as MM/YY or MM/YYYY (kind card).' },
+      cardCvv: { type: 'string', description: 'Card CVV/CVC (kind card).' },
+      cardHolder: { type: 'string', description: 'Card holder name (kind card).' },
       url: { type: 'string', description: 'Associated URL (login page or service home).' },
       notes: { type: 'string', description: 'Free-form notes.' },
       tags: { type: 'array', description: 'Searchable tags (array).', items: { type: 'string' } },
@@ -325,6 +329,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.refreshToken !== undefined ? { refreshToken: args.refreshToken } : {}),
         ...(args.expiresAt !== undefined ? { expiresAt: args.expiresAt } : {}),
         ...(args.otpSecret !== undefined ? { otpSecret: args.otpSecret } : {}),
+        ...(args.cardNumber !== undefined ? { cardNumber: args.cardNumber } : {}),
+        ...(args.cardExpiry !== undefined ? { cardExpiry: args.cardExpiry } : {}),
+        ...(args.cardCvv !== undefined ? { cardCvv: args.cardCvv } : {}),
+        ...(args.cardHolder !== undefined ? { cardHolder: args.cardHolder } : {}),
         ...(args.url !== undefined ? { url: args.url } : {}),
         ...(args.notes !== undefined ? { notes: args.notes } : {}),
         ...(args.tags !== undefined || args.tagsCsv !== undefined
@@ -400,7 +408,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'keys, tokens, or TOTP secrets. Use vault_get with a result id to read the full entry.',
     parameters: {
       query: { type: 'string', description: 'Search text; matches case-insensitively. Omit to list all (optionally filtered by kind).' },
-      kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      kind: { type: 'string', description: 'Only return entries of this kind (login/ssh/api-key/secret/oauth/cookie/card/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'] },
       favoriteOnly: { type: 'boolean', description: 'Only return pinned (favorite) entries.' },
       tag: { type: 'string', description: 'Only return entries carrying this tag.' },
       regex: { type: 'boolean', description: 'Treat query as a regular expression (case-insensitive).' },
@@ -488,7 +496,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       kind: {
         type: 'string',
         description: 'New category.',
-        enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'],
+        enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'],
       },
       username: { type: 'string', description: 'New username.' },
       email: { type: 'string', description: 'New email.' },
@@ -509,6 +517,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       favorite: { type: 'boolean', description: 'Pin/unpin the entry (favorites rank first in search).' },
       resetRotation: { type: 'boolean', description: 'Reset the rotation timer now (sets updatedAt to now).' },
       otpSecret: { type: 'string', description: 'New TOTP secret.' },
+      cardNumber: { type: 'string', description: 'New card number.' },
+      cardExpiry: { type: 'string', description: 'New card expiry (MM/YY).' },
+      cardCvv: { type: 'string', description: 'New card CVV.' },
+      cardHolder: { type: 'string', description: 'New card holder.' },
       url: { type: 'string', description: 'New URL.' },
       notes: { type: 'string', description: 'New notes.' },
       tags: { type: 'array', description: 'New tags.', items: { type: 'string' } },
@@ -793,7 +805,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'rather than echoing it into the conversation, and do not repeat it in chat afterwards.',
     parameters: {
       id: { type: 'string', required: true, description: 'Entry id.' },
-      field: { type: 'string', required: true, description: 'Field to copy: username, password, apiKey, secret, accessToken, refreshToken, otpSecret, privateKey.' },
+      field: { type: 'string', required: true, description: 'Field to copy: username, password, apiKey, secret, accessToken, refreshToken, otpSecret, privateKey, cardNumber, cardCvv.' },
       masked: { type: 'boolean', description: 'Return the value masked (e.g. hunter***) instead of plaintext.' },
     },
     output: {
@@ -872,7 +884,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'soft-deleted, newest first. No secrets — a lightweight audit view.',
     parameters: {
       hours: { type: 'number', description: 'Look-back window in hours (default 24).' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only report changes for entries of this kind.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Only report changes for entries of this kind.' },
       limit: { type: 'number', description: 'Max events (default 50, 1–500).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { changes: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.changes) }] },
@@ -968,6 +980,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
               if (!Array.isArray(e.cookies) || e.cookies.length === 0) issues.push('cookie: no cookies stored')
               else if (e.cookies.some(c => c.value.length === 0)) issues.push('cookie: empty cookie value')
               break
+            case 'card':
+              if (!e.cardNumber) issues.push('card: missing card number')
+              if (!e.cardExpiry) issues.push('card: missing expiry')
+              if (!e.cardCvv) issues.push('card: missing CVV')
+              if (e.cardNumber !== undefined && !/^[0-9]{13,19}$/.test(e.cardNumber.replace(/[\s-]/g, ''))) issues.push('card: card number does not look valid')
+              break
           }
           perEntry.push({ id: e.id, title: e.title, ok: issues.length === 0, issues })
         }
@@ -1005,6 +1023,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         case 'cookie':
           if (!Array.isArray(entry.cookies) || entry.cookies.length === 0) issues.push('cookie: no cookies stored')
           else if (entry.cookies.some(c => c.value.length === 0)) issues.push('cookie: empty cookie value')
+          break
+        case 'card':
+          if (!entry.cardNumber) issues.push('card: missing card number')
+          if (!entry.cardExpiry) issues.push('card: missing expiry')
+          if (!entry.cardCvv) issues.push('card: missing CVV')
+          if (entry.cardNumber !== undefined && !/^[0-9]{13,19}$/.test(entry.cardNumber.replace(/[\s-]/g, ''))) issues.push('card: card number does not look valid')
           break
       }
       return { ok: issues.length === 0, issues }
@@ -1056,7 +1080,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'summaries. Useful to pick up where you left off or surface what changed.',
     parameters: {
       limit: { type: 'number', description: 'Max results (default 10).' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only entries of this kind.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Only entries of this kind.' },
       days: { type: 'integer', description: 'Only entries updated within the last N days (1–365).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: JSON.stringify(v.entries) }] },
@@ -1195,7 +1219,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       remove: { type: 'array', items: { type: 'string' }, description: 'Tags to remove.' },
       replace: { type: 'array', items: { type: 'string' }, description: 'Replace the whole tag list with these tags.' },
       dryRun: { type: 'boolean', description: 'Only report how many entries would change, without writing.' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Only apply to entries of this kind.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Only apply to entries of this kind.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { matched: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, entries: { type: 'array', required: true, items: { type: 'json' } } } }, render: (_a, v) => [{ type: 'text', text: `matched ${v.matched}, updated ${v.updated} entries` }] },
     async execute(args) {
@@ -1440,7 +1464,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'capturing a credential fast without the full vault_add field list.',
     parameters: {
       title: { type: 'string', required: true, description: 'Entry title.' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind (default login).' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Entry kind (default login).' },
       secret: { type: 'string', description: 'The secret value: stored into apiKey for api-key, password for login, secret otherwise.' },
       username: { type: 'string', description: 'Optional username.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Searchable tags.' },
@@ -1530,6 +1554,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(entry.refreshToken !== undefined ? { refreshToken: entry.refreshToken } : {}),
         ...(entry.expiresAt !== undefined ? { expiresAt: entry.expiresAt } : {}),
         ...(entry.otpSecret !== undefined ? { otpSecret: entry.otpSecret } : {}),
+        ...(entry.cardNumber !== undefined ? { cardNumber: entry.cardNumber } : {}),
+        ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
+        ...(entry.cardCvv !== undefined ? { cardCvv: entry.cardCvv } : {}),
+        ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
         ...(entry.url !== undefined ? { url: entry.url } : {}),
         ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
         ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
@@ -1595,7 +1623,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       secret: { type: 'string', required: true, description: 'The secret value to store.' },
       note: { type: 'string', description: 'Optional context note.' },
       title: { type: 'string', description: 'Optional explicit title; defaults to secret-YYYY-MM-DD-NNNN.' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind (default secret).' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Entry kind (default secret).' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', required: true }, title: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `saved as "${v.title}" (id: ${v.id})` }] },
     async execute(args) {
@@ -1626,7 +1654,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       title: { type: 'string', description: 'Title substring.' },
       username: { type: 'string', description: 'Username/email substring.' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Entry kind.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Entry kind.' },
       tag: { type: 'string', description: 'Exact tag.' },
       createdAfter: { type: 'integer', description: 'Only entries created after this epoch millis.' },
       createdBefore: { type: 'integer', description: 'Only entries created before this epoch millis.' },
@@ -1655,7 +1683,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Return the number of active entries (optionally filtered by kind and/or tag). Lightweight '
       + 'alternative to vault_stats when you only need a count.',
     parameters: {
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Count only this kind.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Count only this kind.' },
       tag: { type: 'string', description: 'Count only entries carrying this tag.' },
       favoriteOnly: { type: 'boolean', description: 'Count only pinned (favorite) entries.' },
     },
@@ -1824,7 +1852,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       target: { type: 'string', required: true, description: 'Title, username, or host to look for.' },
       exact: { type: 'boolean', description: 'Require an exact (case-insensitive) title match instead of substring search.' },
-      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'], description: 'Restrict to this kind.' },
+      kind: { type: 'string', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'], description: 'Restrict to this kind.' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, id: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.found ? 'credential found' : 'no matching credential' }] },
     async execute(args) {
@@ -2529,7 +2557,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'suitable for .env or export statements. Keys derive from the title + field name; values are the '
       + 'secrets. Returns the lines so the caller can write them to a file (user-authorized).',
     parameters: {
-      kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'] },
       ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
       mask: { type: 'boolean', description: 'Return masked values (secrets replaced with ***) instead of the real values.' },
       prefix: { type: 'string', description: 'Optional key prefix, e.g. "APP_" → APP_GITHUB_TOKEN.' },
@@ -2574,7 +2602,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'the right field names (e.g. kind ssh → host/port/username/password/privateKey). Also supports '
       + 'user-defined templates (action: save/list/remove) persisted next to the vault (KeePassXC-style).',
     parameters: {
-      kind: { type: 'string', description: 'Entry kind; default login.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      kind: { type: 'string', description: 'Entry kind; default login.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'] },
       action: { type: 'string', description: 'get (default) | save | list | remove.', enum: ['get', 'save', 'list', 'remove'] },
       name: { type: 'string', description: 'Custom template name (required for save/remove).' },
       fields: { type: 'json', description: 'Field template for action=save, e.g. {"username":"account","password":""}.' },
@@ -2648,7 +2676,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     parameters: {
       path: { type: 'string', description: 'Optional absolute output path; defaults to <vault dir>/vault-export-<ts>.csv.' },
       delimiter: { type: 'string', description: 'CSV delimiter (default ",").' },
-      kind: { type: 'string', description: 'Only export entries of this kind (login/ssh/api-key/secret/oauth/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'custom'] },
+      kind: { type: 'string', description: 'Only export entries of this kind (login/ssh/api-key/secret/oauth/cookie/card/custom).', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'] },
       includeSecrets: { type: 'boolean', description: 'Include secret columns (password/apiKey/secret/tokens). Default false — the CSV is secret-free for safe handling.' },
       favoriteOnly: { type: 'boolean', description: 'Only export pinned (favorite) entries.' },
       tag: { type: 'string', description: 'Only export entries carrying this tag.' },
@@ -2661,8 +2689,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const entries = s.list().filter(e => (kind === undefined || (e.kind ?? 'login') === kind)
         && (args.favoriteOnly !== true || e.favorite === true)
         && (tag.length === 0 || (e.tags ?? []).includes(tag)))
-      const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey']
-      const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color']
+      const secretFields = ['password', 'apiKey', 'secret', 'accessToken', 'refreshToken', 'otpSecret', 'privateKey', 'cardNumber', 'cardCvv']
+      const metaFields = ['url', 'email', 'phone', 'host', 'port', 'expiresAt', 'rotationDays', 'notes', 'tags', 'sensitivity', 'favorite', 'icon', 'color', 'cardExpiry', 'cardHolder']
       const healthFields = ['weakPassword', 'no2fa', 'httpSite', 'expired']
       const stampFields = ['createdAt', 'updatedAt']
       const fields = args.includeSecrets === true
@@ -3573,12 +3601,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           id: e.id,
           organizationId: null,
           folderId: null,
-          type: 1,
+          type: (e.kind ?? 'login') === 'card' ? 3 : 1,
           reprompt: 0,
           name: e.title,
           notes: e.notes ?? null,
           favorite: e.favorite === true,
-          login: Object.keys(login).length > 0 ? login : {},
+          ...((e.kind ?? 'login') === 'card' ? { card: buildBitwardenCard(e) } : {}),
+          login: (e.kind ?? 'login') === 'card' ? {} : (Object.keys(login).length > 0 ? login : {}),
           fields: fields.length > 0 ? fields : null,
           collectionIds: null,
         })
@@ -4200,6 +4229,11 @@ export class VaultGateway extends TypertRemoteService {
           break
         case 'oauth':
           if (!e.accessToken) issues.push('oauth: missing accessToken')
+          break
+        case 'card':
+          if (!e.cardNumber) issues.push('card: missing card number')
+          if (!e.cardExpiry) issues.push('card: missing expiry')
+          if (!e.cardCvv) issues.push('card: missing CVV')
           break
       }
       if (issues.length > 0) out.push({ id: e.id, title: e.title, issues })
@@ -5049,6 +5083,8 @@ export type VaultEntrySummaryWire = {
   tags?: string[]
   icon?: string
   color?: string
+  cardExpiry?: string
+  cardHolder?: string
   updatedAt?: number
 }
 
@@ -5073,6 +5109,8 @@ function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire
     ...(entry.port !== undefined ? { port: entry.port } : {}),
     ...(entry.url !== undefined ? { url: entry.url } : {}),
     ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
+    ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
+    ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
   }
 }
 
@@ -5359,6 +5397,40 @@ function toSummaryJson(entry: VaultEntry | VaultEntrySummary): JsonValue {
 
 /** Strip timestamps from an entry for model-visible output (keeps secrets
  * when the caller asked for the full entry via vault_get). */
+
+/** Build a Bitwarden card object from a dsh-vault card entry. Expiry is
+ * parsed from `MM/YY` or `MM/YYYY`; card brand is inferred from the number. */
+function buildBitwardenCard(e: VaultEntry): Record<string, unknown> {
+  const card: Record<string, unknown> = {
+    cardholderName: e.cardHolder ?? null,
+    number: e.cardNumber ?? null,
+    code: e.cardCvv ?? null,
+    brand: inferCardBrand(e.cardNumber),
+    expMonth: null,
+    expYear: null,
+  }
+  const expiry = e.cardExpiry
+  if (expiry !== undefined) {
+    const m = /^(\d{1,2})\s*[/\-]\s*(\d{2}|\d{4})$/.exec(expiry.trim())
+    if (m !== null) {
+      card.expMonth = Number.parseInt(m[1]!, 10)
+      const yy = m[2]!
+      card.expYear = yy.length === 2 ? 2000 + Number.parseInt(yy, 10) : Number.parseInt(yy, 10)
+    }
+  }
+  return card
+}
+
+/** Heuristic card brand from the first digits (Visa/Mastercard/Amex/Discover). */
+function inferCardBrand(number: string | undefined): string | null {
+  if (number === undefined) return null
+  const digits = number.replace(/[\s-]/g, '')
+  if (/^4/.test(digits)) return 'Visa'
+  if (/^5[1-5]/.test(digits)) return 'Mastercard'
+  if (/^3[47]/.test(digits)) return 'Amex'
+  if (/^6(?:011|5)/.test(digits)) return 'Discover'
+  return null
+}
 
 /** Check a file exists (promise-friendly). */
 async function existsFile(path: string): Promise<boolean> {
@@ -5728,6 +5800,10 @@ function stripFieldsForPatch(entry: VaultEntry): VaultEntryPatch {
     ...(entry.refreshToken !== undefined ? { refreshToken: entry.refreshToken } : {}),
     ...(entry.expiresAt !== undefined ? { expiresAt: entry.expiresAt } : {}),
     ...(entry.otpSecret !== undefined ? { otpSecret: entry.otpSecret } : {}),
+    ...(entry.cardNumber !== undefined ? { cardNumber: entry.cardNumber } : {}),
+    ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
+    ...(entry.cardCvv !== undefined ? { cardCvv: entry.cardCvv } : {}),
+    ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
     ...(entry.url !== undefined ? { url: entry.url } : {}),
     ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
     ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
