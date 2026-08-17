@@ -3742,7 +3742,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         for (const entry of entries) {
           const m = /^(.*)\.json$/.exec(entry)
           if (!m) continue
-          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-')) continue
+          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
           names.push(m[1]!)
         }
       } catch { /* dir may not exist yet */ }
@@ -3782,7 +3782,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         for (const entry of entries) {
           const m = /^(.*)\.json$/.exec(entry)
           if (!m) continue
-          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-')) continue
+          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
           names.push(m[1]!)
         }
       } catch { /* no dir yet */ }
@@ -4595,18 +4595,36 @@ export class VaultGateway extends TypertRemoteService {
 
   /** List recent encrypted backups (timestamped files) for the UI. */
   @Remote('backups')
-  async backups(limit: number): Promise<Array<{ path: string; at: number }>> {
+  async backups(limit: number): Promise<Array<{ path: string; at: number; vaultName: string }>> {
     const max = limit === undefined ? 5 : limit
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
-    const found: Array<{ path: string; at: number }> = []
+    const found: Array<{ path: string; at: number; vaultName: string }> = []
     try {
       const entries = await readdir(dir)
       for (const entry of entries) {
         if (!isBackupFile(entry)) continue
-        found.push({ path: join(dir, entry), at: backupSortKey(entry) })
+        found.push({ path: join(dir, entry), at: backupSortKey(entry), vaultName: backupVaultName(entry) })
       }
     } catch { /* no dir yet */ }
     return found.sort((a, b) => b.at - a.at).slice(0, max)
+  }
+
+  /** Delete one backup file permanently (default vault cannot be deleted, but
+   * its backup files may be). */
+  @Remote('deleteBackup')
+  async deleteBackup(path: string): Promise<{ deleted: boolean; path: string }> {
+    this.assertWritable('deleteBackup')
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
+    const target = join(dir, basename(path))
+    if (!isBackupFile(basename(target))) {
+      throw new Error('deleteBackup: not a vault backup file')
+    }
+    try {
+      await unlink(target)
+    } catch {
+      throw new Error('deleteBackup: backup file not found')
+    }
+    return { deleted: true, path: target }
   }
 
   /** Restore the active vault from one of its encrypted backups. A safety
@@ -4662,7 +4680,7 @@ export class VaultGateway extends TypertRemoteService {
       for (const entry of entries) {
         const m = /^(.*)\.json$/.exec(entry)
         if (!m) continue
-        if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-')) continue
+        if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
         names.push(m[1]!)
       }
     } catch { /* no dir yet */ }
@@ -5336,6 +5354,15 @@ function backupStampMatch(name: string): string | null {
 /** Whether a file name is one of our backup files. */
 function isBackupFile(name: string): boolean {
   return backupStampMatch(name) !== null
+}
+
+/** The owning vault name of a backup file, parsed from its name
+ * (`default-backups-...` → `default`); legacy `vault-backup-*` files predate
+ * per-vault names and return an empty string. */
+function backupVaultName(name: string): string {
+  const modern = /^([^/]+?)-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/.exec(name)
+  if (modern !== null) return modern[1]!
+  return ''
 }
 
 /** Extract a comparable sort key from a backup file name (epoch ms for legacy,

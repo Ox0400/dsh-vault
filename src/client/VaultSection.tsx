@@ -87,7 +87,8 @@ export interface VaultSectionInjected {
   tags: () => Promise<Array<{ name: string; count: number }>>
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
-  backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
+  backups: (limit?: number) => Promise<Array<{ path: string; at: number; vaultName: string }>>
+  deleteBackup: (path: string) => Promise<{ deleted: boolean; path: string }>
   restoreBackup: (path: string, mode?: string, overwrite?: boolean) => Promise<{ entries: number; safetyBackup: string; note: string; added?: number; skipped?: number; updated?: number }>
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importFirefox: (masterPassword?: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
@@ -234,7 +235,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -247,7 +248,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [uriMap, setUriMap] = useState<Record<string, string>>({})
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
-  const [backupList, setBackupList] = useState<Array<{ path: string; at: number }>>([])
+  const [backupList, setBackupList] = useState<Array<{ path: string; at: number; vaultName: string }>>([])
   const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
   const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; expiringSoon?: number; updatedAt?: number }>>([])
   const [sessionUrl, setSessionUrl] = useState('')
@@ -354,6 +355,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       void backupStatus().then(bk => setBackupInfo(bk)).catch(() => {})
       void refresh()
       status().then(value => setLocked(value.locked)).catch(() => {})
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Delete one backup file (confirms first). */
+  async function deleteBackupFile(b: { path: string }): Promise<void> {
+    if (!window.confirm(t('backupDeleteConfirm'))) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await deleteBackup(b.path)
+      setMessage(t('backupDeleted'))
+      void backups(20).then(setBackupList).catch(() => {})
     } catch {
       setMessage(t('error'))
     } finally {
@@ -1523,7 +1540,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('recentBackups')} ({backupList.length})</p>
           {backupList.map(b => (
             <div key={b.path} className={css.dupGroup}>
-              <span className={css.dupNames}>{new Date(b.at).toLocaleString()}</span>
+              <span className={css.dupNames}>
+                {b.vaultName !== '' ? `${b.vaultName} · ` : ''}{new Date(b.at).toLocaleString()}
+              </span>
               <button
                 type="button"
                 className={css.dupMerge}
@@ -1531,6 +1550,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 disabled={busy || readonly || locked}
                 title={t('backupRestoreHint')}
               >{t('backupRestore')}</button>
+              <button
+                type="button"
+                className={css.dangerButton}
+                onClick={() => void deleteBackupFile(b)}
+                disabled={busy || readonly || locked}
+                title={t('backupDelete')}
+              >{t('backupDelete')}</button>
             </div>
           ))}
         </div>

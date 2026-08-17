@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll',
     ])
   })
@@ -643,4 +643,21 @@ test('VaultGateway vaultRename / vaultDelete manage named vaults', async () => {
     ctx.registry.delete(SystemPrompt)
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('backup files do not appear as vaults and can be deleted', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'X', username: 'u', password: 'p' })
+    const bk = await gateway.backup()
+    // The backup file must not show up in the vault roster.
+    const vaults = await gateway.listVaults()
+    expect(vaults.some(v => bk.path.endsWith(`${v.name}.json`))).toBe(false)
+    // Deleting a non-backup path is rejected.
+    await expect(gateway.deleteBackup('/tmp/not-a-backup.json')).rejects.toThrow(/not a vault backup/)
+    // Deleting the real backup works and removes it from the list.
+    const del = await gateway.deleteBackup(bk.path)
+    expect(del.deleted).toBe(true)
+    const remaining = await gateway.backups(20)
+    expect(remaining.some(b => b.path === bk.path)).toBe(false)
+  })
 })
