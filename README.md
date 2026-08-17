@@ -80,6 +80,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_backup` / `vault_backup_now` | Timestamped encrypted backup named `<vault>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json` (owning vault + date visible); retention pruning keeps the newest N |
 | `vault_restore_backup` | Restore from a backup: `mode: "merge"` (default) copies the backup entries INTO the current vault so they appear in the entries list; `mode: "replace"` overwrites the whole vault with a safety snapshot first |
 | `vault_vault_rename` / `vault_vault_delete` | Rename a named vault (file moves, active session follows) or permanently delete one (default vault protected) |
+| `vault_match_url` | Find login entries matching a URL (Bitwarden/1Password-style: exact host, subdomain, parent domain, path-prefix; www./port normalization) with a 0–100 score — never returns the password |
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON interop (full field mapping, overwrite support) |
