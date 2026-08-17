@@ -84,6 +84,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_import_bitwarden_encrypted` | Decrypt a Bitwarden password-protected JSON export (PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC) and import it; pass the export passphrase |
 | `vault_import_manager_csv` | Password-manager CSV auto-detected by header: Bitwarden (`login_uri`/`login_username`/…), 1Password 8, Dashlane, NordPass, Keeper, LastPass (`fav`/`grouping`/`extra`); dryRun preview |
 | `vault_import_kdbx` | KeePass KDBX: 3.1 and 4.x, AES-KDF or Argon2 (RFC 9106), AES-256-CBC or ChaCha20 payload, keyfile support |
+| `vault_export_1password` | Export entries as a 1Password 1PUX archive (ZIP + export.data) for import into 1Password or re-import here; item categories map to login / credit card / API credential / server |
 | `vault_import_1password` / `vault_import_1pif` | 1Password 1PUX (ZIP) and legacy 1PIF text exports |
 | `vault_import_enpass` | Enpass JSON export (folders → tags, typed fields, TOTP) |
 | `vault_import_keepass_xml` | KeePass 2.x XML export (plaintext or `********` masked values) |

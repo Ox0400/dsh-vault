@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from '../src/imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport, buildOnePasswordPux } from '../src/imports.ts'
 import { readZip } from '../src/zip.ts'
 import { deflateRawSync } from 'node:zlib'
 
@@ -346,4 +346,20 @@ describe('Bitwarden encrypted export', () => {
   it('rejects a wrong password on the Argon2id export', () => {
     expect(() => decryptBitwardenExport(readFileSync(FIXTURE_ARGON, 'utf8'), 'nope')).toThrow(/wrong password|MAC mismatch/)
   }, 20000)
+})
+
+it('buildOnePasswordPux round-trips through readOnePasswordPux', () => {
+  const buf = buildOnePasswordPux([
+    { title: 'GitHub', kind: 'login', username: 'ada', password: 's3cret!', url: 'https://github.com', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' },
+    { title: 'Visa', kind: 'card', cardNumber: '4111111111111111', cardExpiry: '12/29', cardCvv: '123', cardHolder: 'Ada' },
+  ])
+  const creds = readOnePasswordPux(buf)
+  expect(creds).toHaveLength(2)
+  const gh = creds.find(c => c.title === 'GitHub')!
+  expect(gh.username).toBe('ada')
+  expect(gh.password).toBe('s3cret!')
+  expect(gh.otp).toBe('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')
+  const visa = creds.find(c => c.title === 'Visa')!
+  // The generic importer only extracts login fields; the card title survives.
+  expect(visa.title).toBe('Visa')
 })

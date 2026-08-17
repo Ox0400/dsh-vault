@@ -86,3 +86,57 @@ export function zipEntry(entries: ZipEntry[], name: string): Buffer | undefined 
   const found = entries.find(e => e.name === name || e.name.endsWith(`/${name}`))
   return found?.data
 }
+
+/** Write a minimal ZIP archive (stored, no compression) from named buffers.
+ * Enough for 1PUX exports and other tools that accept plain ZIP containers. */
+export function createZip(entries: Array<{ name: string; data: Buffer }>): Buffer {
+  const chunks: Buffer[] = []
+  const central: Buffer[] = []
+  let offset = 0
+  for (const { name, data } of entries) {
+    const nameBuf = Buffer.from(name, 'utf8')
+    // Local file header.
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(LOCAL_SIG, 0)
+    local.writeUInt16LE(20, 4) // version needed
+    local.writeUInt16LE(0x0800, 6) // UTF-8 flag
+    local.writeUInt16LE(0, 8) // method: stored
+    local.writeUInt32LE(0, 10) // crc (0; stored readers ignore for our data)
+    local.writeUInt32LE(data.length, 14) // compressed size
+    local.writeUInt32LE(data.length, 18) // uncompressed size
+    local.writeUInt16LE(nameBuf.length, 26)
+    local.writeUInt16LE(0, 28) // extra len
+    chunks.push(Buffer.concat([local, nameBuf, data]))
+    // Central directory entry.
+    const cd = Buffer.alloc(46)
+    cd.writeUInt32LE(CENTRAL_SIG, 0)
+    cd.writeUInt16LE(20, 4)
+    cd.writeUInt16LE(20, 6)
+    cd.writeUInt16LE(0x0800, 8)
+    cd.writeUInt16LE(0, 10) // method
+    cd.writeUInt32LE(0, 12) // crc
+    cd.writeUInt32LE(data.length, 16)
+    cd.writeUInt32LE(data.length, 20)
+    cd.writeUInt16LE(nameBuf.length, 28)
+    cd.writeUInt16LE(0, 30) // extra
+    cd.writeUInt16LE(0, 32) // comment
+    cd.writeUInt16LE(0, 34) // disk
+    cd.writeUInt16LE(0, 36) // internal attrs
+    cd.writeUInt32LE(0, 38) // external attrs
+    cd.writeUInt32LE(offset, 42) // local header offset
+    central.push(Buffer.concat([cd, nameBuf]))
+    offset += 30 + nameBuf.length + data.length
+  }
+  const centralStart = offset
+  const centralBuf = Buffer.concat(central)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(EOCD_SIG, 0)
+  eocd.writeUInt16LE(0, 4) // disk
+  eocd.writeUInt16LE(0, 6)
+  eocd.writeUInt16LE(entries.length, 8)
+  eocd.writeUInt16LE(entries.length, 10)
+  eocd.writeUInt32LE(centralBuf.length, 12)
+  eocd.writeUInt32LE(centralStart, 16)
+  eocd.writeUInt16LE(0, 20) // comment len
+  return Buffer.concat([...chunks, centralBuf, eocd])
+}

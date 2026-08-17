@@ -19,7 +19,7 @@
  * @module dsh-vault/imports
  */
 
-import { readZip, zipEntry } from './zip.ts'
+import { createZip, readZip, zipEntry } from './zip.ts'
 import { extractEntries as kdbxExtractEntries } from './kdbx.ts'
 import { createCipheriv, createDecipheriv, createHash, createHmac, pbkdf2Sync } from 'node:crypto'
 import { argon2 } from './argon2.ts'
@@ -613,4 +613,87 @@ export function decryptBitwardenExport(input: string, password: string): string 
 /** SHA-256 one-shot. */
 function createHashSha256(data: Buffer): Buffer {
   return createHash('sha256').update(data).digest()
+}
+
+/** Build a 1Password 1PUX export document from dsh-vault entries. The 1PUX
+ * format is a ZIP archive containing export.data (JSON: accounts → vaults →
+ * items) plus export.attributes. Item categories map to 1Password types:
+ * login, card (credit card), api-key/secret/oauth → API Credential, ssh → Server. */
+export function buildOnePasswordPux(entries: Array<{
+  title: string
+  kind?: string
+  username?: string
+  email?: string
+  password?: string
+  url?: string
+  notes?: string
+  otpSecret?: string
+  cardNumber?: string
+  cardExpiry?: string
+  cardCvv?: string
+  cardHolder?: string
+  apiKey?: string
+  secret?: string
+  accessToken?: string
+  refreshToken?: string
+  tags?: string[]
+  favorite?: boolean
+}>): Buffer {
+  const items = entries.map((e, index) => {
+    const kind = e.kind ?? 'login'
+    const category = kind === 'card' ? 'CREDIT_CARD'
+      : kind === 'api-key' || kind === 'secret' || kind === 'oauth' ? 'API_CREDENTIAL'
+      : kind === 'ssh' ? 'SERVER' : 'LOGIN'
+    const fields: Array<Record<string, unknown>> = []
+    const add = (title: string, value: string, designation?: string): void => {
+      if (value.length === 0) return
+      const f: Record<string, unknown> = { id: `f${fields.length}`, type: 'STRING', title, value }
+      if (designation !== undefined) f.designation = designation
+      fields.push(f)
+    }
+    if (kind === 'card') {
+      add('cardholder', e.cardHolder ?? '', 'cardholder')
+      add('number', e.cardNumber ?? '', 'cc-number')
+      add('expiry', e.cardExpiry ?? '', 'cc-expiry')
+      add('cvv', e.cardCvv ?? '', 'cvv')
+    } else {
+      add('username', e.username ?? '', 'username')
+      add('email', e.email ?? '', 'email')
+      add('password', e.password ?? '', 'password')
+      if (e.apiKey !== undefined) add('API Key', e.apiKey, 'apiKey')
+      if (e.secret !== undefined) add('Secret', e.secret, 'secret')
+      if (e.accessToken !== undefined) add('Access Token', e.accessToken, 'accessToken')
+      if (e.refreshToken !== undefined) add('Refresh Token', e.refreshToken, 'refreshToken')
+    }
+    if (e.otpSecret !== undefined && e.otpSecret.length > 0) add('one-time password', e.otpSecret, 'otp')
+    const urls = e.url !== undefined && e.url.length > 0 ? [{ label: 'website', primary: true, href: e.url }] : []
+    const item: Record<string, unknown> = {
+      id: `item-${index}-${e.title.replace(/[^A-Za-z0-9]+/g, '-').slice(0, 40)}`,
+      title: e.title,
+      category,
+      favorite: e.favorite === true,
+      urls,
+      tags: e.tags ?? [],
+      details: {
+        fields,
+        ...(e.notes !== undefined && e.notes.length > 0 ? { notesPlain: e.notes } : {}),
+      },
+    }
+    return item
+  })
+  const doc = {
+    accounts: [{
+      attrs: { accountName: 'dsh-vault export', name: 'dsh-vault', avatar: '', email: '' },
+      vaults: [{
+        attrs: { name: 'dsh-vault' },
+        items,
+      }],
+    }],
+  }
+  const exportData = Buffer.from(JSON.stringify(doc), 'utf8')
+  const attributes = Buffer.from(JSON.stringify({ version: 1, generator: 'dsh-vault' }), 'utf8')
+  return createZip([
+    { name: 'export.data', data: exportData },
+    { name: 'export.attributes', data: attributes },
+  ])
 }

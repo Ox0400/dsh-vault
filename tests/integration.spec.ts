@@ -114,6 +114,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_env',
       'vault_expiry',
       'vault_export',
+      'vault_export_1password',
       'vault_export_bitwarden',
       'vault_export_browser',
       'vault_export_csv',
@@ -3115,5 +3116,36 @@ test('vault_watchtower rates entries and filters by minScore', async () => {
     // minScore filter keeps only entries below the threshold.
     const risky = await call(ctx, 'vault_watchtower', { minScore: 50 }) as { entries: Array<{ title: string }> }
     expect(risky.entries.some(e => e.title === 'GoodWT')).toBe(false)
+  })
+})
+
+test('vault_export_1password produces a 1PUX archive that re-imports', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'Login1', username: 'alice', password: 'pw-secret', url: 'https://x.example', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    await call(ctx, 'vault_add', { title: 'Card1', kind: 'card', cardNumber: '4111111111111111', cardExpiry: '12/29', cardCvv: '123', cardHolder: 'Alice' })
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'vault-1pux-'))
+    const out = join(dir, 'export.1pux')
+    try {
+      const r = await call(ctx, 'vault_export_1password', { path: out }) as { count: number }
+      assert.equal(r.count, 2)
+      // The file is a ZIP containing export.data with accounts→vaults→items.
+      const { readZip } = await import('../src/zip')
+      const { zipEntry } = await import('../src/zip')
+      const entries = readZip(await readFile(out))
+      const exportData = zipEntry(entries, 'export.data')!
+      const doc = JSON.parse(exportData.toString('utf8'))
+      const items = doc.accounts[0].vaults[0].items
+      assert.equal(items.length, 2)
+      const login = items.find((i: { title: string }) => i.title === 'Login1')
+      assert.equal(login.category, 'LOGIN')
+      const card = items.find((i: { title: string }) => i.title === 'Card1')
+      assert.equal(card.category, 'CREDIT_CARD')
+      assert.equal(card.details.fields.find((f: { designation: string }) => f.designation === 'cc-number').value, '4111111111111111')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

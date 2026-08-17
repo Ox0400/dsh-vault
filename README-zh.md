@@ -82,6 +82,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_import_bitwarden_encrypted` | 解密 Bitwarden 口令保护 JSON 导出（PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC）并导入,需提供导出口令 |
 | `vault_import_manager_csv` | 密码管理器 CSV 自动识别表头：Bitwarden（login_uri/login_username/…）、1Password 8、Dashlane、NordPass、Keeper、LastPass（fav/grouping/extra）；支持 dryRun 预览 |
 | `vault_import_kdbx` | KeePass KDBX：3.1 与 4.x、AES-KDF 或 Argon2（RFC 9106）、AES-256-CBC 或 ChaCha20 载荷、支持 keyfile |
+| `vault_export_1password` | 导出为 1Password 1PUX 归档（ZIP + export.data）,可导入 1Password 或用 vault_import_1password 再导入;条目类别映射 login/信用卡/API 凭据/服务器 |
 | `vault_import_1password` / `vault_import_1pif` | 1Password 1PUX（ZIP）与旧版 1PIF 文本导出 |
 | `vault_import_enpass` | Enpass JSON 导出（文件夹→标签、类型化字段、TOTP） |
 | `vault_import_keepass_xml` | KeePass 2.x XML 导出（明文或 ****** 掩码值） |

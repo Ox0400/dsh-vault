@@ -36,7 +36,7 @@ import { analyzeVault, analyzeEntry } from './watchtower.ts'
 import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar, pruneExpiredCookies, countExpiredCookies, countExpiringCookies } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx, describeKdbxKdf } from './kdbx.ts'
-import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport } from './imports.ts'
+import { readOnePasswordPux, readPasswordCsv, readEnpassJson, readBitwardenJson, readOnePasswordPif, readKeePassXml, decryptBitwardenExport, buildOnePasswordPux } from './imports.ts'
 
 /** Lossless JSON value (mirrors the harness session's JsonValue; kept local so
  * the published bundle builds without depending on the dsh-session package). */
@@ -3642,6 +3642,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
       await writeFile(args.path, JSON.stringify(doc, null, 2), { mode: 0o600 })
       return { path: args.path, count: items.length }
+    },
+  }))
+
+  // ── vault_export_1password: export as a 1Password 1PUX archive ───────────
+  ctx.tools.register(defineTool({
+    name: 'vault_export_1password',
+    description: 'Export entries in the 1Password 1PUX format (a ZIP archive with export.data) so '
+      + 'they can be imported into 1Password, 1Password-compatible tools, or re-imported here with '
+      + 'vault_import_1password. Item categories map to 1Password types (login / credit card / API '
+      + 'credential / server). Contains plaintext secrets — write it to a protected file. Returns '
+      + 'the output path and count.',
+    parameters: { path: { type: 'string', required: true, description: 'Absolute output .1pux path.' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `exported ${v.count} entries to ${v.path} — contains plaintext secrets; keep the file protected (mode 600)` }] },
+    async execute(args) {
+      assertWritable('vault_export_1password')
+      const s = await guardStore()
+      const doc = buildOnePasswordPux(s.list())
+      await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
+      await writeFile(args.path, doc, { mode: 0o600 })
+      return { path: args.path, count: s.list().length }
     },
   }))
 
