@@ -21,7 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import Schema from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir, unlink, rename as renameFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, readdirSync, statSync } from 'node:fs'
@@ -1349,26 +1349,28 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_backup_status: days since last backup ─────────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_backup_status',
-    description: 'Report how many days have passed since the last vault-backup-* file was written '
-      + '(1Password-style backup reminder). Returns daysSinceBackup and a suggestion.',
+    description: 'Report how many days have passed since the last backup file was written '
+      + '(1Password-style backup reminder; new-style `<vault>-backups-<date>.json` and legacy '
+      + '`vault-backup-<epoch>.json` names are both recognized). Returns daysSinceBackup and a suggestion.',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: false, properties: { daysSinceBackup: { type: 'integer', required: true }, backups: { type: 'integer', required: true }, lastBackupAt: { type: 'integer' }, oldestBackupAt: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: `last backup ${v.daysSinceBackup} days ago (${v.backups} backup file(s))` }] },
     async execute() {
       const s = await guardStore()
       const dir = dirname(resolveVaultPath(config))
-      const backups: number[] = []
+      const stamps: number[] = []
       try {
         const entries = await readdir(dir)
         for (const entry of entries) {
-          const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
-          if (m) backups.push(Number(m[1]))
+          if (!isBackupFile(entry)) continue
+          const key = backupSortKey(entry)
+          if (key > 0) stamps.push(key)
         }
       } catch { /* no dir yet */ }
-      const last = backups.length > 0 ? Math.max(...backups) : 0
+      const last = stamps.length > 0 ? Math.max(...stamps) : 0
       const days = last > 0 ? Math.floor((Date.now() - last) / 86_400_000) : -1
       void s
-      const oldest = backups.length > 0 ? Math.min(...backups) : 0
-      return { daysSinceBackup: days, backups: backups.length, ...(last > 0 ? { lastBackupAt: last } : {}), ...(oldest > 0 ? { oldestBackupAt: oldest } : {}) }
+      const oldest = stamps.length > 0 ? Math.min(...stamps) : 0
+      return { daysSinceBackup: days, backups: stamps.length, ...(last > 0 ? { lastBackupAt: last } : {}), ...(oldest > 0 ? { oldestBackupAt: oldest } : {}) }
     },
   }))
 
@@ -1915,13 +1917,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_backup_now',
     description: 'Create an immediate timestamped backup of the vault file (alias of vault_backup). '
-      + 'Returns the backup path.',
+      + 'The file is named `<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` so the owning vault and date '
+      + 'are visible in the name. Returns the backup path.',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', required: true } } }, render: (_a, v) => [{ type: 'text', text: `backup written to ${v.path}` }] },
     async execute() {
       const s = await guardStore()
       const source = resolveVaultPath(config)
-      const backup = join(dirname(source), `vault-backup-${Date.now()}.json`)
+      const backup = join(dirname(source), backupFileName(config.name ?? 'default'))
       const raw = await readFile(source, 'utf8')
       await mkdir(dirname(backup), { recursive: true, mode: 0o700 })
       await writeFile(backup, raw, { mode: 0o600 })
@@ -1933,17 +1936,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_restore_backup: restore the vault from an encrypted backup ──────
   ctx.tools.register(defineTool({
     name: 'vault_restore_backup',
-    description: 'Restore the vault from one of its encrypted `vault-backup-*.json` files. A safety '
-      + 'snapshot of the current state is written first (named *-pre-restore.json), then the backup '
-      + 'overwrites the live vault file and the store reloads. Use vault_backups to list available '
-      + 'backup paths first.',
+    description: 'Restore entries from one of the vault encrypted backup files (new-style '
+      + '`<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` or legacy `vault-backup-<epoch>.json`). By '
+      + 'default mode="merge": the backup entries are copied INTO the current vault (same-title '
+      + 'entries skipped unless overwrite: true), so they appear in the entries list. Pass '
+      + 'mode="replace" for the legacy behaviour: a safety snapshot is written first, then the '
+      + 'backup overwrites the whole vault file and the store reloads. Use vault_backups to list '
+      + 'available backup paths first.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Absolute path of a vault-backup-<timestamp>.json file.' },
+      path: { type: 'string', required: true, description: 'Absolute path of a backup .json file.' },
+      mode: { type: 'string', enum: ['merge', 'replace'], description: '"merge" copies backup entries into the current vault (default); "replace" overwrites the whole vault.' },
+      overwrite: { type: 'boolean', description: 'Merge mode only: replace same-title entries (default false).' },
+      dryRun: { type: 'boolean', description: 'Merge mode only: preview counts without writing (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'integer', required: true }, safetyBackup: { type: 'string' }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `restored (${v.entries} entries)` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { entries: { type: 'integer', required: true }, safetyBackup: { type: 'string' }, note: { type: 'string' }, added: { type: 'integer' }, skipped: { type: 'integer' }, updated: { type: 'integer' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `restored (${v.entries} entries)` }] },
     async execute(args) {
       assertWritable('vault_restore_backup')
       const s = await guardStore()
+      const mode = args.mode === 'replace' ? 'replace' : 'merge'
+      if (mode === 'merge') {
+        const result = await mergeBackupIntoVault(masterPassword, config, args.path, args.overwrite === true, args.dryRun === true)
+        void s
+        return { entries: result.entries, safetyBackup: '', note: result.note, added: result.added, skipped: result.skipped, updated: result.updated }
+      }
       const result = await restoreVaultFromBackup(masterPassword, config, args.path)
       void s
       return result
@@ -3549,8 +3564,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       try {
         const entries = await readdir(dir)
         for (const entry of entries) {
-          const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
-          if (m) found.push({ path: join(dir, entry), at: Number(m[1]) })
+          if (!isBackupFile(entry)) continue
+          found.push({ path: join(dir, entry), at: backupSortKey(entry) })
         }
       } catch { /* no dir yet */ }
       found.sort((a, b) => Number((b as { at: number }).at) - Number((a as { at: number }).at))
@@ -3562,8 +3577,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.tools.register(defineTool({
     name: 'vault_backup',
     description: 'Create a timestamped backup of the vault file (a copy of the on-disk encrypted '
-      + 'document, not a plaintext export). Old backups beyond maxBackups (default 10) are pruned '
-      + 'automatically (newest kept). Returns the backup path and retention stats.',
+      + 'document, not a plaintext export). The file is named `<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` '
+      + 'so the owning vault and date are visible in the name. Old backups beyond maxBackups (default '
+      + '10) are pruned automatically (newest kept). Returns the backup path and retention stats.',
     parameters: {
       maxBackups: { type: 'integer', description: 'Keep at most this many backups (default 10, min 1).' },
       note: { type: 'string', description: 'Optional note returned with the backup (e.g. why it was taken).' },
@@ -3577,17 +3593,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (!Number.isInteger(maxBackups) || maxBackups < 1 || maxBackups > 100) {
         throw new Error('vault_backup: maxBackups must be an integer 1–100')
       }
-      const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
+      const backup = join(dir, backupFileName(config.name ?? 'default'))
       const raw = await readFile(source, 'utf8')
       await mkdir(dir, { recursive: true, mode: 0o700 })
       await writeFile(backup, raw, { mode: 0o600 })
-      // Retention: keep the newest maxBackups vault-backup-*.json files.
+      // Retention: keep the newest maxBackups backup files. Prefer the file
+      // mtime (true creation order — back-to-back backups can share a second),
+      // falling back to the name when mtime is unavailable.
       let backups: string[] = []
       try {
         const names = await readdir(dir)
-        backups = names.filter(n => /^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(n))
+        backups = names.filter(n => isBackupFile(n))
           .map(n => join(dir, n))
-          .sort((a, b) => b.localeCompare(a)) // newest first (timestamp in name)
+          .sort((a, b) => {
+            const ma = statSync(a).mtimeMs
+            const mb = statSync(b).mtimeMs
+            if (ma !== mb) return mb - ma
+            return compareBackupNewest(basename(a), basename(b))
+          })
       } catch {
         backups = []
       }
@@ -3767,6 +3790,70 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_vault_rename: rename a named vault (file) ───────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_vault_rename',
+    description: 'Rename a named vault: the vault file (and its access policy file, if any) is '
+      + 'moved to the new name. The active session switches to the new name. Default vault "default" '
+      + 'cannot be renamed. Returns the new name and the vault roster.',
+    parameters: {
+      from: { type: 'string', required: true, description: 'Current vault name (e.g. "work").' },
+      to: { type: 'string', required: true, description: 'New vault name (e.g. "personal").' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { renamed: { type: 'boolean', required: true }, from: { type: 'string' }, to: { type: 'string' }, vaults: { type: 'array', items: { type: 'json' } }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `renamed vault "${v.from}" -> "${v.to}"` }] },
+    async execute(args) {
+      assertWritable('vault_vault_rename')
+      const from = args.from.trim()
+      const to = args.to.trim()
+      if (!/^[a-zA-Z0-9._-]+$/.test(from) || !/^[a-zA-Z0-9._-]+$/.test(to)) {
+        throw new Error('vault_vault_rename: names may contain only letters, digits, . _ -')
+      }
+      if (from === 'default') throw new Error('vault_vault_rename: the default vault cannot be renamed')
+      if (from === to) return { renamed: false, from, to, note: 'source and target names are identical' }
+      const dir = dirname(resolveVaultPath(config))
+      const source = join(dir, `${from}.json`)
+      const target = join(dir, `${to}.json`)
+      if (await existsFile(source) === false) throw new Error(`vault_vault_rename: vault "${from}" not found`)
+      if (await existsFile(target)) throw new Error(`vault_vault_rename: vault "${to}" already exists`)
+      await renameFile(source, target)
+      // Drop cached stores for both names so the next open reads the new file.
+      sharedVaultStores.delete(`${target}\0${masterPassword}`)
+      if (currentVaultName === from) currentVaultName = to
+      const roster = await listVaultRoster(config)
+      return { renamed: true, from, to, vaults: roster, note: `vault "${from}" renamed to "${to}"` }
+    },
+  }))
+
+  // ── vault_vault_delete: delete a named vault (file) ───────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_vault_delete',
+    description: 'Permanently delete a named vault and its access-policy file. The default vault '
+      + 'cannot be deleted. Consider vault_backup first — deletion is irreversible. If the deleted '
+      + 'vault is active, the session switches back to "default".',
+    parameters: {
+      name: { type: 'string', required: true, description: 'Vault name to delete (e.g. "work").' },
+      confirm: { type: 'boolean', required: true, description: 'Must be true to confirm deletion.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { deleted: { type: 'boolean', required: true }, name: { type: 'string' }, active: { type: 'string' }, vaults: { type: 'array', items: { type: 'json' } }, note: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.note ?? `deleted vault "${v.name}"` }] },
+    async execute(args) {
+      assertWritable('vault_vault_delete')
+      const name = args.name.trim()
+      if (args.confirm !== true) throw new Error('vault_vault_delete: pass confirm: true to delete a vault')
+      if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+        throw new Error('vault_vault_delete: name may contain only letters, digits, . _ -')
+      }
+      if (name === 'default') throw new Error('vault_vault_delete: the default vault cannot be deleted')
+      const dir = dirname(resolveVaultPath(config))
+      const source = join(dir, `${name}.json`)
+      if (await existsFile(source) === false) throw new Error(`vault_vault_delete: vault "${name}" not found`)
+      await unlink(source)
+      sharedVaultStores.delete(`${source}\0${masterPassword}`)
+      if (currentVaultName === name) currentVaultName = 'default'
+      const roster = await listVaultRoster(config)
+      return { deleted: true, name, active: currentVaultName ?? 'default', vaults: roster, note: `vault "${name}" deleted` }
+    },
+  }))
+
   // ── vault_rekey: upgrade the scrypt KDF parameters in place ────────────────
   ctx.tools.register(defineTool({
     name: 'vault_rekey',
@@ -3782,7 +3869,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // failed re-key never strands the vault unrecoverable.
       const source = resolveVaultPath(config)
       const dir = dirname(source)
-      const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
+      const backup = join(dir, backupFileName(config.name ?? 'default'))
       const raw = await readFile(source, 'utf8')
       await mkdir(dir, { recursive: true, mode: 0o700 })
       await writeFile(backup, raw, { mode: 0o600 })
@@ -3930,15 +4017,19 @@ export class VaultGateway extends TypertRemoteService {
     const max = maxBackups ?? this.backupRetention
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
     const source = this.vaultPath ?? defaultVaultPath(this.activeName)
-    const backup = join(dir, `vault-backup-${Date.now()}-${randomUUID().slice(0, 8)}.json`)
+    const backup = join(dir, backupFileName(this.activeName ?? 'default'))
     const raw = await readFile(source, 'utf8')
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await writeFile(backup, raw, { mode: 0o600 })
     let total = 1
     let pruned = 0
     try {
-      const names = (await readdir(dir)).filter(n => /^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(n))
-        .map(n => join(dir, n)).sort((a, b) => b.localeCompare(a))
+      const names = (await readdir(dir)).filter(n => isBackupFile(n))
+        .map(n => join(dir, n)).sort((a, b) => {
+          const ma = statSync(a).mtimeMs
+          const mb = statSync(b).mtimeMs
+          return ma !== mb ? mb - ma : compareBackupNewest(basename(a), basename(b))
+        })
       total = names.length
       for (const stale of names.filter(n => n !== backup).slice(max - 1)) {
         try { await unlink(stale); pruned++ } catch { /* best-effort */ }
@@ -3950,17 +4041,18 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('backupStatus')
   async backupStatus(): Promise<{ daysSinceBackup: number; backups: number }> {
     const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
-    const backups: number[] = []
+    const stamps: number[] = []
     try {
       const entries = await readdir(dir)
       for (const entry of entries) {
-        const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
-        if (m) backups.push(Number(m[1]))
+        if (!isBackupFile(entry)) continue
+        const key = backupSortKey(entry)
+        if (key > 0) stamps.push(key)
       }
     } catch { /* no dir yet */ }
-    const last = backups.length > 0 ? Math.max(...backups) : 0
+    const last = stamps.length > 0 ? Math.max(...stamps) : 0
     const days = last > 0 ? Math.floor((Date.now() - last) / 86_400_000) : -1
-    return { daysSinceBackup: days, backups: backups.length }
+    return { daysSinceBackup: days, backups: stamps.length }
   }
 
   /** Vault overview stats (no secrets). */
@@ -4510,8 +4602,8 @@ export class VaultGateway extends TypertRemoteService {
     try {
       const entries = await readdir(dir)
       for (const entry of entries) {
-        const m = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(entry)
-        if (m) found.push({ path: join(dir, entry), at: Number(m[1]) })
+        if (!isBackupFile(entry)) continue
+        found.push({ path: join(dir, entry), at: backupSortKey(entry) })
       }
     } catch { /* no dir yet */ }
     return found.sort((a, b) => b.at - a.at).slice(0, max)
@@ -4520,13 +4612,18 @@ export class VaultGateway extends TypertRemoteService {
   /** Restore the active vault from one of its encrypted backups. A safety
    * snapshot of the current state is written first, then the store reloads. */
   @Remote('restoreBackup')
-  async restoreBackup(path: string): Promise<{ entries: number; safetyBackup: string; note: string }> {
+  async restoreBackup(path: string, mode?: string, overwrite?: boolean): Promise<{ entries: number; safetyBackup: string; note: string; added?: number; skipped?: number; updated?: number }> {
     this.assertWritable('restoreBackup')
     await this.guardedStore()
-    return restoreVaultFromBackup(this.masterPassword, {
+    const config = {
       ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}),
       ...(this.activeName !== undefined ? { name: this.activeName } : {}),
-    }, path)
+    }
+    if (mode !== 'replace') {
+      const result = await mergeBackupIntoVault(this.masterPassword, config, path, overwrite === true, false)
+      return { entries: result.entries, safetyBackup: '', note: result.note, added: result.added, skipped: result.skipped, updated: result.updated }
+    }
+    return restoreVaultFromBackup(this.masterPassword, config, path)
   }
 
   /** Lock the vault immediately (wipe the in-memory key); UI "lock" button. */
@@ -4590,6 +4687,48 @@ export class VaultGateway extends TypertRemoteService {
       for (const tag of e.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
     }
     return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  }
+
+  /** Rename a named vault (file + policy); the active session follows. */
+  @Remote('vaultRename')
+  async vaultRename(from: string, to: string): Promise<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }> {
+    this.assertWritable('vaultRename')
+    if (!/^[a-zA-Z0-9._-]+$/.test(from) || !/^[a-zA-Z0-9._-]+$/.test(to)) {
+      throw new Error('vaultRename: names may contain only letters, digits, . _ -')
+    }
+    if (from === 'default') throw new Error('vaultRename: the default vault cannot be renamed')
+    if (from === to) {
+      return { renamed: false, from, to, vaults: await listVaultRoster({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}) }, this.activeName), note: 'source and target names are identical' }
+    }
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
+    const source = join(dir, `${from}.json`)
+    const target = join(dir, `${to}.json`)
+    if (!(await existsFile(source))) throw new Error(`vaultRename: vault "${from}" not found`)
+    if (await existsFile(target)) throw new Error(`vaultRename: vault "${to}" already exists`)
+    await renameFile(source, target)
+    sharedVaultStores.delete(`${target}\0${this.masterPassword}`)
+    if (this.activeName === from) this.activeName = to
+    const vaults = await listVaultRoster({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}) }, this.activeName)
+    return { renamed: true, from, to, vaults, note: `vault "${from}" renamed to "${to}"` }
+  }
+
+  /** Permanently delete a named vault (file + policy); active falls back to default. */
+  @Remote('vaultDelete')
+  async vaultDelete(name: string, confirm: boolean): Promise<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }> {
+    this.assertWritable('vaultDelete')
+    if (confirm !== true) throw new Error('vaultDelete: pass confirm: true to delete a vault')
+    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+      throw new Error('vaultDelete: name may contain only letters, digits, . _ -')
+    }
+    if (name === 'default') throw new Error('vaultDelete: the default vault cannot be deleted')
+    const dir = dirname(this.vaultPath ?? defaultVaultPath(this.activeName))
+    const source = join(dir, `${name}.json`)
+    if (!(await existsFile(source))) throw new Error(`vaultDelete: vault "${name}" not found`)
+    await unlink(source)
+    sharedVaultStores.delete(`${source}\0${this.masterPassword}`)
+    if (this.activeName === name) this.activeName = 'default'
+    const vaults = await listVaultRoster({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}) }, this.activeName)
+    return { deleted: true, name, active: this.activeName ?? 'default', vaults, note: `vault "${name}" deleted` }
   }
 
   /** Rename a tag across every entry (Bitwarden-style tag merge). */
@@ -5143,22 +5282,105 @@ function toSummaryJson(entry: VaultEntry | VaultEntrySummary): JsonValue {
 /** Strip timestamps from an entry for model-visible output (keeps secrets
  * when the caller asked for the full entry via vault_get). */
 
+/** Check a file exists (promise-friendly). */
+async function existsFile(path: string): Promise<boolean> {
+  try {
+    await readFile(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** List the named vaults (one .json per vault) with an active flag. */
+async function listVaultRoster(config: Config, activeName?: string): Promise<Array<{ name: string; active: boolean }>> {
+  const dir = dirname(resolveVaultPath(config))
+  const names: string[] = []
+  try {
+    const entries = await readdir(dir)
+    for (const entry of entries) {
+      const m = /^(.*)\.json$/.exec(entry)
+      if (!m) continue
+      if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
+      names.push(m[1]!)
+    }
+  } catch { /* no dir yet */ }
+  const active = activeName ?? currentVaultName
+  return names.sort().map(name => ({ name, active: name === active }))
+}
+
+/** Format a backup filename: `<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` so the
+ * owning vault and the exact date are visible in the file name. Falls back to
+ * the legacy `vault-backup-<epoch>` scheme for `default` (kept for
+ * compatibility with existing files/tools). */
+function backupFileName(vaultName: string, at = new Date()): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const stamp = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}_${pad(at.getHours())}-${pad(at.getMinutes())}-${pad(at.getSeconds())}`
+  const safe = /^[A-Za-z0-9._-]+$/.test(vaultName) ? vaultName : 'vault'
+  // Second-precision names can collide when backups are taken back-to-back,
+  // so a short random suffix always follows the timestamp.
+  return `${safe}-backups-${stamp}-${randomUUID().slice(0, 6)}.json`
+}
+
+/** Match either a new-style (`<name>-backups-<stamp>.json`) or legacy
+ * (`vault-backup-<epoch>[-<hex>].json`) backup file name. Returns the matched
+ * timestamp text (epoch for legacy, the `YYYY-MM-DD_HH-MM-SS` part for new). */
+function backupStampMatch(name: string): string | null {
+  const legacy = /^vault-backup-(\d+)(?:-[0-9a-f]{8})?\.json$/.exec(name)
+  if (legacy !== null) return legacy[1]!
+  const modern = /-backups-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(?:-[0-9a-f]{6})?\.json$/.exec(name)
+  if (modern !== null) return modern[1]!
+  return null
+}
+
+/** Whether a file name is one of our backup files. */
+function isBackupFile(name: string): boolean {
+  return backupStampMatch(name) !== null
+}
+
+/** Extract a comparable sort key from a backup file name (epoch ms for legacy,
+ * parsed date for new-style). Same-second new-style names share a key — callers
+ * that need strict ordering use the filename (whose trailing random suffix
+ * disambiguates back-to-back runs). */
+function backupSortKey(name: string): number {
+  const stamp = backupStampMatch(name)
+  if (stamp === null) return 0
+  if (/^\d+$/.test(stamp)) return Number(stamp)
+  const parts = stamp.split('_')
+  const date = parts[0]
+  const time = parts[1]
+  if (date === undefined || time === undefined) return 0
+  const [y, mo, d] = date.split('-').map(Number)
+  const [h, mi, s] = time.split('-').map(Number)
+  return new Date(y!, mo! - 1, d, h, mi, s).getTime()
+}
+
+/** Compare two backup file names newest-first. New-style names embed a
+ * sortable `YYYY-MM-DD_HH-MM-SS` stamp plus a trailing random suffix, so a
+ * plain descending string comparison orders by time then by creation order. */
+function compareBackupNewest(a: string, b: string): number {
+  const ka = backupSortKey(a)
+  const kb = backupSortKey(b)
+  if (ka !== kb) return kb - ka
+  return b.localeCompare(a) // same stamp: later random suffix sorts first
+}
+
 /** Restore the active vault from an encrypted backup file: validate the path
- * is one of our `vault-backup-*` files, snapshot the current state as a new
+ * is one of our `*-backups-*` files, snapshot the current state as a new
  * backup first, then copy the backup over the live file and reload the shared
  * store so both the tools and the UI see the restored entries immediately. */
 async function restoreVaultFromBackup(masterPassword: string, config: Config, backupPath: string): Promise<{ entries: number; safetyBackup: string; note: string }> {
   const target = resolveVaultPath(config)
   const backup = join(dirname(target), basename(backupPath))
-  if (!/^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(basename(backup))) {
-    throw new Error('vault_restore_backup: not a vault backup file (expected vault-backup-<timestamp>.json)')
+  if (!isBackupFile(basename(backup))) {
+    throw new Error('vault_restore_backup: not a vault backup file (expected <vault>-backups-<timestamp>.json)')
   }
   if (backup === target) throw new Error('vault_restore_backup: cannot restore the live vault file onto itself')
   const raw = await readFile(backup, 'utf8').catch(() => {
     throw new Error('vault_restore_backup: backup file not found')
   })
   // Safety snapshot of the current state before overwriting.
-  const safety = join(dirname(target), `vault-backup-${Date.now()}-pre-restore.json`)
+  const safety = join(dirname(target), backupFileName(config.name ?? 'default', new Date()).replace(/\.json$/, '-pre-restore.json'))
   const current = await readFile(target, 'utf8').catch(() => undefined)
   if (current !== undefined) {
     await writeFile(safety, current, { mode: 0o600 })
@@ -5353,4 +5575,82 @@ function stripTimestamps(entry: VaultEntry): JsonValue {
     clean[key] = value
   }
   return clean as unknown as JsonValue
+}
+
+/** Merge the entries of a backup file into the current vault. The backup is a
+ * same-password encrypted copy of the vault document, so it opens with the
+ * master password; its entries are added to the active vault, skipping titles
+ * that already exist unless `overwrite` is set. This is the "restore as copy"
+ * flow the UI offers — entries appear in the entries list instead of the whole
+ * vault being replaced. Returns counts. */
+async function mergeBackupIntoVault(masterPassword: string, config: Config, backupPath: string, overwrite = false, dryRun = false): Promise<{ added: number; skipped: number; updated: number; entries: number; note: string }> {
+  const target = resolveVaultPath(config)
+  const backup = join(dirname(target), basename(backupPath))
+  if (!isBackupFile(basename(backup))) {
+    throw new Error('vault_restore_backup: not a vault backup file (expected <vault>-backups-<timestamp>.json)')
+  }
+  const backupStore = await openVault({ masterPassword, path: backup, name: 'backup' }).catch(() => {
+    throw new Error('vault_restore_backup: could not open the backup (wrong master password or corrupt file)')
+  })
+  const active = await sharedVaultStore(masterPassword, config)
+  const sourceEntries = backupStore.list()
+  let added = 0
+  let updated = 0
+  let skipped = 0
+  for (const entry of sourceEntries) {
+    const existing = active.list().find(e => e.title === entry.title)
+    if (existing !== undefined) {
+      if (!overwrite) { skipped++; continue }
+      if (!dryRun) {
+        const patch: VaultEntryPatch = { ...stripFieldsForPatch(entry) }
+        await active.update(existing.id, patch)
+      }
+      updated++
+      continue
+    }
+    if (!dryRun) {
+      const patch = { ...stripFieldsForPatch(entry), title: entry.title }
+      await active.add(patch)
+    }
+    added++
+  }
+  const total = active.list().length
+  return {
+    added,
+    skipped,
+    updated,
+    entries: total,
+    note: `restored from backup as merge: ${added} added, ${updated} updated, ${skipped} skipped (${total} entries total${dryRun ? ' — dry run, nothing written' : ''})`,
+  }
+}
+
+/** Reduce a full entry to a patch (strip identity + timestamps, keep secrets). */
+function stripFieldsForPatch(entry: VaultEntry): VaultEntryPatch {
+  const patch: VaultEntryPatch = {
+    ...(entry.kind !== undefined ? { kind: entry.kind } : {}),
+    ...(entry.username !== undefined ? { username: entry.username } : {}),
+    ...(entry.email !== undefined ? { email: entry.email } : {}),
+    ...(entry.phone !== undefined ? { phone: entry.phone } : {}),
+    ...(entry.password !== undefined ? { password: entry.password } : {}),
+    ...(entry.host !== undefined ? { host: entry.host } : {}),
+    ...(entry.port !== undefined ? { port: entry.port } : {}),
+    ...(entry.privateKey !== undefined ? { privateKey: entry.privateKey } : {}),
+    ...(entry.apiKey !== undefined ? { apiKey: entry.apiKey } : {}),
+    ...(entry.secret !== undefined ? { secret: entry.secret } : {}),
+    ...(entry.accessToken !== undefined ? { accessToken: entry.accessToken } : {}),
+    ...(entry.refreshToken !== undefined ? { refreshToken: entry.refreshToken } : {}),
+    ...(entry.expiresAt !== undefined ? { expiresAt: entry.expiresAt } : {}),
+    ...(entry.otpSecret !== undefined ? { otpSecret: entry.otpSecret } : {}),
+    ...(entry.url !== undefined ? { url: entry.url } : {}),
+    ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
+    ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
+    ...(entry.icon !== undefined ? { icon: entry.icon } : {}),
+    ...(entry.color !== undefined ? { color: entry.color } : {}),
+    ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
+    ...(entry.favorite === true ? { favorite: true } : {}),
+    ...(entry.rotationDays !== undefined ? { rotationDays: entry.rotationDays } : {}),
+    ...(entry.fields !== undefined ? { fields: entry.fields } : {}),
+    ...(entry.cookies !== undefined ? { cookies: entry.cookies } : {}),
+  }
+  return patch
 }

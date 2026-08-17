@@ -37,7 +37,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
-      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'verifyAll',
+      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll',
     ])
   })
 })
@@ -143,23 +143,37 @@ test('VaultGateway backup/backups/restoreBackup round trip', async () => {
   await withGateway(async gateway => {
     await gateway.add({ title: 'GitHub', username: 'ada', password: 'hunter2!' })
     const bk = await gateway.backup()
-    expect(bk.path).toMatch(/vault-backup-\d+.*\.json$/)
+    expect(bk.path).toMatch(/-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/)
 
     const list = await gateway.backups(5)
     expect(list.length).toBe(1)
     expect(list[0]!.path).toBe(bk.path)
 
-    // Mutate the vault, then restore from the backup — the original entry returns.
+    // Mutate the vault, then MERGE from the backup (default): delete 'GitHub'
+    // and add 'Temp', then merge — the backup's GitHub entry comes back
+    // alongside Temp; nothing is lost.
+    const all = (await gateway.list()).entries
+    const gh = all.find(e => e.title === 'GitHub')!
+    await gateway.delete(gh.id)
     await gateway.add({ title: 'Temp', username: 'x', password: 'y' })
-    expect((await gateway.list()).entries).toHaveLength(2)
+    expect((await gateway.list()).entries).toHaveLength(1)
 
     const restored = await gateway.restoreBackup(bk.path)
-    expect(restored.entries).toBe(1)
-    expect(restored.safetyBackup).toMatch(/pre-restore\.json$/)
+    expect(restored.added).toBe(1) // GitHub copied back in
+    expect(restored.entries).toBe(2)
     const entries = (await gateway.list()).entries
-    expect(entries).toHaveLength(1)
-    expect(entries[0]!.title).toBe('GitHub')
-    expect(entries[0]!.username).toBe('ada')
+    expect(entries).toHaveLength(2)
+    expect(entries.some(e => e.title === 'GitHub' && e.username === 'ada')).toBe(true)
+    expect(entries.some(e => e.title === 'Temp')).toBe(true)
+
+    // REPLACE mode restores the old semantics: whole vault replaced.
+    const replaced = await gateway.restoreBackup(bk.path, 'replace')
+    expect(replaced.entries).toBe(1)
+    expect(replaced.safetyBackup).toMatch(/pre-restore\.json$/)
+    const after = (await gateway.list()).entries
+    expect(after).toHaveLength(1)
+    expect(after[0]!.title).toBe('GitHub')
+    expect(after[0]!.username).toBe('ada')
   })
 })
 
@@ -185,14 +199,14 @@ test('VaultGateway backup/backups follow the ACTIVE vault after switchVault', as
       const gw = ctx.get('vault') as VaultGateway
       await gw.add({ title: 'A', username: 'a', password: 'x' })
       const bk = await gw.backup()
-      expect(bk.path).toMatch(/\/vault\/vault-backup-\d+.*\.json$/)
+      expect(bk.path).toMatch(/\/vault\/[a-z]+-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/)
       expect((await gw.backups(5)).length).toBe(1)
       // Switch to a second named vault: the same backup directory is used,
       // but the backup snapshots beta's vault file.
       await gw.switchVault('beta')
       await gw.add({ title: 'B', username: 'b', password: 'y' })
       const bk2 = await gw.backup()
-      expect(bk2.path).toMatch(/\/vault\/vault-backup-\d+.*\.json$/)
+      expect(bk2.path).toMatch(/\/vault\/[a-z]+-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/)
       expect(bk2.path).not.toBe(bk.path)
       const betaList = await gw.backups(5)
       expect(betaList.some(b => b.path === bk2.path)).toBe(true)
@@ -583,4 +597,50 @@ test('gateway sessionPrune removes expired cookies and previews without writing'
     expect(after.cookies).toHaveLength(1)
     expect(after.cookies[0]!.name).toBe('live')
   })
+})
+
+test('VaultGateway vaultRename / vaultDelete manage named vaults', async () => {
+  const { unlink } = await import('node:fs/promises')
+  const { homedir } = await import('node:os')
+  const { join: j } = await import('node:path')
+  const suffix = Date.now().toString(36)
+  const a = `rn-a-${suffix}`
+  const b = `rn-b-${suffix}`
+  const base = j(homedir(), '.dsh', 'vault')
+  await unlink(j(base, `${a}.json`)).catch(() => {})
+  await unlink(j(base, `${b}.json`)).catch(() => {})
+  const ctx = new Context()
+  const prevHome = process.env.DSH_HOME
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-rn-'))
+  process.env.DSH_HOME = dir
+  try {
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(VaultGateway, { masterPassword: 'gw-test', name: a })
+    const gw = ctx.get('vault') as VaultGateway
+    await gw.add({ title: 'InA', username: 'a', password: 'x' })
+    // Rename a -> b; the vault file moves and the active name follows.
+    const renamed = await gw.vaultRename(a, b)
+    expect(renamed.renamed).toBe(true)
+    expect(renamed.vaults.some(v => v.name === b && v.active)).toBe(true)
+    expect(renamed.vaults.some(v => v.name === a)).toBe(false)
+    // Entries survive the rename.
+    const entries = (await gw.list()).entries
+    expect(entries.some(e => e.title === 'InA')).toBe(true)
+    // Delete b; active falls back to default.
+    const del = await gw.vaultDelete(b, true)
+    expect(del.deleted).toBe(true)
+    expect(del.active).toBe('default')
+    expect(del.vaults.some(v => v.name === b)).toBe(false)
+    // Deleting default is refused.
+    await expect(gw.vaultDelete('default', true)).rejects.toThrow(/default vault cannot be deleted/)
+  } finally {
+    if (prevHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = prevHome
+    resetVaultSwitch()
+    ctx.registry.delete(VaultGateway)
+    ctx.registry.delete(ToolRuntime)
+    ctx.registry.delete(SystemPrompt)
+    await rm(dir, { recursive: true, force: true })
+  }
 })

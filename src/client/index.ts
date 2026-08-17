@@ -81,7 +81,7 @@ export function apply(ctx: ClientContext): void {
     renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),
     generatorHistory: () => invoke<Array<{ password: string; at: number }>>('generatorHistory'),
     backups: (limit) => invoke<Array<{ path: string; at: number }>>('backups', { limit: limit ?? 5 }),
-    restoreBackup: (path) => invoke<{ entries: number; safetyBackup: string; note: string }>('restoreBackup', { path }),
+    restoreBackup: (path, mode, overwrite) => invoke<{ entries: number; safetyBackup: string; note: string; added?: number; skipped?: number; updated?: number }>('restoreBackup', { path, mode: mode ?? 'merge', overwrite: overwrite ?? false }),
     importChrome: (overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importChrome', { overwrite: overwrite ?? false }),
     importFirefox: (masterPassword, overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importFirefox', { masterPassword: masterPassword ?? '', overwrite: overwrite ?? false }),
     keychainImport: (options) => invoke<{ added: number; skipped: number; updated: number; note: string }>('keychainImport', { options: options ?? {} }),
@@ -115,6 +115,8 @@ export function apply(ctx: ClientContext): void {
     sessionExport: (id, format) => invoke<{ text: string; cookieCount: number; domains: string[] }>('sessionExport', { id, format: format ?? 'header' }),
     sessionGet: (id) => invoke<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>('sessionGet', { id }),
     sessionPrune: (id, preview) => invoke<{ pruned: number; remaining: number; note: string }>('sessionPrune', { id, preview: preview ?? false }),
+    vaultRename: (from, to) => invoke<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>('vaultRename', { from, to }),
+    vaultDelete: (name, confirm) => invoke<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>('vaultDelete', { name, confirm }),
   })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({

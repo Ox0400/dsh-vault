@@ -191,6 +191,8 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_unlock',
       'vault_unpin',
       'vault_update',
+      'vault_vault_delete',
+      'vault_vault_rename',
       'vault_verify',
     ])
   })
@@ -726,7 +728,7 @@ test('vault_backup writes a timestamped copy of the encrypted file', async () =>
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'Backup me', password: 'pw' })
     const r = await call(ctx, 'vault_backup', {}) as { path: string }
-    assert.ok(r.path.includes('vault-backup-'), r.path)
+    assert.ok(r.path.includes('-backups-'), r.path)
     const { readFile } = await import('node:fs/promises')
     const raw = await readFile(r.path, 'utf8')
     const parsed = JSON.parse(raw)
@@ -1448,7 +1450,7 @@ test('vault_backup_now writes an immediate backup', async () => {
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'B', password: 'pw' })
     const r = await call(ctx, 'vault_backup_now', {}) as { path: string }
-    assert.ok(r.path.includes('vault-backup-'))
+    assert.ok(r.path.includes('-backups-'))
     const { readFile } = await import('node:fs/promises')
     assert.ok(JSON.parse(await readFile(r.path, 'utf8')).entries.length >= 1)
   })
@@ -1684,7 +1686,7 @@ test('vault_backup prunes old backups beyond maxBackups', async () => {
     const { readdir } = await import('node:fs/promises')
     const { dirname } = await import('node:path')
     const dir = dirname(first.path)
-    const backups = (await readdir(dir)).filter(n => /^vault-backup-\d+(?:-[0-9a-f]{8})?\.json$/.test(n))
+    const backups = (await readdir(dir)).filter(n => /-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/.test(n))
     assert.equal(backups.length, 2, 'exactly maxBackups remain')
     assert.ok(!backups.includes(first.path.split('/').pop()!), 'oldest backup pruned')
   })
@@ -2333,7 +2335,7 @@ test('vault_rekey takes an automatic backup first', async () => {
     await call(ctx, 'vault_add', { title: 'RekeyA', password: 'pw' })
     const r = await call(ctx, 'vault_rekey', {}) as { n: number; backup: string }
     assert.ok(r.n >= 32768)
-    assert.ok(r.backup.includes('vault-backup-'), 'backup created before re-key')
+    assert.ok(r.backup.includes('-backups-'), 'backup created before re-key')
     const { readFile } = await import('node:fs/promises')
     const raw = JSON.parse(await readFile(r.backup, 'utf8'))
     assert.ok(raw.entries.length >= 1, 'backup holds entries')

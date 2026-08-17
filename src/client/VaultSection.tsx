@@ -88,7 +88,7 @@ export interface VaultSectionInjected {
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
   backups: (limit?: number) => Promise<Array<{ path: string; at: number }>>
-  restoreBackup: (path: string) => Promise<{ entries: number; safetyBackup: string; note: string }>
+  restoreBackup: (path: string, mode?: string, overwrite?: boolean) => Promise<{ entries: number; safetyBackup: string; note: string; added?: number; skipped?: number; updated?: number }>
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importFirefox: (masterPassword?: string, overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
@@ -123,6 +123,8 @@ export interface VaultSectionInjected {
   sessionExport: (id: string, format?: 'header' | 'netscape' | 'json' | 'playwright') => Promise<{ text: string; cookieCount: number; domains: string[] }>
   sessionGet: (id: string) => Promise<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string }>
   sessionPrune: (id: string, preview?: boolean) => Promise<{ pruned: number; remaining: number; note: string }>
+  vaultRename: (from: string, to: string) => Promise<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
+  vaultDelete: (name: string, confirm: boolean) => Promise<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
 }
 
 /** Type-level alias so consumers can reference the wire shapes without values. */
@@ -232,7 +234,7 @@ function emptyForm(): FormFields {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -352,6 +354,44 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       void backupStatus().then(bk => setBackupInfo(bk)).catch(() => {})
       void refresh()
       status().then(value => setLocked(value.locked)).catch(() => {})
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Rename the active (or picked) vault. */
+  async function runVaultRename(): Promise<void> {
+    const current = vaults.find(v => v.active)?.name ?? 'default'
+    const target = window.prompt(`${t('vaultRenamePrompt')} (${current})`)
+    if (target === null || target.trim() === '' || target.trim() === current) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await vaultRename(current, target.trim())
+      setMessage(r.note)
+      await listVaults().then(setVaults)
+      void refresh()
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Delete a picked vault (confirms first; default vault cannot be deleted). */
+  async function runVaultDelete(name: string): Promise<void> {
+    if (name === 'default') { setMessage(t('vaultDeleteDefault')); return }
+    if (!window.confirm(t('vaultDeleteConfirm').replace('{name}', name))) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await vaultDelete(name, true)
+      setMessage(r.note)
+      await listVaults().then(setVaults)
+      void backups(20).then(setBackupList).catch(() => {})
+      void refresh()
     } catch {
       setMessage(t('error'))
     } finally {
@@ -661,11 +701,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   /** Restore the vault from a backup file (asks for confirmation first). */
   async function restoreBackupFrom(b: { path: string; at: number }): Promise<void> {
-    if (!window.confirm(t('backupRestoreConfirm'))) return
+    const mode = window.confirm(t('backupRestoreModeMerge'))
+      ? 'merge'
+      : window.confirm(t('backupRestoreModeReplace')) ? 'replace' : null
+    if (mode === null) return
     setBusy(true)
     setMessage(null)
     try {
-      const result = await restoreBackup(b.path)
+      const result = await restoreBackup(b.path, mode)
       setMessage(result.note)
       setBackupInfo(null)
       void backups(20).then(setBackupList).catch(() => {})
@@ -1225,6 +1268,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             ))}
           </select>
         )}
+        <button type="button" className={css.dupMerge} onClick={() => void runVaultRename()} disabled={busy || locked} title={t('vaultRename')}>{t('vaultRename')}</button>
+        {vaults.filter(v => v.name !== 'default').map(v => (
+          <button key={v.name} type="button" className={css.dangerButton} onClick={() => void runVaultDelete(v.name)} disabled={busy || locked} title={t('vaultDelete')}>{t('vaultDelete')} {v.name}</button>
+        ))}
         <label className={css.searchBox}>
           <span className={css.srOnly}>{t('searchPlaceholder')}</span>
           <input
