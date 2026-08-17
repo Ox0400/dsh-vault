@@ -33,6 +33,7 @@ import { checkPassword } from './breach.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { analyzeVault, analyzeEntry } from './watchtower.ts'
+import { matchScore, normalizedHost } from './urlmatch.ts'
 import { openSession, collectSessionCookies, closeSession, openSessionCount, listSessions, cookieHeader, netscapeJar, parseNetscapeJar, pruneExpiredCookies, countExpiredCookies, countExpiringCookies } from './session.ts'
 import { readFirefoxLogins } from './firefox.ts'
 import { readKdbx, describeKdbxKdf } from './kdbx.ts'
@@ -2123,25 +2124,55 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     output: { schema: { type: 'object', additionalProperties: false, properties: { found: { type: 'boolean', required: true }, entry: { type: 'json' } } }, render: (_a, v) => [{ type: 'text', text: v.found ? `credentials available for ${(v.entry as { title?: string })?.title ?? 'entry'}` : 'no credentials for this target' }] },
     async execute(args) {
       const s = await guardStore()
-      const target = args.target.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '')
+      const target = args.target.trim()
       if (target.length === 0) return { found: false }
       let best: VaultEntry | undefined
+      let bestScore = 0
       for (const e of s.list()) {
-        const host = (e.host ?? '').toLowerCase()
-        const url = (e.url ?? '').toLowerCase()
-        const hostBase = host.split(':')[0] ?? ''
-        const matches = (host.length > 0 && host.includes(target))
-          || (url.length > 0 && url.includes(target))
-          || (hostBase.length > 0 && target.includes(hostBase))
-        if (matches) {
-          if (best === undefined || host.length > (best.host ?? '').length) best = e
+        const hostScore = e.host !== undefined ? matchScore(target, e.host) : 0
+        const urlScore = e.url !== undefined ? matchScore(target, e.url) : 0
+        const score = Math.max(hostScore, urlScore)
+        if (score > bestScore) {
+          bestScore = score
+          best = e
         }
       }
-      if (best === undefined) return { found: false }
+      if (best === undefined || bestScore === 0) return { found: false }
       const summary: Record<string, string> = { id: best.id, title: best.title, kind: best.kind ?? 'login' }
       const identity = best.username ?? best.email
       if (identity !== undefined) summary.username = identity
       return { found: true, entry: summary as unknown as JsonValue }
+    },
+  }))
+
+  // ── vault_match_url: find login entries matching a URL ─────────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_match_url',
+    description: 'Find the login entries whose stored URL/host best match a target URL (Bitwarden/'
+      + '1Password-style URL matching): exact host, subdomain, parent domain, and path-prefix are '
+      + 'recognized, with www./port normalization. Returns ranked candidates (id/title/username — '
+      + 'never the password) plus a 0–100 score so the caller can pick the best or drive automation.',
+    parameters: { url: { type: 'string', required: true, description: 'Target URL, e.g. "https://mail.example.com/inbox".' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { matches: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} match(es)` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const target = args.url.trim()
+      if (target.length === 0) return { matches: [], count: 0 }
+      const scored: Array<{ score: number; entry: VaultEntry }> = []
+      for (const e of s.list()) {
+        const hostScore = e.host !== undefined ? matchScore(target, e.host) : 0
+        const urlScore = e.url !== undefined ? matchScore(target, e.url) : 0
+        const score = Math.max(hostScore, urlScore)
+        if (score > 0) scored.push({ score, entry: e })
+      }
+      scored.sort((a, b) => b.score - a.score)
+      const matches = scored.map(({ score, entry }) => {
+        const m: Record<string, unknown> = { id: entry.id, title: entry.title, kind: entry.kind ?? 'login', score }
+        const identity = entry.username ?? entry.email
+        if (identity !== undefined) m.username = identity
+        return m
+      })
+      return { matches: matches as unknown as JsonValue[], count: matches.length }
     },
   }))
 

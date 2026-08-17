@@ -155,6 +155,7 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_list',
       'vault_lock',
       'vault_mask',
+      'vault_match_url',
       'vault_merge',
       'vault_migrate_keepass',
       'vault_note_secret',
@@ -3205,5 +3206,22 @@ test('vault_recovery_code / vault_verify_recovery / vault_recovery_status round 
     assert.equal(ok.verified, true)
     const bad = await call(ctx, 'vault_verify_recovery', { code: 'nope-nope' }) as { verified: boolean }
     assert.equal(bad.verified, false)
+  })
+})
+
+test('vault_match_url ranks candidates by URL and autofill_check uses fuzzy match', async () => {
+  await withContext(async ctx => {
+    await call(ctx, 'vault_add', { title: 'GitHub', username: 'ada', password: 'pw', url: 'https://github.com' })
+    await call(ctx, 'vault_add', { title: 'GitHub Login', username: 'ada2', password: 'pw2', url: 'https://github.com/login' })
+    await call(ctx, 'vault_add', { title: 'Other', username: 'x', password: 'pw3', url: 'https://other.org' })
+    const m = await call(ctx, 'vault_match_url', { url: 'https://github.com/settings' }) as { matches: Array<{ title: string; score: number }> }
+    expect(m.matches.length).toBe(2)
+    // Exact-host entries outrank nothing; both github entries match by host.
+    expect(m.matches.every(x => x.title.startsWith('GitHub'))).toBe(true)
+    const check = await call(ctx, 'vault_autofill_check', { target: 'https://mail.github.com' }) as { found: boolean }
+    // Subdomain of github.com matches the stored host.
+    expect(check.found).toBe(true)
+    const none = await call(ctx, 'vault_autofill_check', { target: 'https://example.com' }) as { found: boolean }
+    expect(none.found).toBe(false)
   })
 })
