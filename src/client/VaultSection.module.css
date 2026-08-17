@@ -403,6 +403,7 @@
   padding: 4px 10px;
 }
 .backupButton {
+  align-self: flex-start;
   border: 1px solid var(--dsh-color-border, #ccc);
   border-radius: 999px;
   background: var(--dsh-color-surface-2, #f7f7f8);
