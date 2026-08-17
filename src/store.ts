@@ -132,6 +132,9 @@ export interface VaultEntry {
   /** Browser session cookies (kind `cookie`): the cookies collected after a
    * login, stored as structured CookieData rows. */
   cookies?: CookieData[]
+  /** Password history (1Password/Bitwarden-style): previous passwords with
+   * the epoch millis when each was superseded. Newest first, capped. */
+  passwordHistory?: Array<{ password: string; at: number }>
   /** Arbitrary additional key/value fields (e.g. region, username hint). */
   fields?: Record<string, FieldValue>
   /** Creation epoch millis. */
@@ -218,6 +221,8 @@ export class VaultStore {
   private locked = false
   /** Weak-password heuristic: too short or in a tiny common list. */
   private static readonly MIN_PASSWORD_LENGTH = 12
+  /** How many previous passwords to keep per entry (1Password-style). */
+  private static readonly MAX_PASSWORD_HISTORY = 10
   /** In-process mutation history (audit trail): newest last, capped. */
   private readonly history: Array<{ action: string; id?: string; title?: string; at: number }> = []
   private static readonly HISTORY_CAP = 100
@@ -457,6 +462,21 @@ export class VaultStore {
     if ('expiresAt' in patch && (patch.expiresAt ?? 0) === 0) {
       delete record2.expiresAt
     }
+    // Password history: when the password changes (to a different non-empty
+    // value), record the old one (1Password/Bitwarden-style). Keep the newest
+    // MAX_PASSWORD_HISTORY entries.
+    if ('password' in patch && typeof patch.password === 'string' && patch.password.length > 0
+      && current.password !== undefined && current.password !== patch.password) {
+      // Monotonic timestamp: rapid back-to-back updates can share a millisecond,
+      // which would make the newest-first sort unstable. Clamp to one more than
+      // the newest existing stamp so order is deterministic.
+      const newest = (current.passwordHistory ?? []).reduce((m, h) => Math.max(m, h.at), 0)
+      const at = Math.max(Date.now(), newest + 1)
+      const history = [...(current.passwordHistory ?? []), { password: current.password, at }]
+        .sort((a, b) => b.at - a.at)
+        .slice(0, VaultStore.MAX_PASSWORD_HISTORY)
+      updated.passwordHistory = history
+    }
     // `updated` is the same object stored in the map, so the deletes above
     // already took effect in place.
     this.recordHistory('update', id, updated.title)
@@ -649,6 +669,33 @@ export class VaultStore {
     entry.updatedAt = Date.now()
     await this.persist()
     return entry
+  }
+
+  /** The password history of an entry (newest first), or [] when none. */
+  passwordHistoryOf(id: string): Array<{ password: string; at: number }> {
+    const entry = this.entries.get(id)
+    if (!entry) return []
+    return [...(entry.passwordHistory ?? [])].sort((a, b) => b.at - a.at)
+  }
+
+  /** Roll the entry's password back to a stored history entry (by `at` epoch
+   * millis). The current password is pushed onto the history first (so the
+   * rollback itself is reversible). Returns the updated entry. */
+  async rollbackPassword(id: string, at: number): Promise<VaultEntry | undefined> {
+    const entry = this.entries.get(id)
+    if (!entry) return undefined
+    const history = [...(entry.passwordHistory ?? [])].sort((a, b) => b.at - a.at)
+    const target = history.find(h => h.at === at)
+    if (target === undefined) return undefined
+    const currentPassword = entry.password
+    const next = [...history.filter(h => h.at !== at), ...(currentPassword !== undefined ? [{ password: currentPassword, at: Date.now() }] : [])]
+      .sort((a, b) => b.at - a.at)
+      .slice(0, VaultStore.MAX_PASSWORD_HISTORY)
+    const updated = { ...entry, password: target.password, passwordHistory: next, updatedAt: Date.now() }
+    this.entries.set(id, updated)
+    this.recordHistory('rollback', id, updated.title)
+    await this.persist()
+    return updated
   }
 
   /** Activity within the last `windowMs`: entries created, updated, or
@@ -1091,6 +1138,13 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
           || typeof (c as { value?: unknown }).value !== 'string'
           || typeof (c as { domain?: unknown }).domain !== 'string')) {
           throw new Error('vault: cookies must be an array of { name, value, domain, … }')
+        }
+        break
+      case 'passwordHistory':
+        if (!Array.isArray(value) || value.some(h => typeof h !== 'object' || h === null
+          || typeof (h as { password?: unknown }).password !== 'string'
+          || typeof (h as { at?: unknown }).at !== 'number')) {
+          throw new Error('vault: passwordHistory must be an array of { password, at }')
         }
         break
       case 'fields':

@@ -578,3 +578,43 @@ test('store: 1000-entry vault stays fast for list/search/stats', async () => {
     assert.ok(statsMs < 100, `stats ${statsMs}ms`)
   })
 })
+
+test('store: password history records changes and supports rollback', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-ph-'))
+  const { openVault } = await import('../src/store')
+  const path = join(dir, 'vault.json')
+  const store = await openVault({ masterPassword: 'pw', path })
+  const entry = await store.add({ title: 'Hist', username: 'u', password: 'pass-1' })
+  // Two rotations push the old passwords onto the history.
+  await store.update(entry.id, { password: 'pass-2' })
+  await store.update(entry.id, { password: 'pass-3' })
+  const history = store.passwordHistoryOf(entry.id)
+  expect(history).toHaveLength(2)
+  expect(history[0]!.password).toBe('pass-2') // newest first
+  expect(history[1]!.password).toBe('pass-1')
+  // Rollback to pass-1: current pass-3 goes onto the history, pass-1 returns.
+  const target = history.find(h => h.password === 'pass-1')!
+  const rolled = await store.rollbackPassword(entry.id, target.at)
+  expect(rolled?.password).toBe('pass-1')
+  const after = store.passwordHistoryOf(entry.id)
+  expect(after.some(h => h.password === 'pass-3')).toBe(true) // current was archived
+  // Rolling back to a non-existent entry is a no-op.
+  expect(await store.rollbackPassword(entry.id, 12345)).toBeUndefined()
+  await rm(dir, { recursive: true, force: true })
+})
+
+test('store: password history caps at 10 and persists', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-phcap-'))
+  const { openVault } = await import('../src/store')
+  const path = join(dir, 'vault.json')
+  const store = await openVault({ masterPassword: 'pw', path })
+  const entry = await store.add({ title: 'Cap', password: 'p-0' })
+  for (let i = 1; i <= 15; i++) await store.update(entry.id, { password: `p-${i}` })
+  const history = store.passwordHistoryOf(entry.id)
+  expect(history.length).toBe(10)
+  // Reload from disk: history survives.
+  const store2 = await openVault({ masterPassword: 'pw', path })
+  const reloaded = store2.passwordHistoryOf(entry.id)
+  expect(reloaded).toHaveLength(10)
+  await rm(dir, { recursive: true, force: true })
+})

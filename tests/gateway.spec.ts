@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'update', 'vaultDelete', 'vaultRename', 'verifyAll',
     ])
   })
@@ -659,5 +659,25 @@ test('backup files do not appear as vaults and can be deleted', async () => {
     expect(del.deleted).toBe(true)
     const remaining = await gateway.backups(20)
     expect(remaining.some(b => b.path === bk.path)).toBe(false)
+  })
+})
+
+test('VaultGateway passwordHistory / passwordRollback round trip', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'HistGW', username: 'u', password: 'v1' })
+    await gateway.update(added.id, { password: 'v2' })
+    await gateway.update(added.id, { password: 'v3' })
+    const history = await gateway.passwordHistory(added.id)
+    expect(history).toHaveLength(2)
+    expect(history[0]!.password).toBe('v2')
+    const target = history.find(h => h.password === 'v1')!
+    const rolled = await gateway.passwordRollback(added.id, target.at)
+    expect(rolled.rolledBack).toBe(true)
+    expect(rolled.password).toBe('v1')
+    const full = await gateway.get(added.id)
+    expect(full.entry?.password).toBe('v1')
+    // Rolling back to a missing history entry fails cleanly.
+    const missing = await gateway.passwordRollback(added.id, 999999)
+    expect(missing.rolledBack).toBe(false)
   })
 })

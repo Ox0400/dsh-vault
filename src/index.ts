@@ -1283,6 +1283,47 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
+  // ── vault_password_history: list an entry's previous passwords ────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_password_history',
+    description: 'List the password history of an entry (1Password/Bitwarden-style): previous '
+      + 'passwords with the time each was superseded, newest first, capped at 10. The current '
+      + 'password is NOT included (use vault_get for that). Use vault_password_rollback to restore '
+      + 'an old password.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { history: { type: 'array', required: true, items: { type: 'json' } }, count: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `${v.count} previous password(s)` }] },
+    async execute(args) {
+      const s = await guardStore()
+      const history = s.passwordHistoryOf(args.id)
+      return { history: history as unknown as JsonValue[], count: history.length }
+    },
+  }))
+
+  // ── vault_password_rollback: restore a previous password ──────────────────
+  ctx.tools.register(defineTool({
+    name: 'vault_password_rollback',
+    description: 'Roll an entry\'s password back to a stored history entry (see vault_password_history '
+      + 'for the `at` values). The current password is pushed onto the history first, so the rollback '
+      + 'itself is reversible. Returns the restored password.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Entry id.' },
+      at: { type: 'integer', required: true, description: 'Epoch millis of the history entry to restore (from vault_password_history).' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { rolledBack: { type: 'boolean', required: true }, password: { type: 'string' } } }, render: (_a, v) => [{ type: 'text', text: v.rolledBack ? 'password rolled back' : 'history entry not found' }] },
+    async execute(args) {
+      assertWritable('vault_password_rollback')
+      const s = await guardStore()
+      const entry = s.get(args.id)
+      if (!entry) return { rolledBack: false }
+      const updated = await s.rollbackPassword(args.id, args.at)
+      if (updated === undefined || updated.password === undefined) return { rolledBack: false }
+      emitAudit('write', 'vault_password_rollback', entry.id, entry.title)
+      return { rolledBack: true, password: updated.password }
+    },
+  }))
+
   // ── vault_duplicates: exact-title+kind duplicates ───────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_duplicates',
@@ -4847,6 +4888,25 @@ export class VaultGateway extends TypertRemoteService {
       ...(label !== undefined ? { label } : {}),
       secondsRemaining: 30 - (Math.floor(nowMs / 1000) % 30),
     }
+  }
+
+  /** Password history of an entry (newest first; current password excluded). */
+  @Remote('passwordHistory')
+  async passwordHistory(id: string): Promise<Array<{ password: string; at: number }>> {
+    const store = await this.guardedStore()
+    return store.passwordHistoryOf(id)
+  }
+
+  /** Roll the entry password back to a stored history entry. */
+  @Remote('passwordRollback')
+  async passwordRollback(id: string, at: number): Promise<{ rolledBack: boolean; password?: string }> {
+    this.assertWritable('passwordRollback')
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) return { rolledBack: false }
+    const updated = await store.rollbackPassword(id, at)
+    if (updated === undefined || updated.password === undefined) return { rolledBack: false }
+    return { rolledBack: true, password: updated.password }
   }
 
   /** Open a headed browser login session; returns the session handle. */

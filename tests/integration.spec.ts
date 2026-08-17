@@ -154,6 +154,8 @@ test('dsh-vault registers all tools in the registry', async () => {
       'vault_migrate_keepass',
       'vault_note_secret',
       'vault_notes',
+      'vault_password_history',
+      'vault_password_rollback',
       'vault_pin',
       'vault_purge',
       'vault_quick_add',
@@ -3039,5 +3041,25 @@ test('vault_session_list reports expiringSoon counts', async () => {
     const listed = await call(ctx, 'vault_session_list', {}) as { sessions: Array<{ expiringSoon?: number; expiredCount?: number }> }
     expect(listed.sessions[0]!.expiringSoon).toBe(1)
     expect(listed.sessions[0]!.expiredCount).toBe(0)
+  })
+})
+
+test('vault_password_history and vault_password_rollback round trip', async () => {
+  await withContext(async ctx => {
+    const a = await call(ctx, 'vault_add', { title: 'HistTool', username: 'u', password: 'one' }) as { id: string }
+    await call(ctx, 'vault_update', { id: a.id, password: 'two' })
+    await call(ctx, 'vault_update', { id: a.id, password: 'three' })
+    const hist = await call(ctx, 'vault_password_history', { id: a.id }) as { history: Array<{ password: string; at: number }> }
+    assert.equal(hist.history.length, 2)
+    assert.equal(hist.history[0]!.password, 'two')
+    const target = hist.history.find(h => h.password === 'one')!
+    const rolled = await call(ctx, 'vault_password_rollback', { id: a.id, at: target.at }) as { rolledBack: boolean; password: string }
+    assert.equal(rolled.rolledBack, true)
+    assert.equal(rolled.password, 'one')
+    const full = await call(ctx, 'vault_get', { id: a.id }) as { entry: { password: string } }
+    assert.equal(full.entry.password, 'one')
+    // Bad rollback target is a clean failure.
+    const bad = await call(ctx, 'vault_password_rollback', { id: a.id, at: 999999 }) as { rolledBack: boolean }
+    assert.equal(bad.rolledBack, false)
   })
 })

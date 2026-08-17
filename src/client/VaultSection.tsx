@@ -316,7 +316,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     return () => window.clearTimeout(timer)
   }, [form.password, strength])
 
-  /** Apply a template's field values to the current form. */
+  /** Apply a template's field values to the current form. The form is reset
+   * to its empty state first (so fields the template does not set are cleared
+   * rather than leaking the previous template's values), then the template's
+   * fields are applied. Secret-ish fields are never filled from a template. */
   function applyTemplate(name: string): void {
     const tpl = tplList.find(t => t.name === name)
     if (!tpl) return
@@ -326,7 +329,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       if (key === 'password' || key === 'otpSecret' || key === 'apiKey' || key === 'secret') continue
       ;(next as Record<string, unknown>)[key] = value
     }
-    setForm(previous => ({ ...previous, ...next }))
+    // Start from a clean form so switching templates never leaves stale values
+    // from the previous template behind (the user's reported UX bug).
+    setForm({ ...emptyForm(), ...next })
+  }
+
+  /** Change the entry kind. When CREATING a new entry, unrelated fields from
+   * the previous kind are cleared so the form does not carry stale values; when
+   * EDITING an existing entry the other fields are kept (they may be valid for
+   * the new kind too, and clearing would risk data loss). */
+  function changeKind(kind: string): void {
+    setForm(previous => {
+      if (editor.status === 'creating') {
+        return { ...emptyForm(), kind }
+      }
+      return { ...previous, kind }
+    })
   }
 
   /** Save the current form as a reusable template. */
@@ -2117,7 +2135,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 {field.key === 'kind' ? (
                   <select
                     value={form.kind ?? 'login'}
-                    onChange={event => setForm(previous => ({ ...previous, kind: event.target.value }))}
+                    onChange={event => changeKind(event.target.value)}
                   >
                     {Object.entries(KIND_KEYS).map(([value, key]) => (
                       <option key={value} value={value}>{t(key)}</option>
