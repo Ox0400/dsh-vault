@@ -53,6 +53,8 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_totp` | Generate the current 6-digit code for a stored otpSecret (or a bare Base32 / otpauth URI) |
 | `vault_generate_password` | Generate a strong random password (length/classes/grouping) **or a memorable passphrase** (`passphrase: true`, EFF-style word list, `words`/`separator`/`wordDigits`) |
 | `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
+| `vault_password_history` | List an entry's previous passwords (1Password/Bitwarden-style, newest first, capped at 10; current password excluded) |
+| `vault_password_rollback` | Restore an entry password to a stored history entry (current password is archived first, so it is reversible) |
 | `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
 | `vault_backup` | Timestamped encrypted backup with retention; optional `note` |
 | `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
