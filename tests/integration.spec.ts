@@ -3225,3 +3225,10 @@ test('vault_match_url ranks candidates by URL and autofill_check uses fuzzy matc
     expect(none.found).toBe(false)
   })
 })
+
+test('vault_templates action=list returns an array of custom templates', async () => {
+  await withContext(async ctx => {
+    const r = await call(ctx, 'vault_templates', { action: 'list' }) as { templates: unknown[] }
+    assert.ok(Array.isArray(r.templates))
+  })
+})

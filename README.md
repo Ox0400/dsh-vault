@@ -103,7 +103,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_session_close` | Close an open browser login session (collected cookies stay in the vault) |
 | `vault_session_prune` | Remove expired cookies from a saved session (session cookies are kept); `preview: true` reports without writing |
 | `vault_copy` | Copy an entry (secrets included) into another named vault |
-| `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
+| `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style; built-ins now include Wi-Fi, Server, Database, Identity, Bank account, Card (1Password-inspired) | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
 
 **Typical workflows**: store an SSH credential (`kind: ssh` + host/port/username/password or privateKey) and have the model `vault_search` for the host then `vault_get` the connection details; keep `api-key`/`oauth` entries for API-gateway access/refresh token rotation.
 

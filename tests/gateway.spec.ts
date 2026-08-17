@@ -765,3 +765,15 @@ test('VaultGateway recovery code generate → verify → status', async () => {
     expect(typeof status1.issuedAt).toBe('number')
   })
 })
+
+test('VaultGateway templates includes new built-ins (wifi/server/database/card)', async () => {
+  await withGateway(async gateway => {
+    const tpls = await gateway.templates()
+    const builtin = tpls.filter(t => t.name.startsWith('builtin:'))
+    for (const want of ['builtin:wifi', 'builtin:server', 'builtin:database', 'builtin:card', 'builtin:bank']) {
+      expect(builtin.some(t => t.name === want)).toBe(true)
+    }
+    const wifi = builtin.find(t => t.name === 'builtin:wifi')!
+    expect(wifi.fields.password).toBeDefined()
+  })
+})

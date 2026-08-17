@@ -248,6 +248,17 @@ function emptyForm(): FormFields {
   return { title: '', kind: 'login', username: '', email: '', phone: '', password: '', host: '', port: '', icon: '', color: '' }
 }
 
+/** Human label for a built-in template name (`builtin:wifi` → Wi-Fi). */
+function templateLabel(name: string): string {
+  const labels: Record<string, string> = {
+    'builtin:login': 'Login', 'builtin:ssh': 'SSH', 'builtin:api-key': 'API key',
+    'builtin:oauth': 'OAuth', 'builtin:secret': 'Secret', 'builtin:card': 'Card',
+    'builtin:wifi': 'Wi-Fi', 'builtin:server': 'Server', 'builtin:database': 'Database',
+    'builtin:identity': 'Identity', 'builtin:bank': 'Bank account', 'builtin:custom': 'Custom',
+  }
+  return labels[name] ?? name
+}
+
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
   const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus } = props
@@ -2232,7 +2243,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   onChange={event => { const v = event.target.value; if (v) applyTemplate(v) }}
                 >
                   <option value="">—</option>
-                  {tplList.map(tpl => <option key={tpl.name} value={tpl.name}>{tpl.name}</option>)}
+                  {tplList.map(tpl => <option key={tpl.name} value={tpl.name}>{templateLabel(tpl.name)}</option>)}
                 </select>
               </label>
               {editor.status === 'editing' && (

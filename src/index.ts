@@ -105,6 +105,12 @@ const TEMPLATES: Record<string, Record<string, string>> = {
   'api-key': { apiKey: 'the API key', url: 'API base URL', username: 'owner/account (optional)' },
   oauth: { accessToken: 'access token', refreshToken: 'refresh token', expiresAt: 'expiry epoch millis', clientId: 'client id (via fields)', scope: 'granted scopes (via fields)', tokenUrl: 'token endpoint (via fields)' },
   secret: { secret: 'the shared secret', notes: 'what it is for' },
+  card: { cardNumber: 'card number', cardExpiry: 'expiry (MM/YY)', cardCvv: 'CVV', cardHolder: 'card holder name' },
+  wifi: { username: 'network name (SSID)', password: 'Wi-Fi password', host: 'security type (WPA2/WPA3/open, via fields)' },
+  server: { host: 'server address', port: 'port (e.g. 22/3306/5432)', username: 'login user', password: 'password or key passphrase', privateKey: 'PEM private key (optional)' },
+  database: { host: 'database host', port: 'port (e.g. 3306/5432/6379)', username: 'database user', password: 'database password', url: 'connection URL (optional)' },
+  identity: { username: 'full name', email: 'email address', phone: 'phone number', url: 'ID number (via fields)' },
+  bank: { cardHolder: 'account holder', cardNumber: 'account number', cardExpiry: 'routing number (via fields)', url: 'bank website' },
   custom: { fields: 'arbitrary key/value pairs' },
 }
 
