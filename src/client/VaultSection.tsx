@@ -531,10 +531,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Preview a file-based import: prompt for the path, then dry-run. */
-  async function runFilePreview(promptKey: string, run: (path: string) => Promise<{ note: string }>): Promise<void> {
+  async function runFilePreview(promptKey: string, run: (path: string, overwrite: boolean, dryRun: boolean) => Promise<{ note: string }>): Promise<void> {
     const path = window.prompt(t(promptKey as never))
     if (path === null || path.trim() === '') return
-    await runImportPreview(() => run(path.trim()))
+    await runImportPreview(() => run(path.trim(), false, true))
   }
 
   /** Import a password-manager CSV file (Dashlane/NordPass/Keeper). */
