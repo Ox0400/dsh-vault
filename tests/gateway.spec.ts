@@ -70,6 +70,23 @@ test('VaultGateway add/list/get/search/update/delete round trip', async () => {
   })
 })
 
+test('VaultGateway summary carries custom fields for the detail view', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'WithFields', kind: 'custom', fields: { region: 'us-east-1', team: 'infra' } })
+    // Summary (list/search) exposes the fields so the UI detail view can show them.
+    const list = await gateway.list()
+    const inList = list.entries.find(e => e.id === added.id)
+    expect(inList?.fields).toEqual({ region: 'us-east-1', team: 'infra' })
+    const search = await gateway.search('WithFields', 10)
+    const inSearch = search.entries.find(e => e.id === added.id)
+    expect(inSearch?.fields?.team).toBe('infra')
+    // Entries without fields carry no fields key at all.
+    const plain = await gateway.add({ title: 'NoFields' })
+    const plainInList = (await gateway.list()).entries.find(e => e.id === plain.id)
+    expect(plainInList?.fields).toBeUndefined()
+  })
+})
+
 test('VaultGateway totp uses a stored secret', async () => {
   await withGateway(async gateway => {
     const added = await gateway.add({ title: '2FA', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })

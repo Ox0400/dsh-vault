@@ -172,7 +172,7 @@ export interface VaultEntry {
 export type VaultEntrySummary = Pick<
   VaultEntry,
   'id' | 'title' | 'kind' | 'sensitivity' | 'favorite' | 'username' | 'email' | 'phone' | 'host' | 'port' | 'url' | 'tags' | 'icon' | 'color'
-> & { updatedAt?: number; createdAt?: number; cookieCount?: number; cardExpiry?: string; cardHolder?: string }
+> & { updatedAt?: number; createdAt?: number; cookieCount?: number; cardExpiry?: string; cardHolder?: string; fields?: Record<string, FieldValue> }
 
 /** The fields `vault_update` may change, mirroring the entry minus identity/timestamps. */
 export type VaultEntryPatch = Partial<Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt'>>
@@ -1108,6 +1108,7 @@ function toSummary(entry: VaultEntry): VaultEntrySummary {
     ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
     ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
     ...(Array.isArray(entry.cookies) ? { cookieCount: entry.cookies.length } : {}),
+    ...(entry.fields !== undefined && Object.keys(entry.fields).length > 0 ? { fields: entry.fields } : {}),
   }
 }
 

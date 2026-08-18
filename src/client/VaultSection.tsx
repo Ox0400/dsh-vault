@@ -1403,6 +1403,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     if (key === 'sensitivity' && value === 'high') return t('sensitivityHigh')
     if (key === 'kind') return t(KIND_KEYS[String(value)] ?? 'kindCustom')
     if (Array.isArray(value)) return value.join(', ')
+    if (key === 'fields' && typeof value === 'object' && value !== null) {
+      return Object.entries(value as Record<string, string>).map(([k, v]) => `${k}: ${String(v)}`).join(', ')
+    }
     if (typeof value === 'object' && value !== null) return JSON.stringify(value)
     return String(value)
   }

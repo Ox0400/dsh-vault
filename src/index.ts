@@ -5251,7 +5251,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('search')
   async search(query: string, limit: number): Promise<{ entries: VaultEntrySummaryWire[] }> {
     const store = await this.guardedStore()
-    return { entries: store.search(query, limit) }
+    return { entries: store.search(query, limit).map(toSummary) }
   }
 
   /** Add a new entry; returns its id and summary. */
@@ -5468,6 +5468,8 @@ export type VaultEntrySummaryWire = {
   color?: string
   cardExpiry?: string
   cardHolder?: string
+  /** Custom key/value fields (non-secret metadata the user chose to store). */
+  fields?: Record<string, string>
   updatedAt?: number
 }
 
@@ -5494,6 +5496,9 @@ function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire
     ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
     ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
     ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
+    ...(entry.fields !== undefined && Object.keys(entry.fields).length > 0
+      ? { fields: Object.fromEntries(Object.entries(entry.fields).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])) as Record<string, string> }
+      : {}),
   }
 }
 
