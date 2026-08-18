@@ -24,6 +24,8 @@ export interface VaultSummaryWire {
   tags?: string[]
   icon?: string
   color?: string
+  fields?: Record<string, string>
+  createdAt?: number
   updatedAt?: number
 }
 
@@ -301,7 +303,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
-  const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'favorite' | 'smart'>('alpha')
+  const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -1519,11 +1521,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <select
           className={css.sortButton}
           value={sortBy}
-          onChange={event => setSortBy(event.target.value as 'alpha' | 'recent' | 'favorite' | 'smart')}
+          onChange={event => setSortBy(event.target.value as 'alpha' | 'recent' | 'created' | 'favorite' | 'smart')}
           aria-label={t('sortBy')}
         >
           <option value="alpha">{t('sortAlpha')}</option>
           <option value="recent">{t('sortRecent')}</option>
+          <option value="created">{t('sortCreated')}</option>
           <option value="favorite">{t('sortFavorite')}</option>
           <option value="smart">{t('sortSmart')}</option>
         </select>
@@ -2139,7 +2142,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {filteredCount(state.entries, kindFilter, tagFilter) === 0 && (
             <li className={css.empty}>{t('noFiltered')}</li>
           )}
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0

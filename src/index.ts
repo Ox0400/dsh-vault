@@ -5478,6 +5478,7 @@ export type VaultEntrySummaryWire = {
   cardHolder?: string
   /** Custom key/value fields (non-secret metadata the user chose to store). */
   fields?: Record<string, string>
+  createdAt?: number
   updatedAt?: number
 }
 
@@ -5489,6 +5490,7 @@ function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire
   return {
     id: entry.id,
     title: entry.title,
+    ...(entry.createdAt !== undefined ? { createdAt: entry.createdAt } : {}),
     ...(entry.updatedAt !== undefined ? { updatedAt: entry.updatedAt } : {}),
     ...(entry.sensitivity !== undefined ? { sensitivity: entry.sensitivity } : {}),
     ...(entry.favorite !== undefined ? { favorite: entry.favorite } : {}),
