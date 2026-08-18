@@ -1225,8 +1225,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       }
       if (editor.status === 'creating') {
         await add(patch as VaultPatch & { title: string })
+        setMessage(t('savedNew'))
       } else if (editor.status === 'editing') {
         await update(editor.entry.id, patch)
+        setMessage(t('savedUpdated'))
       }
       setEditor({ status: 'closed' })
       await refresh()
