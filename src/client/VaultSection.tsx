@@ -2169,6 +2169,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                           className={css.revealButton}
                           title={t('copyFieldHint')}
                           onClick={() => void copyValue(entry.id, Array.isArray(v) ? v.join(', ') : String(v))}
+                          disabled={locked}
                         >⧉</button>
                       </span>
                     ))}
@@ -2179,7 +2180,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   <button
                     type="button"
                     onClick={() => void copyValue(entry.id, entry.username ?? entry.title)}
-                    disabled={busy}
+                    disabled={busy || readonly || locked}
                   >{t('copy')}</button>
                   <button
                     type="button"
@@ -2192,10 +2193,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     }}
                     disabled={busy || readonly || locked}
                   >{t('copyPassword')}</button>
-                  <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
-                  <button type="button" onClick={() => void showTotpUri(entry.id)} disabled={busy} title={t('totpUriHint')}>{t('totpUri')}</button>
+                  <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy || locked}>{t('totp')}</button>
+                  <button type="button" onClick={() => void showTotpUri(entry.id)} disabled={busy || locked} title={t('totpUriHint')}>{t('totpUri')}</button>
                   {code !== undefined && (
-                    <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy}>{t('copyCode')}</button>
+                    <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy || locked}>{t('copyCode')}</button>
                   )}
                   {entry.url !== undefined && entry.url !== '' && (
                     <button type="button" onClick={() => window.open(entry.url!, '_blank', 'noopener')} title={t('openUrlHint')}>{t('openUrl')}</button>
