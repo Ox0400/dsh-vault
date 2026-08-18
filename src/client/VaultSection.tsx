@@ -1236,8 +1236,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setMessage(t('error'))
       return
     }
-    // Editing an existing entry and changing its password: confirm (Bitwarden-style).
-    if (editor.status === 'editing' && form.password !== undefined && form.password !== editor.entry?.password) {
+    // Editing an existing entry and actually typing a new password: confirm
+    // (Bitwarden-style). An empty form password (entry had none, or the user
+    // cleared it) is not a change, so it never prompts.
+    const entryPw = editor.status === 'editing' ? (editor.entry?.password ?? '') : ''
+    const typedPw = (form.password ?? '').trim()
+    if (editor.status === 'editing' && typedPw.length > 0 && typedPw !== entryPw) {
       if (!window.confirm(t('pwChangeConfirm'))) return
     }
     setBusy(true)
