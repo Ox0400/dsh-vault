@@ -56,6 +56,7 @@ export function apply(ctx: ClientContext): void {
     config: () => invoke<VaultSectionTypes['config']>('config'),
     setAccessMode: (mode) => invoke<VaultSectionTypes['config']>('setAccessMode', { mode }),
     setAutoCapture: (enabled) => invoke<VaultSectionTypes['config']>('setAutoCapture', { enabled }),
+    setAutoLock: (seconds) => invoke<{ seconds: number }>('setAutoLock', { seconds }),
     list: () => invoke<{ entries: VaultSectionTypes['entries'] }>('list').then(r => r.entries),
     search: (query, limit) => invoke<{ entries: VaultSectionTypes['entries'] }>('search', { query, limit: limit ?? 50 }).then(r => r.entries),
     get: (id) => invoke<{ found: boolean; entry?: VaultSectionTypes['fullEntry'] }>('get', { id }),

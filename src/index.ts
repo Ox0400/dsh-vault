@@ -194,8 +194,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    * master password fails at the first tool call with a clear message). */
   async function ensureStore(): Promise<VaultStore> {
     const store = await sharedVaultStore(masterPassword, config)
-    // Install the auto-lock policy once per store instance.
-    if (lockTimeoutSeconds > 0) store.setAutoLock(lockTimeoutSeconds * 1000)
+    // Install the auto-lock policy once per store instance: a persisted
+    // policy value (set from the Settings UI) wins, otherwise fall back to
+    // the configured lockTimeoutSeconds.
+    const seconds = policy.autoLockSeconds ?? lockTimeoutSeconds
+    if (seconds > 0) store.setAutoLock(seconds * 1000)
     return store
   }
 
@@ -4272,28 +4275,53 @@ export class VaultGateway extends TypertRemoteService {
 
   /** Current access policy and capture preference, for the Settings UI. */
   @Remote('config')
-  async config(): Promise<{ accessMode: AccessMode; autoCapture: boolean }> {
-    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
+  async config(): Promise<{ accessMode: AccessMode; autoCapture: boolean; autoLockSeconds: number }> {
+    return {
+      accessMode: this.accessPolicy.mode,
+      autoCapture: this.accessPolicy.autoCapture,
+      autoLockSeconds: this.accessPolicy.autoLockSeconds ?? 0,
+    }
   }
 
   /** Switch the runtime access mode from the Settings UI and persist it. */
   @Remote('setAccessMode')
-  async setAccessMode(mode: AccessMode): Promise<{ accessMode: AccessMode; autoCapture: boolean }> {
+  async setAccessMode(mode: AccessMode): Promise<{ accessMode: AccessMode; autoCapture: boolean; autoLockSeconds: number }> {
     if (mode !== 'readonly' && mode !== 'ask' && mode !== 'auto') {
       throw new Error(`vault: invalid accessMode "${String(mode)}" (expected readonly, ask, or auto)`)
     }
     this.accessPolicy.mode = mode
     await this.persistPolicy()
-    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
+    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture, autoLockSeconds: this.accessPolicy.autoLockSeconds ?? 0 }
   }
 
   /** Toggle auto-capture (detect credentials in chat → offer to save) from
    * the Settings UI and persist it. */
   @Remote('setAutoCapture')
-  async setAutoCapture(enabled: boolean): Promise<{ accessMode: AccessMode; autoCapture: boolean }> {
+  async setAutoCapture(enabled: boolean): Promise<{ accessMode: AccessMode; autoCapture: boolean; autoLockSeconds: number }> {
     this.accessPolicy.autoCapture = Boolean(enabled)
     await this.persistPolicy()
-    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture }
+    return { accessMode: this.accessPolicy.mode, autoCapture: this.accessPolicy.autoCapture, autoLockSeconds: this.accessPolicy.autoLockSeconds ?? 0 }
+  }
+
+  /** Current auto-lock idle timeout in seconds (0 = never) for the Settings UI. */
+  @Remote('autoLock')
+  async autoLock(): Promise<{ seconds: number }> {
+    return { seconds: this.accessPolicy.autoLockSeconds ?? 0 }
+  }
+
+  /** Set the auto-lock idle timeout (seconds; 0 disables) from the Settings
+   * UI, apply it to the shared store immediately, and persist it. */
+  @Remote('setAutoLock')
+  async setAutoLock(seconds: number): Promise<{ seconds: number }> {
+    const n = Math.floor(Number(seconds))
+    if (!Number.isFinite(n) || n < 0 || n > 24 * 60 * 60) {
+      throw new Error(`vault: invalid auto-lock timeout "${String(seconds)}" (0–86400 seconds)`)
+    }
+    this.accessPolicy.autoLockSeconds = n
+    await this.persistPolicy()
+    const store = await this.ensureStore()
+    store.setAutoLock(n > 0 ? n * 1000 : undefined)
+    return { seconds: n }
   }
 
   /** Persist the current policy to `<vault dir>/access.json`. */
@@ -5497,6 +5525,8 @@ export type AccessMode = 'readonly' | 'ask' | 'auto'
 interface AccessPolicy {
   mode: AccessMode
   autoCapture: boolean
+  /** Auto-lock idle timeout in seconds (0 = never); persisted with the policy. */
+  autoLockSeconds?: number
 }
 
 const sharedAccessPolicies = new Map<string, AccessPolicy>()
@@ -5531,6 +5561,9 @@ async function loadAccessPolicy(config: Config): Promise<AccessPolicy> {
     return {
       mode: parsed.mode === 'readonly' || parsed.mode === 'ask' || parsed.mode === 'auto' ? parsed.mode : fallback.mode,
       autoCapture: typeof parsed.autoCapture === 'boolean' ? parsed.autoCapture : fallback.autoCapture,
+      ...(typeof parsed.autoLockSeconds === 'number' && Number.isFinite(parsed.autoLockSeconds) && parsed.autoLockSeconds >= 0
+        ? { autoLockSeconds: parsed.autoLockSeconds }
+        : {}),
     }
   } catch {
     return fallback

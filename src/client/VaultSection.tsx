@@ -61,9 +61,10 @@ export type VaultPatch = Partial<Omit<VaultFullWire, 'id'>>
 /** Registration-side business face supplied by the plugin entry. */
 export interface VaultSectionInjected {
   t: TranslateNS<'settings.vault'>
-  config: () => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
-  setAccessMode: (mode: 'readonly' | 'ask' | 'auto') => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
-  setAutoCapture: (enabled: boolean) => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }>
+  config: () => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }>
+  setAccessMode: (mode: 'readonly' | 'ask' | 'auto') => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }>
+  setAutoCapture: (enabled: boolean) => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }>
+  setAutoLock: (seconds: number) => Promise<{ seconds: number }>
   list: () => Promise<VaultSummaryWire[]>
   search: (query: string, limit?: number) => Promise<VaultSummaryWire[]>
   get: (id: string) => Promise<{ found: boolean; entry?: VaultFullWire }>
@@ -140,7 +141,7 @@ export type VaultSectionTypes = {
   entries: VaultSummaryWire[]
   fullEntry: VaultFullWire
   summaryEntry: VaultSummaryWire
-  config: { accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean }
+  config: { accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }
   accessModes: Array<'readonly' | 'ask' | 'auto'>
 }
 
@@ -262,7 +263,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -300,7 +301,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
-  const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean } | null>(null)
+  const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
   const [dueMap, setDueMap] = useState<Record<string, { due: string; daysLeft: number }>>({})
@@ -330,6 +331,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     if (/disabled in readonly mode/i.test(clean)) return t('errReadonly')
     if (clean.length === 0) return t('error')
     return t('errDetail').replace('{detail}', clean)
+  }
+
+  /** Format an auto-lock timeout (seconds) for display: 90 → "1m 30s". */
+  function formatAutoLock(seconds: number): string {
+    if (seconds <= 0) return '0'
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    if (m === 0) return `${s}s`
+    if (s === 0) return `${m}m`
+    return `${m}m ${s}s`
   }
 
   // Suggest an icon from the URL domain (1Password-style visual hint).
@@ -1940,6 +1951,29 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 }}
               />
             </label>
+            <label className={css.policyField}>
+              <span>{t('autoLockLabel')}</span>
+              <select
+                value={policy.autoLockSeconds}
+                disabled={busy}
+                onChange={event => {
+                  const next = Number(event.target.value)
+                  setBusy(true)
+                  setMessage(null)
+                  void setAutoLock(next).then(
+                    value => { setPolicy(previous => previous ? { ...previous, autoLockSeconds: value.seconds } : previous); setBusy(false) },
+                    (err) => { setMessage(errText(err)); setBusy(false) },
+                  )
+                }}
+              >
+                <option value={0}>{t('autoLockNever')}</option>
+                <option value={60}>{t('autoLock1m')}</option>
+                <option value={300}>{t('autoLock5m')}</option>
+                <option value={900}>{t('autoLock15m')}</option>
+                <option value={1800}>{t('autoLock30m')}</option>
+                <option value={3600}>{t('autoLock1h')}</option>
+              </select>
+            </label>
             <p className={policy.accessMode === 'readonly' ? css.modeReadonly : policy.accessMode === 'ask' ? css.modeAsk : css.modeAuto}>
               {policy.accessMode === 'readonly'
                 ? t('modeReadonlyHint')
@@ -1947,6 +1981,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   ? t('modeAskHint')
                   : t('modeAutoHint')}
               {policy.autoCapture ? ` · ${t('autoCaptureOn')}` : ` · ${t('autoCaptureOff')}`}
+              {policy.autoLockSeconds > 0 ? ` · ${t('autoLockHint')}: ${formatAutoLock(policy.autoLockSeconds)}` : ` · ${t('autoLockNeverHint')}`}
             </p>
           </div>
         </div>
