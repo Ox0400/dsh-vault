@@ -1344,11 +1344,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setCopiedId(id)
     window.setTimeout(() => setCopiedId(null), 3000)
     // Auto-clear the clipboard after 30s (1Password/Bitwarden-style), so a
-    // copied secret does not linger for anyone using the machine later.
+    // copied secret does not linger for anyone using the machine later. Only
+    // clear when the clipboard still holds the value we copied — if the user
+    // copied something else meanwhile, never wipe their content.
     if (clipboardTimer.current !== null) window.clearTimeout(clipboardTimer.current)
+    const copied = value
     clipboardTimer.current = window.setTimeout(() => {
-      void navigator.clipboard.writeText('').catch(() => {})
       clipboardTimer.current = null
+      void navigator.clipboard.readText().then(current => {
+        if (current === copied) void navigator.clipboard.writeText('').catch(() => {})
+      }).catch(() => {})
     }, CLIPBOARD_CLEAR_MS)
   }
 
