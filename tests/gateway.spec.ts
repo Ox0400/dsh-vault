@@ -37,7 +37,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
       'add', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
-      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
+      'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'setFavorite', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
 })
@@ -84,6 +84,23 @@ test('VaultGateway summary carries custom fields for the detail view', async () 
     const plain = await gateway.add({ title: 'NoFields' })
     const plainInList = (await gateway.list()).entries.find(e => e.id === plain.id)
     expect(plainInList?.fields).toBeUndefined()
+  })
+})
+
+test('VaultGateway setFavorite pins and unpins an entry', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'PinMe' })
+    const pin = await gateway.setFavorite(added.id, true)
+    expect(pin.found).toBe(true)
+    let list = await gateway.list()
+    expect(list.entries.find(e => e.id === added.id)?.favorite).toBe(true)
+    const unpin = await gateway.setFavorite(added.id, false)
+    expect(unpin.found).toBe(true)
+    list = await gateway.list()
+    expect(list.entries.find(e => e.id === added.id)?.favorite).toBeUndefined()
+    // Missing id reports not-found.
+    const miss = await gateway.setFavorite('no-such-id', true)
+    expect(miss.found).toBe(false)
   })
 })
 

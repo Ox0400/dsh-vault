@@ -5230,6 +5230,14 @@ export class VaultGateway extends TypertRemoteService {
     return { touched: updated !== undefined }
   }
 
+  /** Pin or unpin an entry from the Settings UI (1Password-style star toggle). */
+  @Remote('setFavorite')
+  async setFavorite(id: string, favorite: boolean): Promise<{ found: boolean }> {
+    const store = await this.guardedStore()
+    const updated = await store.setFavorite(id, favorite)
+    return { found: updated !== undefined }
+  }
+
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */
   @Remote('merge')
   async merge(fromId: string, toId: string, keepSource?: boolean): Promise<{ found: boolean }> {
