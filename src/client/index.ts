@@ -86,7 +86,7 @@ export function apply(ctx: ClientContext): void {
     tags: () => invoke<Array<{ name: string; count: number }>>('tags'),
     renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),
     generatorHistory: () => invoke<Array<{ password: string; at: number }>>('generatorHistory'),
-    backups: (limit) => invoke<Array<{ path: string; at: number; vaultName: string }>>('backups', { limit: limit ?? 5 }),
+    backups: (limit) => invoke<Array<{ path: string; at: number; vaultName: string; size: number }>>('backups', { limit: limit ?? 5 }),
     deleteBackup: (path) => invoke<{ deleted: boolean; path: string }>('deleteBackup', { path }),
     restoreBackup: (path, mode, overwrite) => invoke<{ entries: number; safetyBackup: string; note: string; added?: number; skipped?: number; updated?: number }>('restoreBackup', { path, mode: mode ?? 'merge', overwrite: overwrite ?? false }),
     importChrome: (overwrite) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importChrome', { overwrite: overwrite ?? false }),

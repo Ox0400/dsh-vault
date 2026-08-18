@@ -92,7 +92,7 @@ export interface VaultSectionInjected {
   tags: () => Promise<Array<{ name: string; count: number }>>
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
-  backups: (limit?: number) => Promise<Array<{ path: string; at: number; vaultName: string }>>
+  backups: (limit?: number) => Promise<Array<{ path: string; at: number; vaultName: string; size: number }>>
   deleteBackup: (path: string) => Promise<{ deleted: boolean; path: string }>
   restoreBackup: (path: string, mode?: string, overwrite?: boolean) => Promise<{ entries: number; safetyBackup: string; note: string; added?: number; skipped?: number; updated?: number }>
   importChrome: (overwrite?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
@@ -282,7 +282,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [uriMap, setUriMap] = useState<Record<string, string>>({})
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
-  const [backupList, setBackupList] = useState<Array<{ path: string; at: number; vaultName: string }>>([])
+  const [backupList, setBackupList] = useState<Array<{ path: string; at: number; vaultName: string; size: number }>>([])
   const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
   const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; expiringSoon?: number; updatedAt?: number }>>([])
   const [sessionUrl, setSessionUrl] = useState('')
@@ -1816,6 +1816,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <div key={b.path} className={css.dupGroup}>
               <span className={css.dupNames}>
                 {b.vaultName !== '' ? `${b.vaultName} · ` : ''}{new Date(b.at).toLocaleString()}
+                {b.size !== undefined && b.size > 0 ? ` · ${formatSize(b.size)}` : ''}
               </span>
               <button
                 type="button"
