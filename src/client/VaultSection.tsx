@@ -237,7 +237,7 @@ const KIND_KEYS: Record<string, VaultLocaleKey> = {
 
 type ViewState =
   | { readonly status: 'loading' }
-  | { readonly status: 'error' }
+  | { readonly status: 'error'; readonly reason?: string }
   | { readonly status: 'ready'; readonly entries: VaultSummaryWire[] }
 
 type EditorState =
@@ -316,6 +316,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [breach, setBreach] = useState<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
+
+  /** Turn an RPC/Error failure into a specific, localized message instead of
+   * the generic "operation failed" copy. The RPC channel wraps errors as
+   * `vault.<method> failed: <code>: <message>`; unwrap and map the common
+   * host-side failures to friendly copy, falling back to the raw detail. */
+  function errText(err: unknown): string {
+    const raw = err instanceof Error ? err.message : String(err ?? '')
+    const clean = raw.replace(/^vault\.[a-z]+ failed: [^:]+: /i, '')
+    if (/vault is locked/i.test(clean)) return t('errLocked')
+    if (/title must not be empty/i.test(clean)) return t('errTitleEmpty')
+    if (/invalid vault name/i.test(clean)) return t('errInvalidVaultName')
+    if (/disabled in readonly mode/i.test(clean)) return t('errReadonly')
+    if (clean.length === 0) return t('error')
+    return t('errDetail').replace('{detail}', clean)
+  }
 
   // Suggest an icon from the URL domain (1Password-style visual hint).
   useEffect(() => {
@@ -402,8 +417,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       void backupStatus().then(bk => setBackupInfo(bk)).catch(() => {})
       void refresh()
       status().then(value => setLocked(value.locked)).catch(() => {})
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -418,8 +433,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await deleteBackup(b.path)
       setMessage(t('backupDeleted'))
       void backups(20).then(setBackupList).catch(() => {})
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -437,8 +452,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setMessage(r.note)
       await listVaults().then(setVaults)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -456,8 +471,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await listVaults().then(setVaults)
       void backups(20).then(setBackupList).catch(() => {})
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -473,8 +488,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importFirefox(mp, false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -494,8 +509,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         : await keychainImport({ limit: 10, preview })
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -511,8 +526,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await import1password(path.trim(), false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -525,8 +540,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await run()
       setMessage(`${t('previewLabel')} ${r.note}`)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -549,8 +564,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importManagerCsv(path.trim(), false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -566,8 +581,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importEnpass(path.trim(), false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -583,8 +598,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importBitwarden(path.trim(), false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -602,8 +617,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importBitwardenEncrypted(path.trim(), password, false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -619,8 +634,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await import1pif(path.trim(), false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -636,8 +651,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importKeePassXml(path.trim(), false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -654,8 +669,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importKdbx(path.trim(), password, '', false)
       setMessage(r.note)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -670,8 +685,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await export1pux(path.trim())
       setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}) — ${r.path}`)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -686,8 +701,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await exportBitwarden(path.trim())
       setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}) — ${r.path}`)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -701,8 +716,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await searchSystem(sysQuery.trim(), 'all', 15)
       setSysMatches(r.matches)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -727,8 +742,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await merge(second!.id, first!.id, false)
       await duplicateGroups().then(setDupList)
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -754,8 +769,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       } else {
         setMessage(t('error'))
       }
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -771,8 +786,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         void refresh()
         void status().then(value => setLocked(value.locked)).catch(() => {})
       }
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -788,8 +803,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       if (result.pwned.length === 0 && result.weak.length === 0) {
         setMessage(result.offline ? t('breachOkOffline') : t('breachOk'))
       }
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -805,8 +820,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setMessage(`${t('backupDone')} (${result.kept} kept, ${result.pruned} pruned)`)
       void backups(20).then(setBackupList).catch(() => {})
       void refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -827,8 +842,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       void backups(20).then(setBackupList).catch(() => {})
       void refresh()
       if (result.safetyBackup !== '') setMessage(`${result.note} — ${t('backupSafetyHint')} ${result.safetyBackup}`)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -877,8 +892,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setMessage(t('sessionSaved').replace('{n}', String(saved.saved)))
       setSessionTitle('')
       refreshSessions()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -904,8 +919,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await navigator.clipboard.writeText(exported.text)
       setCopiedId(id)
       window.setTimeout(() => setCopiedId(current => current === id ? null : current), 1600)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -917,8 +932,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const detail = await sessionGet(id)
       setSessionDetail(detail)
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -933,8 +948,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const result = await sessionPrune(id, false)
       setMessage(result.note)
       refreshSessions()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -949,8 +964,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await recoveryCode()
       window.alert(`${t('recoveryCodeAlert')}\n\n${r.code}\n\n${r.note}`)
       setMessage(t('recoveryCodeSet'))
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -965,8 +980,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await verifyRecovery(code.trim())
       setMessage(r.verified ? t('recoveryVerified') : t('recoveryNotVerified'))
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -988,8 +1003,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setSessionPaste('')
       setSessionPasteTitle('')
       refreshSessions()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -1060,7 +1075,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setState({ status: 'ready', entries })
       setVisibleCount(50)
       status().then(value => setLocked(value.locked)).catch(() => {})
-    } catch {
+    } catch (err) {
       // A locked vault makes list() throw; surface the locked banner instead
       // of a generic failure (the user can unlock, not retry).
       const st = await status().catch(() => null)
@@ -1068,7 +1083,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         setLocked(true)
         setState({ status: 'ready', entries: [] })
       } else {
-        setState({ status: 'error' })
+        setState({ status: 'error', reason: errText(err) })
       }
     }
   }, [list, search, query])
@@ -1193,8 +1208,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setTagsDraft((entry.tags ?? []).join(', '))
       setFieldsDraft(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => `${k}=${String(v)}`).join('\n') : '')
       setEditor({ status: 'editing', entry })
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -1259,8 +1274,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       }
       setEditor({ status: 'closed' })
       await refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -1273,8 +1288,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       await remove(id)
       await refresh()
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -1313,8 +1328,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await totpUri(id)
       setUriMap(previous => ({ ...previous, [id]: previous[id] === r.uri ? '' : r.uri }))
-    } catch {
-      setMessage(t('error'))
+    } catch (err) {
+      setMessage(errText(err))
     } finally {
       setBusy(false)
     }
@@ -1484,7 +1499,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {state.status === 'loading' && <p className={css.status}>{t('loading')}</p>}
       {state.status === 'error' && (
         <p role="alert" className={css.error}>
-          {t('error')}{' '}
+          {state.reason ?? t('error')}{' '}
           <button type="button" className={css.retryButton} onClick={() => void refresh()}>{t('retry')}</button>
         </p>
       )}
@@ -1895,7 +1910,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   setMessage(null)
                   void setAccessMode(next).then(
                     value => { setPolicy(value); setBusy(false) },
-                    () => { setMessage(t('error')); setBusy(false) },
+                    (err) => { setMessage(errText(err)); setBusy(false) },
                   )
                 }}
               >
@@ -1916,7 +1931,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   setMessage(null)
                   void setAutoCapture(next).then(
                     value => { setPolicy(value); setBusy(false) },
-                    () => { setMessage(t('error')); setBusy(false) },
+                    (err) => { setMessage(errText(err)); setBusy(false) },
                   )
                 }}
               />
