@@ -4368,6 +4368,15 @@ export class VaultGateway extends TypertRemoteService {
     return { restored: await store.restore(id) }
   }
 
+  /** Permanently remove a trashed (or active) entry from the Settings UI
+   * ("empty trash" / individual purge). */
+  @Remote('purge')
+  async purge(id: string): Promise<{ purged: boolean }> {
+    this.assertWritable('purge')
+    const store = await this.guardedStore()
+    return { purged: await store.purge(id) }
+  }
+
   /** Days since last backup + backup count (no secrets). */
   @Remote('backup')
   async backup(maxBackups?: number): Promise<{ path: string; kept: number; pruned: number }> {

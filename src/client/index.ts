@@ -63,6 +63,7 @@ export function apply(ctx: ClientContext): void {
     add: (patch) => invoke<VaultSectionTypes['summaryEntry']>('add', { patch }),
     update: (id, patch) => invoke<{ found: boolean; entry?: VaultSectionTypes['summaryEntry'] }>('update', { id, patch }),
     remove: (id) => invoke<{ deleted: boolean }>('delete', { id }),
+    purge: (id) => invoke<{ purged: boolean }>('purge', { id }),
     trash: () => invoke<{ entries: VaultSectionTypes['entries'] }>('trash').then(r => r.entries),
     rotation: () => invoke<{ entries: unknown[] }>('rotation').then(r => r.entries),
     history: () => invoke<{ events: unknown[] }>('history').then(r => r.events),

@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
@@ -476,6 +476,28 @@ test('gateway trash / restore / undeleteAll', async () => {
     await gateway.delete(added2.id)
     const all = await gateway.undeleteAll()
     expect(all.restored).toBe(1)
+  })
+})
+
+test('gateway purge permanently removes trashed and active entries', async () => {
+  await withGateway(async gateway => {
+    // A trashed entry can be purged (the delete-only path used to return
+    // false for already-trashed entries, silently breaking "empty trash").
+    const a = await gateway.add({ title: 'PurgeTrashed' })
+    await gateway.delete(a.id)
+    const purged = await gateway.purge(a.id)
+    expect(purged.purged).toBe(true)
+    const trash = await gateway.trash()
+    expect(trash.entries.some(e => e.id === a.id)).toBe(false)
+    // An active entry can also be purged directly.
+    const b = await gateway.add({ title: 'PurgeActive' })
+    const purgedB = await gateway.purge(b.id)
+    expect(purgedB.purged).toBe(true)
+    const list = await gateway.list()
+    expect(list.entries.some(e => e.id === b.id)).toBe(false)
+    // Purging a missing id reports false, not an error.
+    const miss = await gateway.purge('no-such-id')
+    expect(miss.purged).toBe(false)
   })
 })
 
