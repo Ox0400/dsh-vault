@@ -109,7 +109,7 @@ export interface VaultSectionInjected {
   touch: (id: string) => Promise<{ touched: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
-  generatePassword: (options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean }) => Promise<{ password: string }>
+  generatePassword: (options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean; passphrase?: boolean; words?: number; separator?: string; wordDigits?: boolean }) => Promise<{ password: string }>
   strength: (password: string) => Promise<{ score: number; verdict: string; feedback: string; bits: number }>
   templates: () => Promise<Array<{ name: string; kind: string; fields: Record<string, string> }>>
   saveTemplate: (name: string, kind: string, fields: Record<string, string>) => Promise<{ saved: boolean }>
@@ -292,7 +292,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
-  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false })
+  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4 })
   const [showGenOpts, setShowGenOpts] = useState(false)
   const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string } | null>(null)
   const [tplList, setTplList] = useState<Array<{ name: string; kind: string; fields: Record<string, string> }>>([])
@@ -2481,12 +2481,42 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             {showGenOpts && (
               <div className={css.genOpts}>
                 <label className={css.genOptRow}>
-                  <span>{t('genLength')}</span>
+                  <span>{t('genPassphrase')}</span>
                   <input
-                    type="number" min={6} max={64} value={genOpts.length}
-                    onChange={event => setGenOpts(previous => ({ ...previous, length: Math.max(6, Math.min(64, Number(event.target.value) || 24)) }))}
+                    type="checkbox"
+                    checked={genOpts.passphrase}
+                    onChange={event => setGenOpts(previous => ({ ...previous, passphrase: event.target.checked }))}
                   />
                 </label>
+                {genOpts.passphrase ? (
+                  <label className={css.genOptRow}>
+                    <span>{t('genWords')}</span>
+                    <input
+                      type="number" min={2} max={12} value={genOpts.words}
+                      onChange={event => setGenOpts(previous => ({ ...previous, words: Math.max(2, Math.min(12, Number(event.target.value) || 4)) }))}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label className={css.genOptRow}>
+                      <span>{t('genLength')}</span>
+                      <input
+                        type="number" min={6} max={64} value={genOpts.length}
+                        onChange={event => setGenOpts(previous => ({ ...previous, length: Math.max(6, Math.min(64, Number(event.target.value) || 24)) }))}
+                      />
+                    </label>
+                    {(['uppercase', 'lowercase', 'digits', 'symbols', 'excludeAmbiguous'] as const).map(key => (
+                      <label key={key} className={css.genOptRow}>
+                        <span>{t(GEN_OPT_KEYS[key] ?? 'genOptUppercase')}</span>
+                        <input
+                          type="checkbox"
+                          checked={genOpts[key]}
+                          onChange={event => setGenOpts(previous => ({ ...previous, [key]: event.target.checked }))}
+                        />
+                      </label>
+                    ))}
+                  </>
+                )}
                 {genHistory.length > 0 && (
                   <div className={css.genHist}>
                     <span>{t('genHistory')}:</span>
@@ -2501,16 +2531,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     ))}
                   </div>
                 )}
-                {(['uppercase', 'lowercase', 'digits', 'symbols', 'excludeAmbiguous'] as const).map(key => (
-                  <label key={key} className={css.genOptRow}>
-                    <span>{t(GEN_OPT_KEYS[key] ?? 'genOptUppercase')}</span>
-                    <input
-                      type="checkbox"
-                      checked={genOpts[key]}
-                      onChange={event => setGenOpts(previous => ({ ...previous, [key]: event.target.checked }))}
-                    />
-                  </label>
-                ))}
               </div>
             )}
             <label className={css.field}>

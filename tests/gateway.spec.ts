@@ -519,6 +519,27 @@ test('gateway rotation / health / verifyAll / backupStatus / generatorHistory', 
   })
 })
 
+test('gateway generatePassword supports passphrase mode', async () => {
+  await withGateway(async gateway => {
+    // Random mode: a 16-char mix with symbols/digits.
+    const rnd = await gateway.generatePassword({ length: 16 })
+    expect(rnd.password.length).toBe(16)
+    // Passphrase mode: memorable words separated by dashes, with digits.
+    const phr = await gateway.generatePassword({ passphrase: true, words: 4, separator: '-', wordDigits: true })
+    const parts = phr.password.split('-')
+    expect(parts.length).toBeGreaterThanOrEqual(4)
+    // At least the last segment carries digits when wordDigits is on.
+    expect(/\d/.test(phr.password)).toBe(true)
+    // Custom separator and no digits.
+    const phr2 = await gateway.generatePassword({ passphrase: true, words: 3, separator: '.', wordDigits: false })
+    expect(phr2.password.split('.')).toHaveLength(3)
+    expect(/\d/.test(phr2.password)).toBe(false)
+    // Both feed the same history list.
+    const gh = await gateway.generatorHistory()
+    expect(gh.some(h => h.password === phr.password)).toBe(true)
+  })
+})
+
 test('gateway strength / duplicates / duplicateGroups / merge', async () => {
   await withGateway(async gateway => {
     const s = await gateway.strength('CorrectHorseBatteryStaple!2024')
