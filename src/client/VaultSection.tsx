@@ -2043,6 +2043,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   onClick={() => { void restore(entry.id).then(() => { void trash().then(setTrashEntries); void refresh() }) }}
                   disabled={busy || readonly || locked}
                 >{t('restore')}</button>
+                <button
+                  type="button"
+                  className={css.dangerButton}
+                  onClick={() => {
+                    if (!window.confirm(t('purgeOneConfirm').replace('{name}', entry.title))) return
+                    void purge(entry.id).then(() => { void trash().then(setTrashEntries); void refresh() })
+                  }}
+                  disabled={busy || readonly || locked}
+                >{t('purge')}</button>
               </div>
             </li>
           ))}
