@@ -818,6 +818,43 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Export the current security report (weak/reused/no-2FA/http/rotation)
+   * as a CSV file (1Password Watchtower-style). Client-side only; the report
+   * data is already loaded. */
+  async function exportReportCsv(): Promise<void> {
+    if (report === null) return
+    const esc = (v: unknown): string => {
+      const s = String(v ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const lines: string[] = [`dsh-vault security report,${new Date().toISOString()},score=${report.score},verdict=${report.verdict}`]
+    lines.push('')
+    lines.push('weak passwords,title')
+    for (const w of report.weak as Array<{ title?: string; id?: string }>) lines.push(`weak,${esc(w.title ?? w.id ?? '')}`)
+    lines.push('')
+    lines.push('reused passwords,title')
+    for (const r of report.reused as Array<{ title?: string; id?: string }>) lines.push(`reused,${esc(r.title ?? r.id ?? '')}`)
+    lines.push('')
+    lines.push('missing 2FA,title')
+    for (const n of report.no2fa as Array<{ title?: string; id?: string }>) lines.push(`no-2fa,${esc(n.title ?? n.id ?? '')}`)
+    lines.push('')
+    lines.push('http sites,title')
+    for (const h of report.httpSites as Array<{ title?: string; id?: string }>) lines.push(`http,${esc(h.title ?? h.id ?? '')}`)
+    lines.push('')
+    lines.push('rotation due,title')
+    for (const r of report.rotation as Array<{ title?: string; id?: string }>) lines.push(`rotation,${esc(r.title ?? r.id ?? '')}`)
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `dsh-vault-security-report-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    setMessage(t('reportExported'))
+  }
+
   /** Run a Watchtower-style breach scan and show the result. */
   async function runBreachCheck(): Promise<void> {
     setBusy(true)
@@ -2323,6 +2360,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               {t('healthBackup')}: {backupInfo.daysSinceBackup}d ({backupInfo.backups})
             </span>
           )}
+          <button type="button" className={css.backupButton} onClick={() => void exportReportCsv()} disabled={busy || report === null}>
+            {t('exportReport')}
+          </button>
           <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>
             {t('backupNow')}
           </button>
