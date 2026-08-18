@@ -374,12 +374,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   /** Apply a template's field values to the current form. The form is reset
    * to its empty state first (so fields the template does not set are cleared
    * rather than leaking the previous template's values), then the template's
-   * fields are applied. Secret-ish fields are never filled from a template. */
+   * fields are applied. Secret-ish fields are never filled from a template.
+   * Non-catalog kinds (wifi/server/database/identity/bank templates) map to
+   * the closest catalog kind so the kind selector and store stay consistent. */
+  const CATALOG_KIND: Record<string, string> = {
+    wifi: 'login', server: 'ssh', database: 'ssh', identity: 'login', bank: 'card',
+  }
   function applyTemplate(name: string): void {
     const tpl = tplList.find(t => t.name === name)
     if (!tpl) return
     const next: Partial<FormFields> = {}
-    if (tpl.kind !== 'builtin:custom') next.kind = tpl.kind.replace('builtin:', '')
+    if (tpl.kind !== 'builtin:custom') {
+      const raw = tpl.kind.replace('builtin:', '')
+      next.kind = CATALOG_KIND[raw] ?? raw
+    }
     for (const [key, value] of Object.entries(tpl.fields)) {
       if (key === 'password' || key === 'otpSecret' || key === 'apiKey' || key === 'secret') continue
       ;(next as Record<string, unknown>)[key] = value
