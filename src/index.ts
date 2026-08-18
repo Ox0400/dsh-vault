@@ -5238,6 +5238,30 @@ export class VaultGateway extends TypertRemoteService {
     return { found: updated !== undefined }
   }
 
+  /** List an entry's attachments (names + sizes, never the data). */
+  @Remote('attachments')
+  async attachments(id: string): Promise<{ found: boolean; attachments: Array<{ name: string; size: number }> }> {
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) return { found: false, attachments: [] }
+    const list = Object.values(entry.attachments ?? {}).map(a => ({ name: a.name, size: a.size }))
+    return { found: true, attachments: list }
+  }
+
+  /** Detach (permanently remove) one attachment from an entry. */
+  @Remote('detach')
+  async detach(id: string, name: string): Promise<{ found: boolean; detached: boolean }> {
+    this.assertWritable('detach')
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) return { found: false, detached: false }
+    const attachments = { ...(entry.attachments ?? {}) }
+    if (!(name in attachments)) return { found: true, detached: false }
+    delete attachments[name]
+    await store.update(id, { attachments })
+    return { found: true, detached: true }
+  }
+
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */
   @Remote('merge')
   async merge(fromId: string, toId: string, keepSource?: boolean): Promise<{ found: boolean }> {

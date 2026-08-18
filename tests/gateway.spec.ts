@@ -36,7 +36,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'setFavorite', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
@@ -100,6 +100,32 @@ test('VaultGateway setFavorite pins and unpins an entry', async () => {
     expect(list.entries.find(e => e.id === added.id)?.favorite).toBeUndefined()
     // Missing id reports not-found.
     const miss = await gateway.setFavorite('no-such-id', true)
+    expect(miss.found).toBe(false)
+  })
+})
+
+test('VaultGateway attachments lists and detaches files without leaking data', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'WithAttach' })
+    // Attach a file via the store path (base64 inside the encrypted entry).
+    await gateway.update(added.id, {
+      attachments: { 'key.pem': { data: Buffer.from('private-key-data').toString('base64'), name: 'key.pem', size: 16 } },
+    })
+    const listed = await gateway.attachments(added.id)
+    expect(listed.found).toBe(true)
+    expect(listed.attachments).toEqual([{ name: 'key.pem', size: 16 }])
+    // Attachments response never carries the data itself.
+    expect(JSON.stringify(listed)).not.toContain('private-key-data')
+    // Detach removes it.
+    const detached = await gateway.detach(added.id, 'key.pem')
+    expect(detached.detached).toBe(true)
+    const after = await gateway.attachments(added.id)
+    expect(after.attachments).toEqual([])
+    // Detaching a missing name reports detached: false.
+    const again = await gateway.detach(added.id, 'nope.txt')
+    expect(again.detached).toBe(false)
+    // Missing entry.
+    const miss = await gateway.attachments('no-such-id')
     expect(miss.found).toBe(false)
   })
 })

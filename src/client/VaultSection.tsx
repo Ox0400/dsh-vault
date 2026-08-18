@@ -110,6 +110,8 @@ export interface VaultSectionInjected {
   listVaults: () => Promise<Array<{ name: string; active: boolean }>>
   touch: (id: string) => Promise<{ touched: boolean }>
   setFavorite: (id: string, favorite: boolean) => Promise<{ found: boolean }>
+  attachments: (id: string) => Promise<{ found: boolean; attachments: Array<{ name: string; size: number }> }>
+  detach: (id: string, name: string) => Promise<{ found: boolean; detached: boolean }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
   generatePassword: (options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean; passphrase?: boolean; words?: number; separator?: string; wordDigits?: boolean }) => Promise<{ password: string }>
@@ -267,7 +269,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -302,6 +304,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [attachmentsMap, setAttachmentsMap] = useState<Record<string, Array<{ name: string; size: number }>>>({})
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
@@ -321,6 +324,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [breach, setBreach] = useState<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean } | null>(null)
 
   const readonly = policy?.accessMode === 'readonly'
+
+  /** Format a byte count for display (e.g. 1536 → "1.5 KB"). */
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
 
   /** Turn an RPC/Error failure into a specific, localized message instead of
    * the generic "operation failed" copy. The RPC channel wraps errors as
@@ -1186,6 +1196,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       }
     }
   }, [nowTick, totpMap, totp])
+
+  // Load attachments when an entry is expanded.
+  useEffect(() => {
+    if (expandedId === null) return
+    let current = true
+    void attachments(expandedId).then(r => {
+      if (current && r.found) setAttachmentsMap(prev => ({ ...prev, [expandedId]: r.attachments }))
+    }).catch(() => {})
+    return () => { current = false }
+  }, [expandedId, attachments])
 
   // Vault health & meta: load once on mount (stats, backup age, rotation,
   // weak/reused scan, recent activity) and refresh on window focus.
@@ -2254,6 +2274,31 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         >⧉</button>
                       </span>
                     ))}
+                    {(attachmentsMap[entry.id] ?? []).length > 0 && (
+                      <div className={css.attachBox}>
+                        <strong>{t('attachmentsTitle')}:</strong>
+                        {(attachmentsMap[entry.id] ?? []).map(a => (
+                          <span key={a.name} className={css.detailItem}>
+                            📎 {a.name} ({formatSize(a.size)})
+                            <button
+                              type="button"
+                              className={css.revealButton}
+                              title={t('detachHint')}
+                              disabled={busy || readonly || locked}
+                              onClick={() => {
+                                setBusy(true)
+                                void detach(entry.id, a.name).then(() => {
+                                  void attachments(entry.id).then(r => {
+                                    if (r.found) setAttachmentsMap(prev => ({ ...prev, [entry.id]: r.attachments }))
+                                  })
+                                  setBusy(false)
+                                }, () => setBusy(false))
+                              }}
+                            >✕</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className={css.rowActions}>

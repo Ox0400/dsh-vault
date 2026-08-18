@@ -78,6 +78,8 @@ export function apply(ctx: ClientContext): void {
     listVaults: () => invoke<Array<{ name: string; active: boolean; entries?: number }>>('listVaults'),
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
     setFavorite: (id, favorite) => invoke<{ found: boolean }>('setFavorite', { id, favorite }),
+    attachments: (id) => invoke<{ found: boolean; attachments: Array<{ name: string; size: number }> }>('attachments', { id }),
+    detach: (id, name) => invoke<{ found: boolean; detached: boolean }>('detach', { id, name }),
     lock: () => invoke<{ locked: boolean }>('lock'),
     unlock: () => invoke<{ locked: boolean }>('unlock'),
     totpUri: (id) => invoke<{ uri: string }>('totpUri', { id }),
