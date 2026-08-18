@@ -1077,9 +1077,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       status().then(value => setLocked(value.locked)).catch(() => {})
     } catch (err) {
       // A locked vault makes list() throw; surface the locked banner instead
-      // of a generic failure (the user can unlock, not retry).
+      // of a generic failure (the user can unlock, not retry). Even when
+      // status() itself fails (e.g. an older host), a lock-shaped error still
+      // flips the locked flag so write actions stay disabled.
       const st = await status().catch(() => null)
-      if (st !== null && st.locked) {
+      const raw = err instanceof Error ? err.message : String(err ?? '')
+      const lockError = (st !== null && st.locked) || /vault is locked/i.test(raw)
+      if (lockError) {
         setLocked(true)
         setState({ status: 'ready', entries: [] })
       } else {
@@ -1508,7 +1512,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.emptyBox}>
           <p className={css.empty}>{t('empty')}</p>
           <p className={css.emptyHint}>{readonly ? t('emptyHintReadonly') : t('emptyHint')}</p>
-          {!readonly && (
+          {!readonly && !locked && (
             <button type="button" className={css.addButton} onClick={startCreate}>{t('quickAdd')}</button>
           )}
         </div>
@@ -1752,7 +1756,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               value={sessionUrl}
               onChange={event => setSessionUrl(event.target.value)}
               placeholder={t('sessionUrlPlaceholder')}
-              disabled={busy || readonly}
+              disabled={busy || readonly || locked}
             />
           </label>
           <button type="button" className={css.backupButton} onClick={() => void runSessionOpen()} disabled={busy || readonly || locked}>
@@ -1773,7 +1777,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   value={sessionTitle}
                   onChange={event => setSessionTitle(event.target.value)}
                   placeholder={t('sessionNamePlaceholder')}
-                  disabled={busy || readonly}
+                  disabled={busy || readonly || locked}
                 />
               </label>
               <button
@@ -1876,7 +1880,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               value={sessionPasteTitle}
               onChange={event => setSessionPasteTitle(event.target.value)}
               placeholder={t('sessionNamePlaceholder')}
-              disabled={busy || readonly}
+              disabled={busy || readonly || locked}
             />
           </label>
           <label className={css.field}>
@@ -1885,7 +1889,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               value={sessionPaste}
               onChange={event => setSessionPaste(event.target.value)}
               rows={4}
-              disabled={busy || readonly}
+              disabled={busy || readonly || locked}
             />
           </label>
           <button type="button" className={css.backupButton} onClick={() => void runSessionImport()} disabled={busy || readonly || locked}>
@@ -1958,7 +1962,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 type="button"
                 className={css.dupMerge}
                 onClick={() => void renameTagAll(tag.name)}
-                disabled={busy || readonly}
+                disabled={busy || readonly || locked}
               >{t('tagRename')}</button>
             </div>
           ))}
@@ -1975,7 +1979,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 type="button"
                 className={css.dupMerge}
                 onClick={() => void mergeEntries(group)}
-                disabled={busy || readonly}
+                disabled={busy || readonly || locked}
               >{t('dupMerge')}</button>
             </div>
           ))}
@@ -1997,7 +2001,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 <button
                   type="button"
                   onClick={() => { void restore(entry.id).then(() => { void trash().then(setTrashEntries); void refresh() }) }}
-                  disabled={busy || readonly}
+                  disabled={busy || readonly || locked}
                 >{t('restore')}</button>
               </div>
             </li>
@@ -2017,7 +2021,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 setBusy(false)
               }, () => setBusy(false))
             }}
-            disabled={busy || readonly}
+            disabled={busy || readonly || locked}
           >{t('restoreAll')}</button>
           <button
             type="button"
@@ -2031,7 +2035,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 setBusy(false)
               }, () => setBusy(false))
             }}
-            disabled={busy || readonly}
+            disabled={busy || readonly || locked}
           >{t('clearTrash')}</button>
         </>
       )}
@@ -2151,7 +2155,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         setBusy(false)
                       }, () => setBusy(false))
                     }}
-                    disabled={busy || readonly}
+                    disabled={busy || readonly || locked}
                   >{t('copyPassword')}</button>
                   <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy}>{t('totp')}</button>
                   <button type="button" onClick={() => void showTotpUri(entry.id)} disabled={busy} title={t('totpUriHint')}>{t('totpUri')}</button>
@@ -2161,13 +2165,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   {entry.url !== undefined && entry.url !== '' && (
                     <button type="button" onClick={() => window.open(entry.url!, '_blank', 'noopener')} title={t('openUrlHint')}>{t('openUrl')}</button>
                   )}
-                  <button type="button" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly} title={t('touchHint')}>{t('touch')}</button>
-                  <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly}>{t('edit')}</button>
+                  <button type="button" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly || locked} title={t('touchHint')}>{t('touch')}</button>
+                  <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly || locked}>{t('edit')}</button>
                   <button
                     type="button"
                     className={css.deleteButton}
                     onClick={() => void removeEntry(entry.id)}
-                    disabled={busy || readonly}
+                    disabled={busy || readonly || locked}
                   >{t('delete')}</button>
                 </div>
               </li>
