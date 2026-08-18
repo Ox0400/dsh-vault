@@ -295,7 +295,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
-  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4 })
+  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number; separator: string; wordDigits: boolean }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4, separator: '-', wordDigits: true })
   const [showGenOpts, setShowGenOpts] = useState(false)
   const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string } | null>(null)
   const [tplList, setTplList] = useState<Array<{ name: string; kind: string; fields: Record<string, string> }>>([])
@@ -2559,13 +2559,30 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   />
                 </label>
                 {genOpts.passphrase ? (
-                  <label className={css.genOptRow}>
-                    <span>{t('genWords')}</span>
-                    <input
-                      type="number" min={2} max={12} value={genOpts.words}
-                      onChange={event => setGenOpts(previous => ({ ...previous, words: Math.max(2, Math.min(12, Number(event.target.value) || 4)) }))}
-                    />
-                  </label>
+                  <>
+                    <label className={css.genOptRow}>
+                      <span>{t('genWords')}</span>
+                      <input
+                        type="number" min={2} max={12} value={genOpts.words}
+                        onChange={event => setGenOpts(previous => ({ ...previous, words: Math.max(2, Math.min(12, Number(event.target.value) || 4)) }))}
+                      />
+                    </label>
+                    <label className={css.genOptRow}>
+                      <span>{t('genSeparator')}</span>
+                      <input
+                        type="text" maxLength={4} value={genOpts.separator}
+                        onChange={event => setGenOpts(previous => ({ ...previous, separator: event.target.value }))}
+                      />
+                    </label>
+                    <label className={css.genOptRow}>
+                      <span>{t('genWordDigits')}</span>
+                      <input
+                        type="checkbox"
+                        checked={genOpts.wordDigits}
+                        onChange={event => setGenOpts(previous => ({ ...previous, wordDigits: event.target.checked }))}
+                      />
+                    </label>
+                  </>
                 ) : (
                   <>
                     <label className={css.genOptRow}>
