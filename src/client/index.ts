@@ -76,6 +76,7 @@ export function apply(ctx: ClientContext): void {
     listVaults: () => invoke<Array<{ name: string; active: boolean; entries?: number }>>('listVaults'),
     touch: (id) => invoke<{ touched: boolean }>('touch', { id }),
     lock: () => invoke<{ locked: boolean }>('lock'),
+    unlock: () => invoke<{ locked: boolean }>('unlock'),
     totpUri: (id) => invoke<{ uri: string }>('totpUri', { id }),
     tags: () => invoke<Array<{ name: string; count: number }>>('tags'),
     renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),

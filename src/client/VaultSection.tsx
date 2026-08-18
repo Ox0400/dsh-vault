@@ -83,6 +83,7 @@ export interface VaultSectionInjected {
   status: () => Promise<{ locked: boolean; entries: number }>
   switchVault: (name: string) => Promise<{ switched: boolean; name: string }>
   lock: () => Promise<{ locked: boolean }>
+  unlock: () => Promise<{ locked: boolean }>
   totpUri: (id: string) => Promise<{ uri: string }>
   tags: () => Promise<Array<{ name: string; count: number }>>
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
@@ -261,7 +262,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus } = props
+  const { t, config, setAccessMode, setAutoCapture, list, search, get, add, update, remove, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -759,6 +760,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Unlock the vault from the locked banner. */
+  async function unlockNow(): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await unlock()
+      setLocked(r.locked)
+      if (!r.locked) {
+        void refresh()
+        void status().then(value => setLocked(value.locked)).catch(() => {})
+      }
+    } catch {
+      setMessage(t('error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Run a Watchtower-style breach scan and show the result. */
   async function runBreachCheck(): Promise<void> {
     setBusy(true)
@@ -1042,7 +1060,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setVisibleCount(50)
       status().then(value => setLocked(value.locked)).catch(() => {})
     } catch {
-      setState({ status: 'error' })
+      // A locked vault makes list() throw; surface the locked banner instead
+      // of a generic failure (the user can unlock, not retry).
+      const st = await status().catch(() => null)
+      if (st !== null && st.locked) {
+        setLocked(true)
+        setState({ status: 'ready', entries: [] })
+      } else {
+        setState({ status: 'error' })
+      }
     }
   }, [list, search, query])
 
@@ -1370,7 +1396,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       <p className={css.intro}>{t('intro')}</p>
 
       {locked && (
-        <p role="alert" className={css.lockedBanner}>{t('lockedBanner')}</p>
+        <div className={css.lockedBanner} role="alert">
+          <p>{t('lockedBanner')}</p>
+          <button type="button" className={css.backupButton} onClick={() => void unlockNow()} disabled={busy}>{t('unlock')}</button>
+        </div>
       )}
 
       <nav className={css.tabs} aria-label={t('sectionTabs')}>

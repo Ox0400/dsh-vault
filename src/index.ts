@@ -5016,6 +5016,14 @@ export class VaultGateway extends TypertRemoteService {
     return { locked: store.isLocked }
   }
 
+  /** Unlock the current vault (the gateway holds the master password). */
+  @Remote('unlock')
+  async unlock(): Promise<{ locked: boolean }> {
+    const store = await this.ensureStore()
+    if (store.isLocked) await store.unlock()
+    return { locked: store.isLocked }
+  }
+
   /** Generate a one-time recovery code (returns the plaintext once). */
   @Remote('recoveryCode')
   async recoveryCode(): Promise<{ code: string; note: string }> {
@@ -5052,7 +5060,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Vault lock/entry status for the UI banner. */
   @Remote('status')
   async status(): Promise<{ locked: boolean; entries: number }> {
-    const store = await this.guardedStore()
+    const store = await this.ensureStore()
     return { locked: store.isLocked, entries: store.isLocked ? 0 : store.list().length }
   }
 
