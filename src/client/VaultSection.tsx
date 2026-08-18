@@ -698,7 +698,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   /** Export the vault as a 1Password 1PUX archive. */
   async function runExport1pux(): Promise<void> {
-    const path = window.prompt(t('export1puxPrompt'))
+    const suggested = t('exportDefaultPath').replace('{file}', `${new Date().toISOString().slice(0, 10)}.1pux`)
+    const path = window.prompt(`${t('export1puxPrompt')}\n${t('exportPathHint')}: ${suggested}`, suggested)
     if (path === null || path.trim() === '') return
     setBusy(true)
     setMessage(null)
@@ -714,7 +715,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   /** Export the vault as a Bitwarden JSON document. */
   async function runExportBitwarden(): Promise<void> {
-    const path = window.prompt(t('exportBitwardenPrompt'))
+    const suggested = t('exportDefaultPath').replace('{file}', `${new Date().toISOString().slice(0, 10)}.json`)
+    const path = window.prompt(`${t('exportBitwardenPrompt')}\n${t('exportPathHint')}: ${suggested}`, suggested)
     if (path === null || path.trim() === '') return
     setBusy(true)
     setMessage(null)
