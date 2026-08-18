@@ -124,7 +124,7 @@ All four install paths below are **verified end-to-end** (install → bundle lay
 ### Option 1: Install from npm (easiest)
 
 ```sh
-dsh plugin --profile demo add dsh-vault
+dsh plugin --profile web add dsh-vault
 ```
 
 npm packages ship **prebuilt `lib/` artifacts** — no allowBuilds, no local compilation, install and go. Set the master password before launching:
@@ -136,7 +136,7 @@ export DSH_VAULT_PASSWORD='your strong master password'
 ### Option 2: Install from GitHub (pin a tag or commit)
 
 ```sh
-dsh plugin --profile demo add github:Ox0400/dsh-vault#v0.1.1
+dsh plugin --profile web add github:Ox0400/dsh-vault#v0.1.1
 ```
 
 A git install fetches **sources, not built artifacts**, so the `prepare` script builds `lib/` at install time. pnpm ≥10 blocks git dependencies from running build scripts by default. The verified flow:
@@ -164,7 +164,7 @@ A git install fetches **sources, not built artifacts**, so the `prepare` script 
 ### Option 3: Install from a local path
 
 ```sh
-dsh plugin --profile demo add /absolute/path/to/dsh-vault
+dsh plugin --profile web add /absolute/path/to/dsh-vault
 ```
 
 pnpm links the checkout into the profile; the bundle is recognized as long as `lib/` exists (run `pnpm build` in the checkout first if needed).
@@ -172,12 +172,12 @@ pnpm links the checkout into the profile; the bundle is recognized as long as `l
 ### Option 4: Install from a tarball
 
 ```sh
-npm pack && dsh plugin --profile demo add ./dsh-vault-0.1.1.tgz
+npm pack && dsh plugin --profile web add ./dsh-vault-0.1.1.tgz
 ```
 
 The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` is required.
 
-`dsh plugin --profile demo remove dsh-vault` uninstalls (removes both the dependency and the layer).
+`dsh plugin --profile web remove dsh-vault` uninstalls (removes both the dependency and the layer).
 
 ## Configuration
 

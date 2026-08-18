@@ -122,7 +122,7 @@ dsh-vault 是一个 **bundle**(声明 `dsh.bundle` 的包):安装到 profile 后
 ### 方式一：从 npm 安装(最省事)
 
 ```sh
-dsh plugin --profile demo add dsh-vault
+dsh plugin --profile web add dsh-vault
 ```
 
 npm 包自带**预构建的 `lib/` 产物**,无需 allowBuilds、无需本地编译,安装即用。启动前设置主密码:
@@ -134,7 +134,7 @@ export DSH_VAULT_PASSWORD='你的强主密码'
 ### 方式二：从 GitHub 安装(锁 tag 或 commit)
 
 ```sh
-dsh plugin --profile demo add github:Ox0400/dsh-vault#v0.1.1
+dsh plugin --profile web add github:Ox0400/dsh-vault#v0.1.1
 ```
 
 git 安装拉取的是**源码**,`prepare` 脚本会在安装时构建 `lib/`。pnpm ≥10 默认阻止 git 依赖执行构建脚本。实测流程:
@@ -162,7 +162,7 @@ git 安装拉取的是**源码**,`prepare` 脚本会在安装时构建 `lib/`。
 ### 方式三：本地路径安装到 profile
 
 ```sh
-dsh plugin --profile demo add /绝对/路径/to/dsh-vault
+dsh plugin --profile web add /绝对/路径/to/dsh-vault
 ```
 
 pnpm 将 checkout 链接进 profile;只要 `lib/` 存在(必要时先在 checkout 里执行 `pnpm build`)即被识别为 bundle。
@@ -170,12 +170,12 @@ pnpm 将 checkout 链接进 profile;只要 `lib/` 存在(必要时先在 checkou
 ### 方式四：本地 tarball 安装
 
 ```sh
-npm pack && dsh plugin --profile demo add ./dsh-vault-0.1.1.tgz
+npm pack && dsh plugin --profile web add ./dsh-vault-0.1.1.tgz
 ```
 
 tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 
-`dsh plugin --profile demo remove dsh-vault` 卸载(同时移除依赖与 layer)。
+`dsh plugin --profile web remove dsh-vault` 卸载(同时移除依赖与 layer)。
 
 ## 配置
 
