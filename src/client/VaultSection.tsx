@@ -380,7 +380,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     const name = window.prompt(t('tplNamePrompt'))
     if (!name) return
     const fields: Record<string, string> = {}
-    for (const key of ['username', 'email', 'phone', 'host', 'port', 'url', 'notes', 'icon', 'color']) {
+    for (const key of ['username', 'email', 'phone', 'host', 'port', 'url', 'notes', 'icon', 'color',
+      'cardNumber', 'cardExpiry', 'cardCvv', 'cardHolder']) {
       const v = (form as Record<string, unknown>)[key]
       if (typeof v === 'string' && v.length > 0) fields[key] = v
     }
