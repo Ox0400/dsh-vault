@@ -2043,8 +2043,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       <span className={css.dueBadge} title={t('ageHint')}>{passwordAge(entry)}</span>
                     )}
                     {watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good' && (
-                      <span className={`${css.dueBadge} ${watchMap[entry.id]!.verdict === 'poor' ? css.badgeDanger : css.badgeWarn}`} title={watchMap[entry.id]!.flags.join(', ')}>
-                        {watchMap[entry.id]!.verdict === 'poor' ? t('watchPoor') : t('watchWarn')}
+                      <span className={`${css.dueBadge} ${watchMap[entry.id]!.verdict === 'poor' ? css.badgeDanger : css.badgeWarn}`} title={t('watchFlagsTitle') + watchMap[entry.id]!.flags.join(', ')}>
+                        {t('watchScore').replace('{n}', String(watchMap[entry.id]!.score))}
                       </span>
                     )}
                   </span>
