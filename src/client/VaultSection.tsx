@@ -1705,6 +1705,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </p>
       )}
       {activeTab === 'entries' && (<div className={css.tabPane}>
+      {state.status === 'ready' && state.entries.length > 0 && (
+        <div className={css.healthBar}>
+          <span className={css.badge}>{t('entryCount')}: {state.entries.length}</span>
+          {(() => {
+            const byKind = new Map<string, number>()
+            for (const e of state.entries) {
+              const k = e.kind ?? 'login'
+              byKind.set(k, (byKind.get(k) ?? 0) + 1)
+            }
+            return [...byKind.entries()].map(([k, n]) => (
+              <span key={k} className={css.badge}>{t(KIND_KEYS[k] ?? 'kindCustom')}: {n}</span>
+            ))
+          })()}
+          {vaultStats !== null && typeof vaultStats.withTotp === 'number' && vaultStats.withTotp > 0 && (
+            <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
+          )}
+        </div>
+      )}
       {state.status === 'ready' && state.entries.length === 0 && (
         <div className={css.emptyBox}>
           {query.trim().length > 0 || kindFilter !== '' || tagFilter !== '' ? (
