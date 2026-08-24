@@ -1207,6 +1207,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     return () => { current = false }
   }, [expandedId, attachments])
 
+  /** Recompute just the health report (weak/reused/no-2FA/rotation) after a
+   * write so the toolbar badges stay current without a full reload. */
+  const refreshHealth = useCallback(() => {
+    void health().then(hl => {
+      setReport(previous => ({
+        ...(previous ?? { rotation: [], weak: [], reused: [], strength: null, no2fa: [], httpSites: [], score: 100, verdict: 'good' }),
+        weak: (hl?.weak ?? []) as unknown[],
+        reused: (hl?.reused ?? []) as unknown[],
+        strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null,
+        no2fa: ((hl?.no2fa ?? []) as unknown[]),
+        httpSites: ((hl?.httpSites ?? []) as unknown[]),
+        score: Number(hl?.score ?? 100),
+        verdict: String(hl?.verdict ?? 'good'),
+      }))
+    }).catch(() => {})
+  }, [health])
+
   // Vault health & meta: load once on mount (stats, backup age, rotation,
   // weak/reused scan, recent activity) and refresh on window focus.
   useEffect(() => {
@@ -1364,6 +1381,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       }
       setEditor({ status: 'closed' })
       await refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
