@@ -12,6 +12,20 @@ import { Context } from '@deepseek-ai/cordis'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+
+/** Remove a temp dir, retrying briefly when a best-effort async auto-backup
+ * (fire-and-forget) is still writing backup files into it during teardown. */
+async function rmSafe(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true })
+      return
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw err
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+  }
+}
 import { VaultGateway, resetVaultSwitch } from '../src/index'
 
 async function withGateway<T>(run: (gateway: VaultGateway) => Promise<T>): Promise<T> {
@@ -28,7 +42,7 @@ async function withGateway<T>(run: (gateway: VaultGateway) => Promise<T>): Promi
     ctx.registry.delete(VaultGateway)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)
-    await rm(dir, { recursive: true, force: true })
+    await rmSafe(dir)
   }
 }
 
@@ -284,7 +298,7 @@ test('VaultGateway backup/backups follow the ACTIVE vault after switchVault', as
       ctx.registry.delete(VaultGateway)
       ctx.registry.delete(ToolRuntime)
       ctx.registry.delete(SystemPrompt)
-      await rm(dir, { recursive: true, force: true })
+      await rmSafe(dir)
     }
   })
 })
@@ -780,7 +794,7 @@ test('VaultGateway vaultRename / vaultDelete manage named vaults', async () => {
     ctx.registry.delete(VaultGateway)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)
-    await rm(dir, { recursive: true, force: true })
+    await rmSafe(dir)
   }
 })
 
