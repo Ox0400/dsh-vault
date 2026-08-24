@@ -559,6 +559,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await import1password(path.trim(), false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -597,6 +598,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importManagerCsv(path.trim(), false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -614,6 +616,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importEnpass(path.trim(), false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -631,6 +634,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importBitwarden(path.trim(), false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -650,6 +654,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importBitwardenEncrypted(path.trim(), password, false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -667,6 +672,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await import1pif(path.trim(), false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -684,6 +690,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importKeePassXml(path.trim(), false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -702,6 +709,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const r = await importKdbx(path.trim(), password, '', false)
       setMessage(r.note)
       void refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
