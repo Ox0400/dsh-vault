@@ -1232,7 +1232,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         verdict: String(hl?.verdict ?? 'good'),
       }))
     }).catch(() => {})
-  }, [health])
+    void history().then(events => setRecentEvents((events ?? []) as Array<Record<string, unknown>>)).catch(() => {})
+  }, [health, history])
 
   // Vault health & meta: load once on mount (stats, backup age, rotation,
   // weak/reused scan, recent activity) and refresh on window focus.
