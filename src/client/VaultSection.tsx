@@ -25,6 +25,8 @@ export interface VaultSummaryWire {
   icon?: string
   color?: string
   fields?: Record<string, string>
+  cardExpiry?: string
+  cardHolder?: string
   createdAt?: number
   updatedAt?: number
 }
@@ -1599,6 +1601,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     return `${Math.floor(secs / 86400)}d`
   }
 
+  /** Card-expiry reminder badge: "卡到期 MM/YY" when within 3 months or past.
+   * Returns '' when there is no expiry or it is far away. */
+  function cardExpiryBadge(entry: VaultSummaryWire): string {
+    const raw = entry.cardExpiry
+    if (raw === undefined || raw === '') return ''
+    const m = /^(\d{2})\/(\d{2,4})$/.exec(raw.trim())
+    if (!m) return ''
+    const month = Number(m[1]) - 1
+    const year = Number(m[2]) + (m[2]!.length === 2 ? 2000 : 0)
+    const end = new Date(year, month + 1, 0, 23, 59, 59) // last day of month
+    if (Number.isNaN(end.getTime())) return ''
+    const now = Date.now()
+    const monthsLeft = (end.getTime() - now) / (30 * 24 * 3600 * 1000)
+    if (end.getTime() < now) return t('cardExpired') + ' ' + raw.trim()
+    if (monthsLeft <= 3) return t('cardExpiring') + ' ' + raw.trim()
+    return ''
+  }
+
   /** Human-friendly value formatting for the expanded detail box. */
   function formatDetail(key: string, value: unknown): string {
     if (key === 'expiresAt' || key === 'updatedAt' || key === 'createdAt') {
@@ -2520,6 +2540,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     )}
                     {passwordAge(entry) !== '' && (
                       <span className={css.dueBadge} title={t('ageHint')}>{passwordAge(entry)}</span>
+                    )}
+                    {cardExpiryBadge(entry) !== '' && (
+                      <span className={css.dueBadge} title={t('cardExpiryHint')}>{cardExpiryBadge(entry)}</span>
                     )}
                     {watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good' && (
                       <span className={`${css.dueBadge} ${watchMap[entry.id]!.verdict === 'poor' ? css.badgeDanger : css.badgeWarn}`} title={t('watchFlagsTitle') + watchMap[entry.id]!.flags.join(', ')}>
