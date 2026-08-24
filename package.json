@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.0-rc.1",
+  "version": "1.10.0-rc.2",
   "description": "Encrypted credential vault for DeepSeek Harness: store and retrieve usernames, emails, phone numbers, passwords, TOTP secrets, SSH/API-key/OAuth developer credentials through model tools and a Settings UI page.",
   "type": "module",
   "license": "MIT",
