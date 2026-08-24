@@ -273,6 +273,7 @@ function templateLabel(name: string): string {
 export function VaultSection(props: VaultSectionProps): ReactNode {
   const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
+  const searchRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
   const [editor, setEditor] = useState<EditorState>({ status: 'closed' })
@@ -402,6 +403,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }, 250)
     return () => window.clearTimeout(timer)
   }, [form.password, strength])
+
+  // Ctrl/Cmd+K focuses the vault search box (1Password-style quick search).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setActiveTab('entries')
+        window.setTimeout(() => searchRef.current?.focus(), 50)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   /** Apply a template's field values to the current form. The form is reset
    * to its empty state first (so fields the template does not set are cleared
@@ -1681,6 +1695,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <span className={css.srOnly}>{t('searchPlaceholder')}</span>
           <input
             id={searchId}
+            ref={searchRef}
             type="search"
             placeholder={t('searchPlaceholder')}
             value={query}
