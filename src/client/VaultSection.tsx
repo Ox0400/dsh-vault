@@ -1405,11 +1405,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   /** Delete an entry after confirmation. */
   async function removeEntry(id: string): Promise<void> {
     if (!window.confirm(t('deleteConfirm'))) return
+    const title = state.status === 'ready' ? state.entries.find(e => e.id === id)?.title ?? '' : ''
     setBusy(true)
     try {
       await remove(id)
       await refresh()
       refreshHealth()
+      setMessage(title !== '' ? t('deletedWithTitle').replace('{name}', title) : t('deleted'))
     } catch (err) {
       setMessage(errText(err))
     } finally {
