@@ -2371,7 +2371,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     type="button"
                     onClick={() => void copyValue(entry.id, entry.username ?? entry.title)}
                     disabled={busy || readonly || locked}
-                  >{t('copy')}</button>
+                    title={entry.username !== undefined && entry.username !== '' ? t('copyUsernameHint') : t('copyTitleHint')}
+                  >{entry.username !== undefined && entry.username !== '' ? t('copyUsername') : t('copy')}</button>
                   <button
                     type="button"
                     onClick={() => {
