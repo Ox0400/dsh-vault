@@ -311,6 +311,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [pwHistory, setPwHistory] = useState<Array<{ password: string; at: number }> | null>(null)
   const [pwHistoryFor, setPwHistoryFor] = useState<string | null>(null)
+  const [pwHistRevealed, setPwHistRevealed] = useState<number | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
@@ -1744,7 +1745,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {pwHistory.length === 0 && <p className={css.reportSub}>{t('pwHistoryEmpty')}</p>}
           {pwHistory.map((h, i) => (
             <div key={i} className={css.pwHistRow}>
-              <code className={css.pwHistPwd}>{h.password}</code>
+              <code className={css.pwHistPwd}>{pwHistRevealed === i ? h.password : '••••••••'}</code>
+              <button
+                type="button"
+                className={css.revealButton}
+                title={t('pwHistoryHint')}
+                onClick={() => setPwHistRevealed(pwHistRevealed === i ? null : i)}
+              >{pwHistRevealed === i ? t('hide') : t('show')}</button>
               <span className={css.pwHistTime}>{relTime(h.at)}</span>
               <button
                 type="button"
