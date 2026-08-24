@@ -313,6 +313,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [pwHistoryFor, setPwHistoryFor] = useState<string | null>(null)
   const [pwHistRevealed, setPwHistRevealed] = useState<number | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [auditFilter, setAuditFilter] = useState('')
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
@@ -2309,8 +2310,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {activeTab === 'audit' && (<div className={css.tabPane}>
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentActivity')}</p>
+          <div className={css.toolbar}>
+            <select className={css.kindFilter} value={auditFilter} onChange={e => setAuditFilter(e.target.value)} aria-label={t('auditFilter')}>
+              <option value="">{t('auditAll')}</option>
+              <option value="add">{t('auditAdd')}</option>
+              <option value="update">{t('auditUpdate')}</option>
+              <option value="delete">{t('auditDelete')}</option>
+              <option value="restore">{t('auditRestore')}</option>
+            </select>
+          </div>
           {recentEvents.length === 0 && <p className={css.empty}>{t('recentActivityEmpty')}</p>}
-          {recentEvents.slice(0, 30).map((ev, i) => {
+          {recentEvents.filter(ev => auditFilter === '' || String(ev.action ?? '') === auditFilter).slice(0, 30).map((ev, i) => {
             const action = String(ev.action ?? '')
             const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑️' : action === 'restore' ? '♻️' : action === 'purge' ? '🔥' : action === 'update' ? '✏️' : '•'
             const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
