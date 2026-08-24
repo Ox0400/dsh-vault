@@ -2865,20 +2865,51 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     />
                     {t('favoriteHint')}
                   </label>
+                ) : field.key === 'cardNumber' ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="4111 1111 1111 1111"
+                    value={(form.cardNumber ?? '').replace(/(.{4})/g, '$1 ').trim()}
+                    onChange={event => {
+                      const digits = event.target.value.replace(/\D/g, '').slice(0, 19)
+                      setForm(previous => ({ ...previous, cardNumber: digits }))
+                    }}
+                  />
+                ) : field.key === 'cardExpiry' ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="MM/YY"
+                    maxLength={5}
+                    value={form.cardExpiry ?? ''}
+                    onChange={event => {
+                      let raw = event.target.value.replace(/\D/g, '').slice(0, 4)
+                      if (raw.length >= 3) raw = raw.slice(0, 2) + '/' + raw.slice(2)
+                      setForm(previous => ({ ...previous, cardExpiry: raw }))
+                    }}
+                  />
+                ) : field.key === 'cardCvv' ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="123"
+                    maxLength={4}
+                    value={form.cardCvv ?? ''}
+                    onChange={event => setForm(previous => ({ ...previous, cardCvv: event.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                  />
+                ) : field.key === 'cardHolder' ? (
+                  <input
+                    type="text"
+                    value={form.cardHolder ?? ''}
+                    onChange={event => setForm(previous => ({ ...previous, cardHolder: event.target.value }))}
+                  />
                 ) : field.key === 'username' ? (
-                  <span className={css.secretField}>
-                    <input
-                      type="text"
-                      value={(form.username as string | undefined) ?? ''}
-                      onChange={event => setForm(previous => ({ ...previous, username: event.target.value }))}
-                    />
-                    <button
-                      type="button"
-                      className={css.revealButton}
-                      title={t('genUserHint')}
-                      onClick={() => { void generateUsername().then(r => setForm(previous => ({ ...previous, username: r.username }))) }}
-                    >{t('genUser')}</button>
-                  </span>
+                  <input
+                    type="text"
+                    value={(form[field.key] as string | undefined) ?? ''}
+                    onChange={event => setForm(previous => ({ ...previous, [field.key]: event.target.value }))}
+                  />
                 ) : (
                   <input
                     type="text"
