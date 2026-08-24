@@ -1615,6 +1615,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             {report.rotation.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>}
           </span>
         )}
+        {report !== null && report.weak.length === 0 && report.reused.length === 0 && report.no2fa.length === 0 && report.httpSites.length === 0 && report.rotation.length === 0 && (
+          <span className={`${css.badge} ${css.badgeOk}`} title={t('healthSummaryHint')}>{t('healthOk')} ✓</span>
+        )}
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
           + {t('add')}
         </button>
