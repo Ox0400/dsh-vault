@@ -2324,9 +2324,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const action = String(ev.action ?? '')
             const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑️' : action === 'restore' ? '♻️' : action === 'purge' ? '🔥' : action === 'update' ? '✏️' : '•'
             const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
+            const ts = Number((ev as Record<string, unknown>).at)
+            const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
             return (
               <p key={i} className={`${css.reportLine} ${cls}`}>
-                {icon} {action} · {String(ev.title ?? ev.id ?? '')}{relTime((ev as Record<string, unknown>).at) !== '' && ` · ${relTime((ev as Record<string, unknown>).at)}`}
+                {icon} {action} · {String(ev.title ?? ev.id ?? '')}{when !== '' && ` · ${when}`}
               </p>
             )
           })}
