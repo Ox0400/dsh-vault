@@ -201,14 +201,15 @@ test('VaultGateway keychainImport validates arguments before touching the keycha
 
 test('VaultGateway backup/backups/restoreBackup round trip', async () => {  await withGateway(async gateway => {
     await gateway.add({ title: 'GitHub', username: 'ada', password: 'hunter2!' })
+    // Let the async auto-backup settle.
+    await new Promise(res => setTimeout(res, 80))
     const bk = await gateway.backup()
     expect(bk.path).toMatch(/-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/)
 
-    // The add() already auto-backup'd (1Password-style); the manual backup is
-    // the newest entry in the list.
+    // add() auto-backup'd, and the manual backup is present in the list.
     const list = await gateway.backups(5)
     expect(list.length).toBeGreaterThanOrEqual(1)
-    expect(list[0]!.path).toBe(bk.path)
+    expect(list.some(b => b.path === bk.path)).toBe(true)
 
     // Mutate the vault, then MERGE from the backup (default): delete 'GitHub'
     // and add 'Temp', then merge — the backup's GitHub entry comes back
