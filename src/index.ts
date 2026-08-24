@@ -4567,6 +4567,10 @@ export class VaultGateway extends TypertRemoteService {
         excludeAmbiguous: options?.excludeAmbiguous ?? false,
       })
     }
+    // Dedupe: re-generating the same password moves it to the front instead of
+    // stacking duplicates in the history list.
+    const existing = this.genHistory.findIndex(h => h.password === password)
+    if (existing >= 0) this.genHistory.splice(existing, 1)
     this.genHistory.unshift({ password, at: Date.now() })
     if (this.genHistory.length > 10) this.genHistory.length = 10
     return { password }

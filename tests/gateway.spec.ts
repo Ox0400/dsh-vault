@@ -600,6 +600,20 @@ test('gateway generatePassword supports passphrase mode', async () => {
   })
 })
 
+test('gateway generator history has no duplicate entries', async () => {
+  await withGateway(async gateway => {
+    // Generate a batch of distinct passphrases; history must not stack
+    // duplicates (same password regenerated moves to front instead).
+    for (let i = 0; i < 8; i++) {
+      await gateway.generatePassword({ passphrase: true, words: 4, separator: '-', wordDigits: true })
+    }
+    const gh = await gateway.generatorHistory()
+    const pwds = gh.map(h => h.password)
+    expect(new Set(pwds).size).toBe(pwds.length)
+    expect(gh.length).toBeLessThanOrEqual(10)
+  })
+})
+
 test('gateway strength / duplicates / duplicateGroups / merge', async () => {
   await withGateway(async gateway => {
     const s = await gateway.strength('CorrectHorseBatteryStaple!2024')
