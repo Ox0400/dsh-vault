@@ -1636,10 +1636,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {activeTab === 'entries' && (<div className={css.tabPane}>
       {state.status === 'ready' && state.entries.length === 0 && (
         <div className={css.emptyBox}>
-          <p className={css.empty}>{t('empty')}</p>
-          <p className={css.emptyHint}>{readonly ? t('emptyHintReadonly') : t('emptyHint')}</p>
-          {!readonly && !locked && (
-            <button type="button" className={css.addButton} onClick={startCreate}>{t('quickAdd')}</button>
+          {query.trim().length > 0 || kindFilter !== '' || tagFilter !== '' ? (
+            <>
+              <p className={css.empty}>{t('noFiltered')}</p>
+              <p className={css.emptyHint}>{t('noFilteredHint')}</p>
+              <button type="button" className={css.addButton} onClick={() => { setQuery(''); setKindFilter(''); setTagFilter('') }}>{t('clearFilters')}</button>
+            </>
+          ) : (
+            <>
+              <p className={css.empty}>{t('empty')}</p>
+              <p className={css.emptyHint}>{readonly ? t('emptyHintReadonly') : t('emptyHint')}</p>
+              {!readonly && !locked && (
+                <button type="button" className={css.addButton} onClick={startCreate}>{t('quickAdd')}</button>
+              )}
+            </>
           )}
         </div>
       )}
