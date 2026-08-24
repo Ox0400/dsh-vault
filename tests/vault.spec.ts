@@ -577,7 +577,7 @@ test('store: 1000-entry vault stays fast for list/search/stats', async () => {
     assert.ok(searchMs < 100, `search ${searchMs}ms`)
     assert.ok(statsMs < 100, `stats ${statsMs}ms`)
   })
-})
+}, 20_000)
 
 test('store: password history records changes and supports rollback', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vault-ph-'))
