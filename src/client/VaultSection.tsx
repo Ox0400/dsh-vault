@@ -1299,7 +1299,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const result = await get(id)
       if (!result.found || result.entry === undefined) {
-        setMessage(t('error'))
+        setMessage(t('entryNotFound'))
         return
       }
       const entry = result.entry
@@ -1340,7 +1340,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   /** Save the current form (create or update). */
   async function save(): Promise<void> {
     if (!(form.title ?? '').trim()) {
-      setMessage(t('error'))
+      setMessage(t('errTitleEmpty'))
       return
     }
     // Editing an existing entry and actually typing a new password: confirm
