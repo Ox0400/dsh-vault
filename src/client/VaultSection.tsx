@@ -1530,7 +1530,26 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
-  /** Copy a field value to the clipboard and flash the row. */
+  /** Export the audit log (respecting the current filter) as a CSV file. */
+  function exportAuditLog(): void {
+    const rows = recentEvents
+      .filter(ev => auditFilter === '' || String(ev.action ?? '') === auditFilter)
+      .map(ev => {
+        const ts = Number((ev as Record<string, unknown>).at)
+        const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
+        return `${String(ev.action ?? '')},${String(ev.title ?? ev.id ?? '')},${when}`
+      })
+    if (rows.length === 0) return
+    const blob = new Blob(['\uFEFFaction,entry,time\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `dsh-vault-audit-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
   const clipboardTimer = useRef<number | null>(null)
   const CLIPBOARD_CLEAR_MS = 30_000
 
@@ -2367,6 +2386,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               <option value="delete">{t('auditDelete')}</option>
               <option value="restore">{t('auditRestore')}</option>
             </select>
+            <button type="button" className={css.dupMerge} onClick={exportAuditLog} disabled={recentEvents.length === 0}>{t('auditExport')}</button>
           </div>
           {recentEvents.length === 0 && <p className={css.empty}>{t('recentActivityEmpty')}</p>}
           {recentEvents.filter(ev => auditFilter === '' || String(ev.action ?? '') === auditFilter).slice(0, 30).map((ev, i) => {
