@@ -1233,7 +1233,8 @@ test('vault_export_browser writes browser-import CSV', async () => {
     const { readFile } = await import('node:fs/promises')
     const csv = await readFile(outPath, 'utf8')
     assert.ok(csv.includes('example.com'))
-    assert.ok(csv.startsWith('name,url,username,password'))
+    // UTF-8 BOM first so Excel opens Chinese text without mojibake.
+    assert.ok(csv.startsWith('\uFEFFname,url,username,password'))
   })
 })
 
@@ -1330,7 +1331,7 @@ test('vault_migrate_keepass writes KeePass CSV', async () => {
     assert.ok(r.count >= 1)
     const { readFile } = await import('node:fs/promises')
     const csv = await readFile(outPath, 'utf8')
-    assert.ok(csv.startsWith('Group,Title,Username,Password,URL,Notes'))
+    assert.ok(csv.startsWith('\uFEFFGroup,Title,Username,Password,URL,Notes'))
     assert.ok(csv.includes('ssh'))
   })
 })

@@ -1834,7 +1834,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         rows.push([esc(e.title), esc(e.url), esc(e.username ?? e.email), esc(e.password)])
       }
       await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
-      await writeFile(args.path, rows.map(r => r.join(',')).join('\n') + '\n', { mode: 0o600 })
+      // UTF-8 BOM so Excel (Windows) opens Chinese site/user names without mojibake.
+      await writeFile(args.path, '\uFEFF' + rows.map(r => r.join(',')).join('\n') + '\n', { mode: 0o600 })
       return { path: args.path, count: rows.length - 1 }
     },
   }))
@@ -1990,7 +1991,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         rows.push([group, e.title, e.username ?? e.email ?? '', e.password ?? '', e.url ?? '', e.notes ?? ''].map(esc).join(','))
       }
       await mkdir(dirname(args.path), { recursive: true, mode: 0o700 })
-      await writeFile(args.path, rows.join('\n') + '\n', { mode: 0o600 })
+      // UTF-8 BOM for Excel (Windows) Chinese compatibility.
+      await writeFile(args.path, '\uFEFF' + rows.join('\n') + '\n', { mode: 0o600 })
       return { path: args.path, count: rows.length - 1 }
     },
   }))
@@ -3000,7 +3002,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       const file = args.path ?? join(dirname(resolveVaultPath(config)), `vault-export-${Date.now()}.csv`)
       await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-      await writeFile(file, lines.join('\n') + '\n', { mode: 0o600 })
+      // UTF-8 BOM for Excel (Windows) Chinese compatibility.
+      await writeFile(file, '\uFEFF' + lines.join('\n') + '\n', { mode: 0o600 })
       return { path: file, count: entries.length }
     },
   }))
