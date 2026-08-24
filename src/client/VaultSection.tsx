@@ -2207,7 +2207,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const code = totpInfo?.code
             return (
               <li key={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}`}>
-                <div className={css.rowMain} onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}>
+                <div
+                  className={css.rowMain}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={expandedId === entry.id}
+                  onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setExpandedId(expandedId === entry.id ? null : entry.id)
+                    }
+                  }}
+                >
                   <span className={css.title} style={entry.color !== undefined && entry.color !== '' ? { borderLeft: `3px solid ${entry.color}`, paddingLeft: 6 } : undefined}>
                     <span className={css.kindIcon}>{entry.icon ?? kindIcon(entry.kind)}</span>
                     <button
@@ -2220,6 +2232,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         const next = !(entry as VaultSummaryWire & { favorite?: boolean }).favorite
                         void setFavorite(entry.id, next).then(() => void refresh())
                       }}
+                      onKeyDown={event => event.stopPropagation()}
                     >★</button>
                     {entry.title}
                     {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
