@@ -372,10 +372,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     if (url.length === 0 || (form.icon ?? '').length > 0) return
     const host = url.replace(/^https?:\/\//i, '').split('/')[0]!.toLowerCase()
     const map: Record<string, string> = {
-      github: '🐙', gitlab: '🦊', google: '🔎', 'google.com': '🔎', amazon: '📦', apple: '',
+      github: '🐙', gitlab: '🦊', google: '🔎', 'google.com': '🔎', amazon: '📦', apple: '🍎',
       aws: '☁️', azure: '☁️', digitalocean: '🐳', docker: '🐳', npm: '📦', figma: '🎨',
       notion: '📝', slack: '💬', discord: '🎮', twitter: '🐦', facebook: '👥', instagram: '📷',
       linkedin: '💼', youtube: '▶️', netflix: '🎬', spotify: '🎵', dropbox: '📁', drive: '🗂️',
+      microsoft: '🪟', 'microsoft.com': '🪟', office: '🪟', outlook: '✉️', gmail: '✉️', yahoo: '✉️',
+      reddit: '👽', twitch: '🎮', steam: '🎮', epic: '🎮', origin: '🎮', pinterest: '📌',
+      tiktok: '🎵', snapchat: '👻', whatsapp: '💬', telegram: '✈️', wechat: '💬', zoom: '🎥',
+      teams: '💬', skype: '💬', stripe: '💳', paypal: '💰', venmo: '💰', coinbase: '🪙',
+      binance: '🪙', kraken: '🪙', robinhood: '📈', fidelity: '📈', chase: '🏦', citi: '🏦',
+      wellsfargo: '🏦', bankofamerica: '🏦', airbnb: '🏠', uber: '🚗', lyft: '🚗', doordash: '🍔',
+      grubhub: '🍔', instacart: '🛒', ebay: '🛒', etsy: '🧶', shopify: '🛍️', wordpress: '📝',
+      medium: '📝', substack: '✉️', hashnode: '💻', vercel: '▲', netlify: '🌐', heroku: '🌐',
+      cloudflare: '🌐', godaddy: '🌐', namecheap: '🌐', linode: '🌐', vultr: '🌐', huggingface: '🤗',
+      openai: '🤖', anthropic: '🤖', googlecloud: '☁️', firebase: '🔥', supabase: '🔥', mongodb: '🍃',
     }
     const hostBase = host.split('.')[0] ?? ''
     const icon = map[host] ?? map[hostBase] ?? ''
