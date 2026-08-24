@@ -135,6 +135,8 @@ export interface VaultSectionInjected {
   vaultRename: (from: string, to: string) => Promise<{ renamed: boolean; from?: string; to?: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
   vaultDelete: (name: string, confirm: boolean) => Promise<{ deleted: boolean; name?: string; active: string; vaults: Array<{ name: string; active: boolean }>; note: string }>
   watchtower: () => Promise<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>
+  passwordHistory: (id: string) => Promise<Array<{ password: string; at: number }>>
+  passwordRollback: (id: string, at: number) => Promise<{ rolledBack: boolean; password?: string }>
   export1pux: (path: string) => Promise<{ path: string; count: number }>
   exportBitwarden: (path: string) => Promise<{ path: string; count: number }>
   recoveryCode: () => Promise<{ code: string; note: string }>
@@ -269,7 +271,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const [query, setQuery] = useState('')
   const [state, setState] = useState<ViewState>({ status: 'loading' })
@@ -307,6 +309,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [attachmentsMap, setAttachmentsMap] = useState<Record<string, Array<{ name: string; size: number }>>>({})
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [pwHistory, setPwHistory] = useState<Array<{ password: string; at: number }> | null>(null)
+  const [pwHistoryFor, setPwHistoryFor] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
@@ -1448,6 +1452,43 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Show an entry's password history (1Password-style) and allow rollback. */
+  async function showPasswordHistory(id: string): Promise<void> {
+    setBusy(true)
+    try {
+      const h = await passwordHistory(id)
+      setPwHistory(h)
+      setPwHistoryFor(id)
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Roll the entry's password back to a history point. */
+  async function rollbackPassword(at: number): Promise<void> {
+    if (pwHistoryFor === null) return
+    if (!window.confirm(t('pwRollbackConfirm'))) return
+    setBusy(true)
+    try {
+      const r = await passwordRollback(pwHistoryFor, at)
+      if (r.rolledBack) {
+        setMessage(t('pwRolledBack'))
+        setPwHistory(null)
+        setPwHistoryFor(null)
+        void refresh()
+        refreshHealth()
+      } else {
+        setMessage(t('pwRollbackFailed'))
+      }
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Copy a field value to the clipboard and flash the row. */
   const clipboardTimer = useRef<number | null>(null)
   const CLIPBOARD_CLEAR_MS = 30_000
@@ -1696,6 +1737,26 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {message !== null && <p role="alert" className={css.error}>{message}</p>}
+
+      {pwHistory !== null && (
+        <div className={css.pwHistBox} role="dialog" aria-label={t('pwHistory')}>
+          <p className={css.reportTitle}>{t('pwHistory')}</p>
+          {pwHistory.length === 0 && <p className={css.reportSub}>{t('pwHistoryEmpty')}</p>}
+          {pwHistory.map((h, i) => (
+            <div key={i} className={css.pwHistRow}>
+              <code className={css.pwHistPwd}>{h.password}</code>
+              <span className={css.pwHistTime}>{relTime(h.at)}</span>
+              <button
+                type="button"
+                className={css.dupMerge}
+                disabled={busy || readonly || locked}
+                onClick={() => void rollbackPassword(h.at)}
+              >{t('pwRollback')}</button>
+            </div>
+          ))}
+          <button type="button" className={css.backupButton} onClick={() => { setPwHistory(null); setPwHistoryFor(null) }}>{t('cancel')}</button>
+        </div>
+      )}
 
       {state.status === 'loading' && <p className={css.status}>{t('loading')}</p>}
       {state.status === 'error' && (
@@ -2495,6 +2556,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     <button type="button" onClick={() => window.open(entry.url!, '_blank', 'noopener')} title={t('openUrlHint')}>{t('openUrl')}</button>
                   )}
                   <button type="button" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly || locked} title={t('touchHint')}>{t('touch')}</button>
+                  <button type="button" onClick={() => void showPasswordHistory(entry.id)} disabled={busy || locked} title={t('pwHistoryHint')}>{t('pwHistory')}</button>
                   <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly || locked}>{t('edit')}</button>
                   <button
                     type="button"

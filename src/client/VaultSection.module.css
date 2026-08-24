@@ -342,6 +342,33 @@
 }
 
 .histAdd { color: #2e9e5b; }
+
+.pwHistBox {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 8px;
+  background: var(--dsh-color-surface-2, rgba(128, 128, 128, 0.06));
+}
+
+.pwHistRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.pwHistPwd {
+  font-family: var(--dsh-font-mono, monospace);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.pwHistTime {
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
 .histDanger { color: #cf3d3d; }
 .histUpdate { color: #c98a1b; }
 .histNeutral { opacity: 0.7; }
