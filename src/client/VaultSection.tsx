@@ -1343,6 +1343,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setMessage(t('errTitleEmpty'))
       return
     }
+    // Port must be a number in 1–65535 when provided (inline validation).
+    if (form.port !== undefined && form.port !== '' && !/^\d{1,5}$/.test(form.port.trim())) {
+      setMessage(t('errInvalidPort'))
+      return
+    }
+    if (form.port !== undefined && form.port !== '' && Number(form.port) > 65535) {
+      setMessage(t('errInvalidPort'))
+      return
+    }
     // Editing an existing entry and actually typing a new password: confirm
     // (Bitwarden-style). An empty form password (entry had none, or the user
     // cleared it) is not a change, so it never prompts.
