@@ -305,6 +305,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [attachmentsMap, setAttachmentsMap] = useState<Record<string, Array<{ name: string; size: number }>>>({})
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
@@ -1412,6 +1414,35 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Toggle batch-select mode (Bitwarden-style bulk operations). */
+  function toggleSelectMode(): void {
+    setSelectMode(m => {
+      const next = !m
+      if (!next) setSelectedIds(new Set())
+      return next
+    })
+  }
+
+  /** Delete all selected entries after one confirmation (bulk operation). */
+  async function removeSelected(): Promise<void> {
+    if (selectedIds.size === 0) return
+    if (!window.confirm(t('bulkDeleteConfirm').replace('{n}', String(selectedIds.size)))) return
+    const count = selectedIds.size
+    setBusy(true)
+    try {
+      await Promise.all([...selectedIds].map(id => remove(id)))
+      setSelectedIds(new Set())
+      setSelectMode(false)
+      await refresh()
+      refreshHealth()
+      setMessage(t('bulkDeleted').replace('{n}', String(count)))
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Copy a field value to the clipboard and flash the row. */
   const clipboardTimer = useRef<number | null>(null)
   const CLIPBOARD_CLEAR_MS = 30_000
@@ -1629,7 +1660,34 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
           + {t('add')}
         </button>
+        {!readonly && !locked && (
+          <button type="button" className={selectMode ? `${css.dupMerge} ${css.selectActive}` : css.dupMerge} onClick={toggleSelectMode} disabled={busy}>
+            {selectMode ? t('bulkDone') : t('bulkSelect')}
+          </button>
+        )}
       </div>
+      {selectMode && (
+        <div className={css.bulkBar}>
+          <label className={css.bulkItem}>
+            <input
+              type="checkbox"
+              checked={state.status === 'ready' && state.entries.length > 0 && [...state.entries].every(e => selectedIds.has(e.id))}
+              onChange={event => {
+                if (state.status !== 'ready') return
+                const ids = new Set(selectedIds)
+                for (const e of state.entries) {
+                  if (event.target.checked) ids.add(e.id)
+                  else ids.delete(e.id)
+                }
+                setSelectedIds(ids)
+              }}
+            />
+            <span>{t('bulkSelectAll')}</span>
+          </label>
+          <span className={css.bulkCount}>{t('bulkSelected')}: {selectedIds.size}</span>
+          <button type="button" className={css.dangerButton} onClick={() => void removeSelected()} disabled={busy || selectedIds.size === 0}>{t('bulkDelete')}</button>
+        </div>
+      )}
       </div>)}
 
       {message !== null && <p role="alert" className={css.error}>{message}</p>}
@@ -2256,7 +2314,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const frac = remaining !== undefined ? remaining / 30 : 0
             const code = totpInfo?.code
             return (
-              <li key={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}`}>
+              <li key={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}${selectedIds.has(entry.id) ? ` ${css.rowSelected}` : ''}`}>
+                {selectMode && (
+                  <input
+                    type="checkbox"
+                    className={css.rowCheck}
+                    checked={selectedIds.has(entry.id)}
+                    onChange={event => {
+                      setSelectedIds(prev => {
+                        const next = new Set(prev)
+                        if (event.target.checked) next.add(entry.id)
+                        else next.delete(entry.id)
+                        return next
+                      })
+                    }}
+                    aria-label={entry.title}
+                  />
+                )}
                 <div
                   className={css.rowMain}
                   role="button"

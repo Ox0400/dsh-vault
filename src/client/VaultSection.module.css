@@ -35,6 +35,45 @@
   flex-wrap: wrap;
 }
 
+.selectActive {
+  border-color: var(--dsh-color-primary, #2e9e5b);
+  color: var(--dsh-color-primary, #2e9e5b);
+}
+
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  background: var(--dsh-color-surface-2, rgba(128, 128, 128, 0.08));
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+
+.bulkItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.bulkCount {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.rowCheck {
+  margin: 0 8px 0 0;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.rowSelected {
+  outline: 1px solid var(--dsh-color-primary, #2e9e5b);
+  border-radius: 4px;
+}
+
 .searchBox {
   flex: 1 1 150px;
   min-width: 150px;
