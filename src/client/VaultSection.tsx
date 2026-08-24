@@ -2326,9 +2326,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
             const ts = Number((ev as Record<string, unknown>).at)
             const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
+            const evTitle = String(ev.title ?? ev.id ?? '')
             return (
               <p key={i} className={`${css.reportLine} ${cls}`}>
-                {icon} {action} · {String(ev.title ?? ev.id ?? '')}{when !== '' && ` · ${when}`}
+                {icon} {action} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
               </p>
             )
           })}
