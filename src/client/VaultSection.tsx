@@ -299,7 +299,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number; separator: string; wordDigits: boolean }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4, separator: '-', wordDigits: true })
   const [showGenOpts, setShowGenOpts] = useState(false)
-  const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string } | null>(null)
+  const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string; bits: number } | null>(null)
   const [tplList, setTplList] = useState<Array<{ name: string; kind: string; fields: Record<string, string> }>>([])
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
@@ -377,7 +377,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     if (pw.length === 0) { setPwStrength(null); return }
     const timer = window.setTimeout(() => {
       void strength(pw).then(
-        r => setPwStrength({ score: r.score, verdict: r.verdict }),
+        r => setPwStrength({ score: r.score, verdict: r.verdict, bits: r.bits }),
         () => setPwStrength(null),
       )
     }, 250)
@@ -2604,7 +2604,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             {pwStrength !== null && (
               <div className={css.pwMeter}>
                 <div className={`${css.pwBar} ${pwStrength.score >= 60 ? css.pwStrong : pwStrength.score >= 40 ? css.pwFair : css.pwWeak}`} style={{ width: `${pwStrength.score}%` }} />
-                <span className={css.pwLabel}>{t('strengthLabel')}: {pwStrength.score}/100 ({t(VERDICT_KEYS_SHORT[pwStrength.verdict] ?? 'verdictGood')})</span>
+                <span className={css.pwLabel}>{t('strengthLabel')}: {pwStrength.score}/100 ({t(VERDICT_KEYS_SHORT[pwStrength.verdict] ?? 'verdictGood')}) · {t('entropyLabel')}: {pwStrength.bits} bits</span>
               </div>
             )}
             {showGenOpts && (
