@@ -220,7 +220,7 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
 const VERDICT_KEYS: Record<string, VaultLocaleKey> = { good: 'verdictGood', fair: 'verdictFair', poor: 'verdictPoor' }
 const TAB_KEYS: Record<string, VaultLocaleKey> = {
   entries: 'tabEntries', security: 'tabSecurity', transfer: 'tabTransfer',
-  backup: 'tabBackup', permissions: 'tabPermissions', sessions: 'tabSessions', trash: 'tabTrash',
+  backup: 'tabBackup', permissions: 'tabPermissions', sessions: 'tabSessions', audit: 'tabAudit', trash: 'tabTrash',
 }
 const VERDICT_KEYS_SHORT: Record<string, VaultLocaleKey> = { weak: 'verdictPoor', fair: 'verdictFair', strong: 'verdictGood', 'very strong': 'verdictGood' }
 const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
@@ -312,9 +312,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [pwHistory, setPwHistory] = useState<Array<{ password: string; at: number }> | null>(null)
   const [pwHistoryFor, setPwHistoryFor] = useState<string | null>(null)
   const [pwHistRevealed, setPwHistRevealed] = useState<number | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
-  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'trash'>('entries')
+  const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
@@ -1541,6 +1542,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const result = await totp(id)
       setTotpMap(previous => ({ ...previous, [id]: { code: result.code, until: Date.now() + result.secondsRemaining * 1000 } }))
+      // Auto-copy the code (Bitwarden/1Password-style one-tap flow).
+      void copyValue(id, result.code)
     } catch {
       setTotpMap(previous => ({ ...previous, [id]: { code: t('error'), until: 0 } }))
     } finally {
@@ -1622,7 +1625,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
 
       <nav className={css.tabs} aria-label={t('sectionTabs')}>
-        {(['entries', 'security', 'transfer', 'backup', 'permissions', 'sessions', 'trash'] as const).map(tab => (
+        {(['entries', 'security', 'transfer', 'backup', 'permissions', 'sessions', 'audit', 'trash'] as const).map(tab => (
           <button
             key={tab}
             type="button"
@@ -1819,22 +1822,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {recentEntries.map((e, i) => (
             <p key={i} className={css.reportLine}>{String(e.title ?? '')}{relTime((e as Record<string, unknown>).updatedAt) !== '' && ` · ${relTime((e as Record<string, unknown>).updatedAt)}`}</p>
           ))}
-        </div>
-      )}
-
-      {recentEvents.length > 0 && (
-        <div className={css.reportBox}>
-          <p className={css.reportTitle}>{t('recentActivity')}</p>
-          {recentEvents.slice(0, 12).map((ev, i) => {
-            const action = String(ev.action ?? '')
-            const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑️' : action === 'restore' ? '♻️' : action === 'purge' ? '🔥' : action === 'update' ? '✏️' : '•'
-            const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
-            return (
-              <p key={i} className={`${css.reportLine} ${cls}`}>
-                {icon} {action} · {String(ev.title ?? ev.id ?? '')}{relTime((ev as Record<string, unknown>).at) !== '' && ` · ${relTime((ev as Record<string, unknown>).at)}`}
-              </p>
-            )
-          })}
         </div>
       )}
 
@@ -2310,6 +2297,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       )}
       </div>)}
 
+      {activeTab === 'audit' && (<div className={css.tabPane}>
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('recentActivity')}</p>
+          {recentEvents.length === 0 && <p className={css.empty}>{t('recentActivityEmpty')}</p>}
+          {recentEvents.slice(0, 30).map((ev, i) => {
+            const action = String(ev.action ?? '')
+            const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑️' : action === 'restore' ? '♻️' : action === 'purge' ? '🔥' : action === 'update' ? '✏️' : '•'
+            const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
+            return (
+              <p key={i} className={`${css.reportLine} ${cls}`}>
+                {icon} {action} · {String(ev.title ?? ev.id ?? '')}{relTime((ev as Record<string, unknown>).at) !== '' && ` · ${relTime((ev as Record<string, unknown>).at)}`}
+              </p>
+            )
+          })}
+        </div>
+      </div>)}
+
       {activeTab === 'trash' && (<div className={css.tabPane}>
       {trashEntries.length === 0 && <p className={css.empty}>{t('trashEmpty')}</p>}
       {trashEntries.length > 0 && (
@@ -2539,12 +2543,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   {copiedId === entry.id && <span className={css.copied}>{t('copied')} · {t('clearsIn30s')}</span>}
                   <button
                     type="button"
+                    className={css.actionPrimary}
                     onClick={() => void copyValue(entry.id, entry.username ?? entry.title)}
                     disabled={busy || readonly || locked}
                     title={entry.username !== undefined && entry.username !== '' ? t('copyUsernameHint') : t('copyTitleHint')}
                   >{entry.username !== undefined && entry.username !== '' ? t('copyUsername') : t('copy')}</button>
                   <button
                     type="button"
+                    className={css.actionPrimary}
                     onClick={() => {
                       setBusy(true)
                       void get(entry.id).then(r => {
@@ -2554,23 +2560,31 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     }}
                     disabled={busy || readonly || locked}
                   >{t('copyPassword')}</button>
-                  <button type="button" onClick={() => void showTotp(entry.id)} disabled={busy || locked}>{t('totp')}</button>
-                  <button type="button" onClick={() => void showTotpUri(entry.id)} disabled={busy || locked} title={t('totpUriHint')}>{t('totpUri')}</button>
                   {code !== undefined && (
-                    <button type="button" onClick={() => void copyValue(entry.id, code)} disabled={busy || locked}>{t('copyCode')}</button>
+                    <button type="button" className={css.actionPrimary} onClick={() => void copyValue(entry.id, code)} disabled={busy || locked}>{t('copyCode')}</button>
                   )}
-                  {entry.url !== undefined && entry.url !== '' && (
-                    <button type="button" onClick={() => window.open(entry.url!, '_blank', 'noopener')} title={t('openUrlHint')}>{t('openUrl')}</button>
-                  )}
-                  <button type="button" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly || locked} title={t('touchHint')}>{t('touch')}</button>
-                  <button type="button" onClick={() => void showPasswordHistory(entry.id)} disabled={busy || locked} title={t('pwHistoryHint')}>{t('pwHistory')}</button>
-                  <button type="button" onClick={() => void startEdit(entry.id)} disabled={busy || readonly || locked}>{t('edit')}</button>
-                  <button
-                    type="button"
-                    className={css.deleteButton}
-                    onClick={() => void removeEntry(entry.id)}
-                    disabled={busy || readonly || locked}
-                  >{t('delete')}</button>
+                  <span className={css.moreWrap}>
+                    <button
+                      type="button"
+                      className={css.moreButton}
+                      aria-haspopup="menu"
+                      aria-expanded={openMenuId === entry.id}
+                      onClick={event => { event.stopPropagation(); setOpenMenuId(openMenuId === entry.id ? null : entry.id) }}
+                    >⋯</button>
+                    {openMenuId === entry.id && (
+                      <span className={css.moreMenu} role="menu" onClick={() => setOpenMenuId(null)}>
+                        <button type="button" role="menuitem" onClick={() => void showTotp(entry.id)} disabled={busy || locked}>{t('totp')}</button>
+                        <button type="button" role="menuitem" onClick={() => void showTotpUri(entry.id)} disabled={busy || locked}>{t('totpUri')}</button>
+                        {entry.url !== undefined && entry.url !== '' && (
+                          <button type="button" role="menuitem" onClick={() => window.open(entry.url!, '_blank', 'noopener')}>{t('openUrl')}</button>
+                        )}
+                        <button type="button" role="menuitem" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly || locked}>{t('touch')}</button>
+                        <button type="button" role="menuitem" onClick={() => void showPasswordHistory(entry.id)} disabled={busy || locked}>{t('pwHistory')}</button>
+                        <button type="button" role="menuitem" onClick={() => void startEdit(entry.id)} disabled={busy || readonly || locked}>{t('edit')}</button>
+                        <button type="button" role="menuitem" className={css.deleteButton} onClick={() => void removeEntry(entry.id)} disabled={busy || readonly || locked}>{t('delete')}</button>
+                      </span>
+                    )}
+                  </span>
                 </div>
               </li>
             )
