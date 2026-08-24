@@ -1587,6 +1587,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <option value="favorite">{t('sortFavorite')}</option>
           <option value="smart">{t('sortSmart')}</option>
         </select>
+        {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
+          <span className={css.healthSummary} title={t('healthSummaryHint')}>
+            {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
+            {report.reused.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>}
+            {report.no2fa.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('no2fa')}: {report.no2fa.length}</span>}
+            {report.httpSites.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('httpSites')}: {report.httpSites.length}</span>}
+            {report.rotation.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>}
+          </span>
+        )}
         <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
           + {t('add')}
         </button>
