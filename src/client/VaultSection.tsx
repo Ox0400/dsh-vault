@@ -1396,6 +1396,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       await remove(id)
       await refresh()
+      refreshHealth()
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -2147,7 +2148,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               <div className={css.rowActions}>
                 <button
                   type="button"
-                  onClick={() => { void restore(entry.id).then(() => { void trash().then(setTrashEntries); void refresh() }) }}
+                  onClick={() => { void restore(entry.id).then(() => { void trash().then(setTrashEntries); void refresh(); refreshHealth() }) }}
                   disabled={busy || readonly || locked}
                 >{t('restore')}</button>
                 <button
@@ -2174,6 +2175,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               void undeleteAll().then(() => {
                 void trash().then(setTrashEntries)
                 void refresh()
+                refreshHealth()
                 setBusy(false)
               }, () => setBusy(false))
             }}
