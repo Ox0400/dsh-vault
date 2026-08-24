@@ -27,6 +27,7 @@ export interface VaultSummaryWire {
   fields?: Record<string, string>
   cardExpiry?: string
   cardHolder?: string
+  hasOtp?: boolean
   createdAt?: number
   updatedAt?: number
 }
@@ -1242,6 +1243,28 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       }
     }
   }, [nowTick, totpMap, totp])
+
+  // KeePassXC #9247-style inline TOTP: auto-fetch the current code for every
+  // entry that carries an otpSecret, so the row shows live digits without a
+  // menu click. Batched (max 25 per pass) so huge vaults never burst requests;
+  // entries already cached with a live window are skipped. The ticker above
+  // keeps them fresh across 30s boundaries.
+  useEffect(() => {
+    if (state.status !== 'ready') return
+    const targets = state.entries
+      .filter(e => e.hasOtp === true)
+      .filter(e => {
+        const info = totpMap[e.id]
+        return info === undefined || info.until <= 0 || info.code === t('error')
+      })
+      .slice(0, 25)
+    for (const e of targets) {
+      void totp(e.id).then(
+        result => setTotpMap(previous => ({ ...previous, [e.id]: { code: result.code, until: Date.now() + result.secondsRemaining * 1000 } })),
+        () => { /* secret removed or vault locked; row simply shows no code */ },
+      )
+    }
+  }, [state.status === 'ready' ? state.entries : null, totpMap, totp, t])
 
   // Load attachments when an entry is expanded.
   useEffect(() => {
@@ -2576,8 +2599,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       <code className={css.uriCode}>{uriMap[entry.id]}</code>
                     </span>
                   )}
-                  {code !== undefined && (
-                    <span className={css.totp}>
+                  {entry.hasOtp === true && code !== undefined && (
+                    <span className={css.totp} title={t('totpInlineHint')}>
                       <svg className={css.totpRing} width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                         <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
                         <circle

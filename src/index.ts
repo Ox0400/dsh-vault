@@ -5528,6 +5528,9 @@ export type VaultEntrySummaryWire = {
   color?: string
   cardExpiry?: string
   cardHolder?: string
+  /** True when the entry carries a TOTP secret, so the UI can fetch and show
+   * the current one-time code inline (the secret itself never leaves the host). */
+  hasOtp?: boolean
   /** Custom key/value fields (non-secret metadata the user chose to store). */
   fields?: Record<string, string>
   createdAt?: number
@@ -5558,6 +5561,7 @@ function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire
     ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
     ...(entry.cardExpiry !== undefined ? { cardExpiry: entry.cardExpiry } : {}),
     ...(entry.cardHolder !== undefined ? { cardHolder: entry.cardHolder } : {}),
+    ...((entry as VaultEntry).otpSecret !== undefined || (entry as VaultEntrySummary).hasOtp === true ? { hasOtp: true } : {}),
     ...(entry.fields !== undefined && Object.keys(entry.fields).length > 0
       ? { fields: Object.fromEntries(Object.entries(entry.fields).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])) as Record<string, string> }
       : {}),

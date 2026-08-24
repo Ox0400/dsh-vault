@@ -150,6 +150,24 @@ test('VaultGateway totp uses a stored secret', async () => {
     const result = await gateway.totp(added.id)
     expect(result.code).toMatch(/^\d{6}$/)
     expect(result.label).toBe('2FA')
+    expect(result.secondsRemaining).toBeGreaterThanOrEqual(1)
+    expect(result.secondsRemaining).toBeLessThanOrEqual(30)
+  })
+})
+
+test('VaultGateway list summary flags hasOtp without leaking the secret', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'WithOtp', otpSecret: 'GEZDGNBVGY3TQOJQ' })
+    await gateway.add({ title: 'Plain', password: 'pw' })
+    const entries = (await gateway.list()).entries
+    const withOtp = entries.find(e => e.title === 'WithOtp')!
+    const plain = entries.find(e => e.title === 'Plain')!
+    // The summary advertises OTP presence so the UI can fetch the live code…
+    expect(withOtp.hasOtp).toBe(true)
+    expect(plain.hasOtp).toBe(undefined)
+    // …but never ships the secret itself to the client.
+    expect('otpSecret' in withOtp).toBe(false)
+    expect(JSON.stringify(withOtp)).not.toContain('GEZDGNBVGY3TQOJQ')
   })
 })
 
