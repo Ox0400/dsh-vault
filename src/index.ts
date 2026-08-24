@@ -4360,6 +4360,7 @@ export class VaultGateway extends TypertRemoteService {
     for (const e of store.listTrash()) {
       if (await store.restore(e.id)) restored++
     }
+    if (restored > 0) void this.autoBackup()
     return { restored }
   }
 
@@ -4368,7 +4369,9 @@ export class VaultGateway extends TypertRemoteService {
   async restore(id: string): Promise<{ restored: boolean }> {
     this.assertWritable('restore')
     const store = await this.guardedStore()
-    return { restored: await store.restore(id) }
+    const restored = await store.restore(id)
+    if (restored) void this.autoBackup()
+    return { restored }
   }
 
   /** Permanently remove a trashed (or active) entry from the Settings UI
@@ -4377,7 +4380,9 @@ export class VaultGateway extends TypertRemoteService {
   async purge(id: string): Promise<{ purged: boolean }> {
     this.assertWritable('purge')
     const store = await this.guardedStore()
-    return { purged: await store.purge(id) }
+    const purged = await store.purge(id)
+    if (purged) void this.autoBackup()
+    return { purged }
   }
 
   /** Days since last backup + backup count (no secrets). */
@@ -4405,6 +4410,14 @@ export class VaultGateway extends TypertRemoteService {
       }
     } catch { /* no dir yet */ }
     return { path: backup, kept: Math.max(1, Math.min(total, max)), pruned }
+  }
+
+  /** Best-effort auto-backup after a write (1Password-style). Retention is
+   * bounded by the configured keep count; failures never break the write. */
+  private async autoBackup(): Promise<void> {
+    try {
+      await this.backup(this.backupRetention)
+    } catch { /* backup is best-effort */ }
   }
 
   @Remote('backupStatus')
@@ -5245,6 +5258,7 @@ export class VaultGateway extends TypertRemoteService {
   async setFavorite(id: string, favorite: boolean): Promise<{ found: boolean }> {
     const store = await this.guardedStore()
     const updated = await store.setFavorite(id, favorite)
+    if (updated !== undefined) void this.autoBackup()
     return { found: updated !== undefined }
   }
 
@@ -5303,6 +5317,7 @@ export class VaultGateway extends TypertRemoteService {
     if (!patch.title.trim()) throw new Error('vault: title must not be empty')
     const store = await this.guardedStore()
     const entry = await store.add(patch)
+    void this.autoBackup()
     return toSummary(entry)
   }
 
@@ -5313,6 +5328,7 @@ export class VaultGateway extends TypertRemoteService {
     const store = await this.guardedStore()
     const updated = await store.update(id, patch)
     if (updated === undefined) return { found: false }
+    void this.autoBackup()
     return { found: true, entry: toSummary(updated) }
   }
 
@@ -5321,7 +5337,9 @@ export class VaultGateway extends TypertRemoteService {
   async delete(id: string): Promise<{ deleted: boolean }> {
     this.assertWritable('delete')
     const store = await this.guardedStore()
-    return { deleted: await store.delete(id) }
+    const deleted = await store.delete(id)
+    if (deleted) void this.autoBackup()
+    return { deleted }
   }
 
   /** Generate the current TOTP code for a stored otpSecret (or bare secret). */

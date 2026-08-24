@@ -199,14 +199,15 @@ test('VaultGateway keychainImport validates arguments before touching the keycha
   })
 })
 
-test('VaultGateway backup/backups/restoreBackup round trip', async () => {
-  await withGateway(async gateway => {
+test('VaultGateway backup/backups/restoreBackup round trip', async () => {  await withGateway(async gateway => {
     await gateway.add({ title: 'GitHub', username: 'ada', password: 'hunter2!' })
     const bk = await gateway.backup()
     expect(bk.path).toMatch(/-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/)
 
+    // The add() already auto-backup'd (1Password-style); the manual backup is
+    // the newest entry in the list.
     const list = await gateway.backups(5)
-    expect(list.length).toBe(1)
+    expect(list.length).toBeGreaterThanOrEqual(1)
     expect(list[0]!.path).toBe(bk.path)
 
     // Mutate the vault, then MERGE from the backup (default): delete 'GitHub'
@@ -260,7 +261,8 @@ test('VaultGateway backup/backups follow the ACTIVE vault after switchVault', as
       await gw.add({ title: 'A', username: 'a', password: 'x' })
       const bk = await gw.backup()
       expect(bk.path).toMatch(/\/vault\/[a-z]+-backups-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-[0-9a-f]{6})?\.json$/)
-      expect((await gw.backups(5)).length).toBe(1)
+      // add() auto-backup'd first; the manual backup is the newest entry.
+      expect((await gw.backups(5)).length).toBeGreaterThanOrEqual(1)
       // Switch to a second named vault: the same backup directory is used,
       // but the backup snapshots beta's vault file.
       await gw.switchVault('beta')
@@ -911,5 +913,22 @@ test('VaultGateway templates includes new built-ins (wifi/server/database/card)'
     }
     const wifi = builtin.find(t => t.name === 'builtin:wifi')!
     expect(wifi.fields.password).toBeDefined()
+  })
+})
+
+test('VaultGateway auto-backs-up after writes (1Password-style)', async () => {
+  await withGateway(async gateway => {
+    const before = (await gateway.backups(5)).length
+    await gateway.add({ title: 'AutoBk', password: 'pw' })
+    await new Promise(res => setTimeout(res, 50))
+    const afterAdd = (await gateway.backups(5)).length
+    expect(afterAdd).toBeGreaterThan(before)
+    // delete also backs up
+    const all = (await gateway.list()).entries
+    const auto = all.find(e => e.title === 'AutoBk')!
+    await gateway.delete(auto.id)
+    await new Promise(res => setTimeout(res, 50))
+    const afterDel = (await gateway.backups(5)).length
+    expect(afterDel).toBeGreaterThan(afterAdd)
   })
 })
