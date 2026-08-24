@@ -341,6 +341,11 @@
   opacity: 0.8;
 }
 
+.histAdd { color: #2e9e5b; }
+.histDanger { color: #cf3d3d; }
+.histUpdate { color: #c98a1b; }
+.histNeutral { opacity: 0.7; }
+
 .reportSub {
   color: var(--dsh-color-text-2, #666);
   font-size: 12px;

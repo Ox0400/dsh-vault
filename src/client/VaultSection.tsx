@@ -1245,11 +1245,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         rotation().catch(() => []),
         health().catch(() => null),
         recent().catch(() => []),
+        history().catch(() => []),
         duplicates().catch(() => null),
-      ]).then(([st, bk, rot, hl, rc, dp]) => {
+      ]).then(([st, bk, rot, hl, rc, hst, dp]) => {
         if (dp !== null && typeof dp === 'object' && (dp as { groups?: number }).groups !== undefined) {
           setDupGroups((dp as { groups: number }).groups)
         }
+        if (Array.isArray(hst)) setRecentEvents(hst as Array<Record<string, unknown>>)
         duplicateGroups().then(setDupList).catch(() => {})
         verifyAll().then(setAudit).catch(() => {})
         tags().then(setTagList).catch(() => {})
@@ -1734,11 +1736,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {recentEvents.length > 0 && (
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentActivity')}</p>
-          {recentEvents.map((ev, i) => (
-            <p key={i} className={css.reportLine}>
-              {String(ev.action ?? '')} · {String(ev.title ?? ev.id ?? '')}{relTime((ev as Record<string, unknown>).at) !== '' && ` · ${relTime((ev as Record<string, unknown>).at)}`}
-            </p>
-          ))}
+          {recentEvents.slice(0, 12).map((ev, i) => {
+            const action = String(ev.action ?? '')
+            const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑️' : action === 'restore' ? '♻️' : action === 'purge' ? '🔥' : action === 'update' ? '✏️' : '•'
+            const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
+            return (
+              <p key={i} className={`${css.reportLine} ${cls}`}>
+                {icon} {action} · {String(ev.title ?? ev.id ?? '')}{relTime((ev as Record<string, unknown>).at) !== '' && ` · ${relTime((ev as Record<string, unknown>).at)}`}
+              </p>
+            )
+          })}
         </div>
       )}
 
