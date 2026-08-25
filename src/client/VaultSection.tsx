@@ -1479,6 +1479,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       await remove(id)
       await refresh()
       refreshHealth()
+      // Keep the trash tab in sync so the just-deleted entry shows up there.
+      await trash().then(setTrashEntries).catch(() => {})
       setMessage(title !== '' ? t('deletedWithTitle').replace('{name}', title) : t('deleted'))
     } catch (err) {
       setMessage(errText(err))
@@ -1508,6 +1510,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setSelectMode(false)
       await refresh()
       refreshHealth()
+      // Keep the trash tab in sync (bulk delete moves every entry to trash).
+      await trash().then(setTrashEntries).catch(() => {})
       setMessage(t('bulkDeleted').replace('{n}', String(count)))
     } catch (err) {
       setMessage(errText(err))
