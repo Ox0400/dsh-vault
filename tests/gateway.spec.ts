@@ -101,6 +101,63 @@ test('VaultGateway summary carries custom fields for the detail view', async () 
   })
 })
 
+test('VaultGateway clone round-trip copies every editable field', async () => {
+  await withGateway(async gateway => {
+    const original = await gateway.add({
+      title: 'CloneMe', kind: 'login', username: 'alice', email: 'a@b.c', phone: '123',
+      host: 'example.com', port: '443', apiKey: 'AK', secret: 'SEC', accessToken: 'AT',
+      refreshToken: 'RT', otpSecret: 'GEZDGNBVGY3TQOJQ', url: 'https://example.com',
+      notes: 'note', tags: ['t1', 't2'], icon: '🔑', color: '#ff0000',
+      expiresAt: 4102444800000, rotationDays: 90, sensitivity: 'high', favorite: true,
+      fields: { region: 'us-east-1', team: 'infra' },
+    })
+    // Mirror the client clone path: get the full entry, then add it back with
+    // a title suffix and without the identity fields.
+    const got = await gateway.get(original.id)
+    expect(got.found).toBe(true)
+    const e = got.entry!
+    const patch = {
+      title: `${e.title} (copy)`,
+      kind: e.kind, username: e.username, email: e.email, phone: e.phone,
+      host: e.host, port: e.port, apiKey: e.apiKey, secret: e.secret,
+      accessToken: e.accessToken, refreshToken: e.refreshToken, otpSecret: e.otpSecret,
+      url: e.url, notes: e.notes, tags: e.tags, icon: e.icon, color: e.color,
+      expiresAt: e.expiresAt, rotationDays: e.rotationDays,
+      sensitivity: e.sensitivity, favorite: e.favorite,
+      fields: e.fields,
+    }
+    const clone = await gateway.add(patch)
+    expect(clone.title).toBe('CloneMe (copy)')
+    expect(clone.id).not.toBe(original.id)
+    // Every copied field matches the original.
+    const c = (await gateway.get(clone.id)).entry!
+    expect(c.kind).toBe('login')
+    expect(c.username).toBe('alice')
+    expect(c.email).toBe('a@b.c')
+    expect(c.phone).toBe('123')
+    expect(c.host).toBe('example.com')
+    expect(c.port).toBe('443')
+    expect(c.apiKey).toBe('AK')
+    expect(c.secret).toBe('SEC')
+    expect(c.accessToken).toBe('AT')
+    expect(c.refreshToken).toBe('RT')
+    expect(c.otpSecret).toBe('GEZDGNBVGY3TQOJQ')
+    expect(c.url).toBe('https://example.com')
+    expect(c.notes).toBe('note')
+    expect(c.tags).toEqual(['t1', 't2'])
+    expect(c.icon).toBe('🔑')
+    expect(c.color).toBe('#ff0000')
+    expect(c.expiresAt).toBe(4102444800000)
+    expect(c.rotationDays).toBe(90)
+    expect(c.sensitivity).toBe('high')
+    expect(c.favorite).toBe(true)
+    expect(c.fields).toEqual({ region: 'us-east-1', team: 'infra' })
+    // The clone advertises OTP so the inline code shows for it too.
+    const inList = (await gateway.list()).entries.find(x => x.id === clone.id)
+    expect(inList?.hasOtp).toBe(true)
+  })
+})
+
 test('VaultGateway setFavorite pins and unpins an entry', async () => {
   await withGateway(async gateway => {
     const added = await gateway.add({ title: 'PinMe' })

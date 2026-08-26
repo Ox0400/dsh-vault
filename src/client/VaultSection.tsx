@@ -1520,6 +1520,55 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Clone an entry (Bitwarden/KeePassXC-style): copy every editable field
+   * into a new entry with a localized title suffix. Attachments and password
+   * history stay with the original; the copy gets its own timestamps. */
+  async function cloneEntry(id: string): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await get(id)
+      if (!r.found || r.entry === undefined) {
+        setMessage(t('entryNotFound'))
+        return
+      }
+      const e = r.entry
+      const patch = {
+        title: `${e.title}${t('cloneSuffix')}`,
+        ...(e.kind !== undefined ? { kind: e.kind } : {}),
+        ...(e.username !== undefined ? { username: e.username } : {}),
+        ...(e.email !== undefined ? { email: e.email } : {}),
+        ...(e.phone !== undefined ? { phone: e.phone } : {}),
+        ...(e.password !== undefined ? { password: e.password } : {}),
+        ...(e.host !== undefined ? { host: e.host } : {}),
+        ...(e.port !== undefined ? { port: e.port } : {}),
+        ...(e.privateKey !== undefined ? { privateKey: e.privateKey } : {}),
+        ...(e.apiKey !== undefined ? { apiKey: e.apiKey } : {}),
+        ...(e.secret !== undefined ? { secret: e.secret } : {}),
+        ...(e.accessToken !== undefined ? { accessToken: e.accessToken } : {}),
+        ...(e.refreshToken !== undefined ? { refreshToken: e.refreshToken } : {}),
+        ...(e.expiresAt !== undefined ? { expiresAt: e.expiresAt } : {}),
+        ...(e.rotationDays !== undefined ? { rotationDays: e.rotationDays } : {}),
+        ...(e.sensitivity !== undefined ? { sensitivity: e.sensitivity } : {}),
+        ...(e.favorite !== undefined ? { favorite: e.favorite } : {}),
+        ...(e.otpSecret !== undefined ? { otpSecret: e.otpSecret } : {}),
+        ...(e.url !== undefined ? { url: e.url } : {}),
+        ...(e.notes !== undefined ? { notes: e.notes } : {}),
+        ...(e.tags !== undefined ? { tags: e.tags } : {}),
+        ...(e.icon !== undefined ? { icon: e.icon } : {}),
+        ...(e.color !== undefined ? { color: e.color } : {}),
+        ...(e.fields !== undefined ? { fields: e.fields } : {}),
+      }
+      const added = await add(patch)
+      await refresh()
+      refreshHealth()
+      setMessage(t('clonedWithTitle').replace('{name}', added.title))
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Show an entry's password history (1Password-style) and allow rollback. */
   async function showPasswordHistory(id: string): Promise<void> {
     setBusy(true)
@@ -2702,6 +2751,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         <button type="button" role="menuitem" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly || locked}>{t('touch')}</button>
                         <button type="button" role="menuitem" onClick={() => void showPasswordHistory(entry.id)} disabled={busy || locked}>{t('pwHistory')}</button>
                         <button type="button" role="menuitem" onClick={() => void startEdit(entry.id)} disabled={busy || readonly || locked}>{t('edit')}</button>
+                        <button type="button" role="menuitem" onClick={() => void cloneEntry(entry.id)} disabled={busy || readonly || locked}>{t('clone')}</button>
                         <button type="button" role="menuitem" className={css.deleteButton} onClick={() => void removeEntry(entry.id)} disabled={busy || readonly || locked}>{t('delete')}</button>
                       </span>
                     )}
