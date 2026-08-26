@@ -799,3 +799,13 @@
 .tabPane {
   margin-top: 2px;
 }
+
+/* Search-result highlight (Bitwarden/KeePassXC-style matched term marking). */
+.hit {
+  background: rgba(255, 200, 0, 0.32);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

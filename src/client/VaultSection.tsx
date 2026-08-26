@@ -236,6 +236,33 @@ function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilte
   return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).length
 }
 
+/** Wrap case-insensitive matches of `term` inside `text` with <mark> spans for
+ * search-result highlighting. Returns React nodes (never innerHTML), so user
+ * input can't inject markup; regex metacharacters are escaped. */
+function highlightText(text: string, term: string): ReactNode {
+  const needle = term.trim()
+  if (needle.length === 0 || text.length === 0) return text
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  let re: RegExp
+  try {
+    re = new RegExp(escaped, 'gi')
+  } catch {
+    return text
+  }
+  const parts: ReactNode[] = []
+  let last = 0
+  let key = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m[0].length === 0) { re.lastIndex++; continue }
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    parts.push(<mark key={key++} className={css.hit}>{m[0]}</mark>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts.length > 0 ? parts : text
+}
+
 const KIND_KEYS: Record<string, VaultLocaleKey> = {
   login: 'kindLogin',
   ssh: 'kindSsh',
@@ -1946,6 +1973,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {vaultStats !== null && typeof vaultStats.withTotp === 'number' && vaultStats.withTotp > 0 && (
             <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
+          {query.trim().length > 0 && state.status === 'ready' && (
+            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter)))}</span>
+          )}
         </div>
       )}
       {state.status === 'ready' && state.entries.length === 0 && (
@@ -2625,7 +2655,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       }}
                       onKeyDown={event => event.stopPropagation()}
                     >★</button>
-                    {entry.title}
+                    {highlightText(entry.title, query)}
                     {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
                       <span className={css.highBadge}>{t('highSensitivity')}</span>
                     )}
@@ -2646,7 +2676,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       </span>
                     )}
                   </span>
-                  <span className={css.identity}>{identityLine(entry)}</span>
+                  <span className={css.identity}>{highlightText(identityLine(entry), query)}</span>
                   {uriMap[entry.id] !== undefined && uriMap[entry.id] !== '' && (
                     <span className={css.totp} title={t('totpUriHint')}>
                       <code className={css.uriCode}>{uriMap[entry.id]}</code>
