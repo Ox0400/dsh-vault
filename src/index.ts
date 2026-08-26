@@ -4777,6 +4777,28 @@ export class VaultGateway extends TypertRemoteService {
     return { added, skipped, updated, note: `CSV import: ${added} added, ${updated} updated, ${skipped} skipped (${creds.length} read)` }
   }
 
+  /** Parse a manager CSV and return masked per-row preview info (never the
+   * passwords themselves) so the UI can show exactly what would be imported
+   * before the user confirms — 1Password/Bitwarden-style import preview. */
+  @Remote('previewImportCsv')
+  async previewImportCsv(path: string): Promise<{
+    rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }>
+    total: number
+    skipped: number
+  }> {
+    const raw = await readFile(path, 'utf8')
+    const cleaned = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+    const creds = readPasswordCsv(cleaned)
+    const rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }> = []
+    let skipped = 0
+    for (const c of creds) {
+      const title = c.title.trim()
+      if (title.length === 0) { skipped++; continue }
+      rows.push({ title, kind: 'login', username: c.username, hasPassword: c.password.length > 0 })
+    }
+    return { rows, total: creds.length, skipped }
+  }
+
   /** Import a legacy 1Password 1PIF export. */
   @Remote('import1pif')
   async import1pif(path: string, overwrite?: boolean, dryRun?: boolean): Promise<{ added: number; skipped: number; updated: number; note: string }> {

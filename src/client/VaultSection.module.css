@@ -809,3 +809,31 @@
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+
+/* CSV import preview panel (masked rows, confirm before commit). */
+.previewBox {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.previewScroll {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 6px 0;
+}
+.previewTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.previewTable th,
+.previewTable td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--dsh-color-border, #eee);
+}
+.previewTable th {
+  opacity: 0.7;
+  font-weight: 600;
+}

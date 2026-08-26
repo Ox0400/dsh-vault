@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -50,7 +50,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'setFavorite', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
@@ -400,6 +400,38 @@ test('VaultGateway importManagerCsv imports a Dashlane export', async () => {
     expect(r.added).toBe(2)
     const entries = (await gateway.list()).entries
     expect(entries.some(e => e.title === 'twitter.com' && e.username === 'ostqxi')).toBe(true)
+  })
+})
+
+test('VaultGateway previewImportCsv returns masked rows without leaking passwords', async () => {
+  const csv = join(__dirname, 'fixtures', 'dashlane.csv')
+  await withGateway(async gateway => {
+    const p = await gateway.previewImportCsv(csv)
+    expect(p.total).toBe(2)
+    expect(p.skipped).toBe(0)
+    expect(p.rows.length).toBe(2)
+    const tw = p.rows.find(r => r.title === 'twitter.com')
+    expect(tw?.username).toBe('ostqxi')
+    expect(tw?.hasPassword).toBe(true)
+    // The preview never ships secret values.
+    expect(JSON.stringify(p)).not.toContain('hunter2')
+    // A CSV with a blank title row: the parser falls back to the username
+    // (same as the real import), so it appears in the preview — never the
+    // password. The preview mirrors exactly what would be imported.
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-pv-'))
+    try {
+      const weird = join(dir, 'weird.csv')
+      await writeFile(weird, 'title,username,password,url\n,blank,secret1,http://x\nok,alice,secret2,http://y\n')
+      const p2 = await gateway.previewImportCsv(weird)
+      expect(p2.total).toBe(2)
+      expect(p2.rows.map(r => r.title)).toEqual(['blank', 'ok'])
+      expect(p2.rows.map(r => r.username)).toEqual(['blank', 'alice'])
+      expect(p2.rows.every(r => r.hasPassword === true)).toBe(true)
+      expect(JSON.stringify(p2)).not.toContain('secret1')
+      expect(JSON.stringify(p2)).not.toContain('secret2')
+    } finally {
+      await rmSafe(dir)
+    }
   })
 })
 

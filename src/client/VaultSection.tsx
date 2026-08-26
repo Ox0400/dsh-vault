@@ -103,6 +103,7 @@ export interface VaultSectionInjected {
   keychainImport: (options?: { limit?: number; overwrite?: boolean; preview?: boolean; service?: string }) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   import1password: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importManagerCsv: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
+  previewImportCsv: (path: string) => Promise<{ rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }>; total: number; skipped: number }>
   importEnpass: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   importBitwarden: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
   import1pif: (path: string, overwrite?: boolean, dryRun?: boolean) => Promise<{ added: number; skipped: number; updated: number; note: string }>
@@ -301,7 +302,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
@@ -326,6 +327,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [sessionPasteTitle, setSessionPasteTitle] = useState('')
   const [sysQuery, setSysQuery] = useState('')
   const [sysMatches, setSysMatches] = useState<Array<{ source: string; name: string; username: string }>>([])
+  const [importPreview, setImportPreview] = useState<{ path: string; rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }>; total: number; skipped: number } | null>(null)
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
@@ -662,6 +664,42 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setMessage(null)
     try {
       const r = await importManagerCsv(path.trim(), false)
+      setMessage(r.note)
+      void refresh()
+      refreshHealth()
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Two-step CSV import: prompt for the path, then show a masked row preview
+   * (titles/usernames only, never passwords) with a confirm before commit —
+   * 1Password/Bitwarden-style import safety. */
+  async function runCsvImportPreview(): Promise<void> {
+    const path = window.prompt(t('importManagerCsvPrompt'))
+    if (path === null || path.trim() === '') return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const p = await previewImportCsv(path.trim())
+      setImportPreview({ path: path.trim(), rows: p.rows, total: p.total, skipped: p.skipped })
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Commit the previewed CSV import. */
+  async function confirmCsvImport(): Promise<void> {
+    if (importPreview === null) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await importManagerCsv(importPreview.path, false)
+      setImportPreview(null)
       setMessage(r.note)
       void refresh()
       refreshHealth()
@@ -2124,9 +2162,41 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importManagerCsvDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImportManagerCsv()} disabled={busy || readonly || locked}>{t('importManagerCsv')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void runCsvImportPreview()} disabled={busy || readonly || locked}>{t('importManagerCsv')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>{t('preview')}</button>
         </div>
+        {importPreview !== null && (
+          <div className={css.previewBox}>
+            <p className={css.reportTitle}>{t('previewImportTitle')}</p>
+            <p className={css.reportSub}>{t('previewImportRows').replace('{n}', String(importPreview.total)).replace('{m}', String(importPreview.skipped))}</p>
+            <div className={css.previewScroll}>
+              <table className={css.previewTable}>
+                <thead>
+                  <tr>
+                    <th>{t('fieldTitle')}</th>
+                    <th>{t('fieldKind')}</th>
+                    <th>{t('fieldUsername')}</th>
+                    <th>{t('fieldPassword')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreview.rows.map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.title}</td>
+                      <td>{t(KIND_KEYS[row.kind] ?? 'kindLogin')}</td>
+                      <td>{row.username}</td>
+                      <td>{row.hasPassword ? '●' : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className={css.dupGroup}>
+              <button type="button" className={css.actionPrimary} onClick={() => void confirmCsvImport()} disabled={busy || readonly || locked || importPreview.rows.length === 0}>{t('confirmImport').replace('{n}', String(importPreview.rows.length))}</button>
+              <button type="button" className={css.dupMerge} onClick={() => setImportPreview(null)} disabled={busy}>{t('cancel')}</button>
+            </div>
+          </div>
+        )}
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('importEnpassDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>{t('importEnpass')}</button>

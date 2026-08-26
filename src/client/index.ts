@@ -94,6 +94,7 @@ export function apply(ctx: ClientContext): void {
     keychainImport: (options) => invoke<{ added: number; skipped: number; updated: number; note: string }>('keychainImport', { options: options ?? {} }),
     import1password: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('import1password', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     importManagerCsv: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importManagerCsv', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
+    previewImportCsv: (path) => invoke<{ rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }>; total: number; skipped: number }>('previewImportCsv', { path }),
     importEnpass: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importEnpass', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     importBitwarden: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('importBitwarden', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
     import1pif: (path, overwrite, dryRun) => invoke<{ added: number; skipped: number; updated: number; note: string }>('import1pif', { path, overwrite: overwrite ?? false, dryRun: dryRun ?? false }),
