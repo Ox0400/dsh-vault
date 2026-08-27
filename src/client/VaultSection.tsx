@@ -2829,10 +2829,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         >⧉</button>
                       </span>
                     ))}
-                    {(attachmentsMap[entry.id] ?? []).length > 0 && (
-                      <div className={css.attachBox}>
-                        <strong>{t('attachmentsTitle')}:</strong>
-                        {(attachmentsMap[entry.id] ?? []).map(a => (
+                    <div className={css.attachBox}>
+                      <strong>{t('attachmentsTitle')}:</strong>
+                      {(attachmentsMap[entry.id] ?? []).map(a => (
                           <span key={a.name} className={css.detailItem}>
                             📎 {a.name} ({formatSize(a.size)})
                             <button
@@ -2868,7 +2867,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                           />
                         </label>
                       </div>
-                    )}
                   </div>
                 )}
                 <div className={css.rowActions}>
