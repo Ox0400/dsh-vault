@@ -52,6 +52,9 @@ export interface VaultFullWire {
   sensitivity?: string
   favorite?: boolean
   otpSecret?: string
+  cardNumber?: string
+  cardCvv?: string
+  cardHolder?: string
   url?: string
   notes?: string
   tags?: string[]
@@ -2909,12 +2912,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     onClick={() => {
                       setBusy(true)
                       void get(entry.id).then(r => {
-                        if (r.found && r.entry?.password) void copyValue(entry.id, r.entry.password)
+                        if (r.found && r.entry) {
+                          // Copy the entry's primary secret: for api-key /
+                          // secret / oauth / card kinds the secret lives in a
+                          // different field than `password`, so fall back
+                          // through the kind-appropriate chain.
+                          const e = r.entry
+                          const value = e.password ?? e.apiKey ?? e.secret ?? e.accessToken ?? e.refreshToken ?? e.privateKey ?? e.cardNumber ?? ''
+                          if (value.length > 0) void copyValue(entry.id, value)
+                          else setMessage(t('nothingToCopy'))
+                        }
                         setBusy(false)
                       }, () => setBusy(false))
                     }}
                     disabled={busy || readonly || locked}
-                  >{t('copyPassword')}</button>
+                  >{entry.kind === 'api-key' ? t('copyApiKey') : entry.kind === 'oauth' ? t('copyToken') : entry.kind === 'card' ? t('copyCardNumber') : entry.kind === 'secret' || entry.kind === 'custom' ? t('copyKey') : t('copyPassword')}</button>
                   {code !== undefined && (
                     <button type="button" className={css.actionPrimary} onClick={() => void copyValue(entry.id, code)} disabled={busy || locked}>{t('copyCode')}</button>
                   )}
