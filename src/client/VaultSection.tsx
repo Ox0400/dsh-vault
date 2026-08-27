@@ -234,12 +234,13 @@ const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
   symbols: 'genOptSymbols', excludeAmbiguous: 'genOptExcludeAmbiguous',
 }
 
-/** Number of entries matching the current kind/tag/favorites filters (for
+/** Number of entries matching the current kind/tag/favorites/due filters (for
  * pagination and result counts). */
-function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean): number {
+function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean, dueOnly: boolean, dueMap: Record<string, { due: string; daysLeft: number }>): number {
   return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter)
     && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))
-    && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)).length
+    && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)
+    && (!dueOnly || dueMap[entry.id] !== undefined)).length
 }
 
 /** Wrap case-insensitive matches of `term` inside `text` with <mark> spans for
@@ -355,6 +356,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [favOnly, setFavOnly] = useState(false)
+  const [dueOnly, setDueOnly] = useState(false)
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -1256,6 +1258,40 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     return () => { current = false }
   }, [config, status, listVaults, templates, refreshSessions])
 
+  /** Re-fetch the dashboard metadata (rotation/health/stats/recent/tags/audit/
+   * trash…) so badges, filters and counts stay current after writes. */
+  const refreshMeta = useCallback((): void => {
+    void Promise.all([
+      stats().catch(() => null),
+      backupStatus().catch(() => null),
+      rotation().catch(() => []),
+      health().catch(() => null),
+      recent().catch(() => []),
+      history().catch(() => []),
+      duplicates().catch(() => null),
+    ]).then(([st, bk, rot, hl, rc, hst, dp]) => {
+      if (dp !== null && typeof dp === 'object' && (dp as { groups?: number }).groups !== undefined) {
+        setDupGroups((dp as { groups: number }).groups)
+      }
+      if (Array.isArray(hst)) setRecentEvents(hst as Array<Record<string, unknown>>)
+      duplicateGroups().then(setDupList).catch(() => {})
+      verifyAll().then(setAudit).catch(() => {})
+      tags().then(setTagList).catch(() => {})
+      generatorHistory().then(setGenHistory).catch(() => {})
+      backups(20).then(setBackupList).catch(() => {})
+      trash().then(setTrashEntries).catch(() => {})
+      if (st !== null) setVaultStats(st as Record<string, unknown>)
+      if (bk !== null) setBackupInfo(bk)
+      setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]), strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null, no2fa: ((hl?.no2fa ?? []) as unknown[]), httpSites: ((hl?.httpSites ?? []) as unknown[]), score: Number(hl?.score ?? 100), verdict: String(hl?.verdict ?? 'good') })
+      const due: Record<string, { due: string; daysLeft: number }> = {}
+      for (const item of (rot ?? []) as Array<{ id?: string; due?: string; daysLeft?: number }>) {
+        if (item.id !== undefined && item.due !== undefined) due[item.id] = { due: item.due, daysLeft: item.daysLeft ?? 0 }
+      }
+      setDueMap(due)
+      setRecentEntries((rc ?? []) as Array<Record<string, unknown>>)
+    })
+  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags, generatorHistory, backups])
+
   const refresh = useMemo(() => async () => {
     setState({ status: 'loading' })
     try {
@@ -1265,6 +1301,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setState({ status: 'ready', entries })
       setVisibleCount(50)
       status().then(value => setLocked(value.locked)).catch(() => {})
+      // Keep badges/filters/counts (due, health, stats, trash, …) in sync
+      // after writes — previously they only updated on mount or focus.
+      refreshMeta()
     } catch (err) {
       // A locked vault makes list() throw; surface the locked banner instead
       // of a generic failure (the user can unlock, not retry). Even when
@@ -1280,7 +1319,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         setState({ status: 'error', reason: errText(err) })
       }
     }
-  }, [list, search, query])
+  }, [list, search, query, refreshMeta])
 
   useEffect(() => {
     let current = true
@@ -1369,43 +1408,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   // weak/reused scan, recent activity) and refresh on window focus.
   useEffect(() => {
     let current = true
-    const load = (): void => {
-      void Promise.all([
-        stats().catch(() => null),
-        backupStatus().catch(() => null),
-        rotation().catch(() => []),
-        health().catch(() => null),
-        recent().catch(() => []),
-        history().catch(() => []),
-        duplicates().catch(() => null),
-      ]).then(([st, bk, rot, hl, rc, hst, dp]) => {
-        if (dp !== null && typeof dp === 'object' && (dp as { groups?: number }).groups !== undefined) {
-          setDupGroups((dp as { groups: number }).groups)
-        }
-        if (Array.isArray(hst)) setRecentEvents(hst as Array<Record<string, unknown>>)
-        duplicateGroups().then(setDupList).catch(() => {})
-        verifyAll().then(setAudit).catch(() => {})
-        tags().then(setTagList).catch(() => {})
-        generatorHistory().then(setGenHistory).catch(() => {})
-        backups(20).then(setBackupList).catch(() => {})
-        trash().then(setTrashEntries).catch(() => {})
-        if (!current) return
-        if (st !== null) setVaultStats(st as Record<string, unknown>)
-        if (bk !== null) setBackupInfo(bk)
-        setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]), strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null, no2fa: ((hl?.no2fa ?? []) as unknown[]), httpSites: ((hl?.httpSites ?? []) as unknown[]), score: Number(hl?.score ?? 100), verdict: String(hl?.verdict ?? 'good') })
-        const due: Record<string, { due: string; daysLeft: number }> = {}
-        for (const item of (rot ?? []) as Array<{ id?: string; due?: string; daysLeft?: number }>) {
-          if (item.id !== undefined && item.due !== undefined) due[item.id] = { due: item.due, daysLeft: item.daysLeft ?? 0 }
-        }
-        setDueMap(due)
-        setRecentEntries((rc ?? []) as Array<Record<string, unknown>>)
-      })
-    }
-    load()
-    const onFocus = (): void => { load() }
+    refreshMeta()
+    const onFocus = (): void => { if (current) refreshMeta() }
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
-  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags, generatorHistory, backups])
+  }, [refreshMeta])
 
   /** Open the editor for a new entry. */
   function startCreate(): void {
@@ -1972,6 +1979,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           aria-pressed={favOnly}
           title={t('favOnlyHint')}
         >★ {t('favOnly')}</button>
+        <button
+          type="button"
+          className={`${css.favToggle}${dueOnly ? ` ${css.favActive}` : ''}`}
+          onClick={() => setDueOnly(value => !value)}
+          aria-pressed={dueOnly}
+          title={t('dueOnlyHint')}
+        >⏰ {t('dueOnly')}</button>
         {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
           <span className={css.healthSummary} title={t('healthSummaryHint')}>
             {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
@@ -2070,7 +2084,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
           {query.trim().length > 0 && state.status === 'ready' && (
-            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly)))}</span>
+            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap)))}</span>
           )}
         </div>
       )}
@@ -2704,18 +2718,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {activeTab === 'entries' && (<div className={css.tabPane}>
-      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly) > visibleCount && (
+      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap) > visibleCount && (
         <button
           type="button"
           className={css.trashButton}
           onClick={() => setVisibleCount(count => count + 50)}
-        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly) - visibleCount})</button>
+        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap) - visibleCount})</button>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <>
         <p className={css.resultCount}>
-          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly)}
+          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap)}
           {(() => {
             const byKind = new Map<string, number>()
             for (const e of state.entries) {
@@ -2730,10 +2744,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           })()}
         </p>
         <ul className={css.list}>
-          {filteredCount(state.entries, kindFilter, tagFilter, favOnly) === 0 && (
+          {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap) === 0 && (
             <li className={css.empty}>{t('noFiltered')}</li>
           )}
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true) && (!dueOnly || dueMap[entry.id] !== undefined)).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
