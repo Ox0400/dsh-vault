@@ -116,6 +116,8 @@ export interface VaultSectionInjected {
   setFavorite: (id: string, favorite: boolean) => Promise<{ found: boolean }>
   attachments: (id: string) => Promise<{ found: boolean; attachments: Array<{ name: string; size: number }> }>
   detach: (id: string, name: string) => Promise<{ found: boolean; detached: boolean }>
+  attach: (id: string, name: string, dataBase64: string, mime?: string) => Promise<{ found: boolean; attached: boolean; name?: string; size?: number; attachments?: number }>
+  downloadAttachment: (id: string, name: string) => Promise<{ found: boolean; name?: string; size?: number; mime?: string; dataBase64?: string }>
   verifyAll: () => Promise<Array<{ id: string; title: string; issues: string[] }>>
   breachCheck: (online?: boolean) => Promise<{ checked: number; pwned: Array<{ id: string; title: string; count: number }>; weak: Array<{ id: string; title: string }>; offline: boolean }>
   generatePassword: (options?: { length?: number; lowercase?: boolean; uppercase?: boolean; digits?: boolean; symbols?: boolean; excludeAmbiguous?: boolean; passphrase?: boolean; words?: number; separator?: string; wordDigits?: boolean }) => Promise<{ password: string }>
@@ -302,7 +304,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
@@ -1634,6 +1636,51 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Attach a file picked in the browser to an entry (base64 → host). */
+  function attachFile(id: string, file: File | undefined): void {
+    if (file === undefined) return
+    setBusy(true)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataBase64 = String(reader.result ?? '').split(',')[1] ?? ''
+      void attach(id, file.name, dataBase64, file.type.length > 0 ? file.type : undefined).then(r => {
+        if (!r.attached) setMessage(t('entryNotFound'))
+        else void attachments(id).then(rr => { if (rr.found) setAttachmentsMap(prev => ({ ...prev, [id]: rr.attachments })) })
+        setBusy(false)
+      }, () => setBusy(false))
+    }
+    reader.onerror = () => setBusy(false)
+    reader.readAsDataURL(file)
+  }
+
+  /** Download one attachment back to disk (base64 → Blob → save). */
+  async function downloadAttachmentFile(id: string, name: string): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await downloadAttachment(id, name)
+      if (!r.found || r.dataBase64 === undefined || r.name === undefined) {
+        setMessage(t('attachmentNotFound'))
+        return
+      }
+      const binary = atob(r.dataBase64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      const blob = new Blob([bytes], { type: r.mime ?? 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = r.name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Show an entry's password history (1Password-style) and allow rollback. */
   async function showPasswordHistory(id: string): Promise<void> {
     setBusy(true)
@@ -2791,6 +2838,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                             <button
                               type="button"
                               className={css.revealButton}
+                              title={t('downloadHint')}
+                              disabled={busy || locked}
+                              onClick={() => void downloadAttachmentFile(entry.id, a.name)}
+                            >⬇</button>
+                            <button
+                              type="button"
+                              className={css.revealButton}
                               title={t('detachHint')}
                               disabled={busy || readonly || locked}
                               onClick={() => {
@@ -2805,6 +2859,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                             >✕</button>
                           </span>
                         ))}
+                        <label className={css.attachAdd} title={t('attachHint')}>
+                          ＋ {t('attachFile')}
+                          <input
+                            type="file"
+                            className={css.srOnly}
+                            onChange={event => { attachFile(entry.id, event.target.files?.[0]); event.target.value = '' }}
+                          />
+                        </label>
                       </div>
                     )}
                   </div>

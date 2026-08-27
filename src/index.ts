@@ -5308,6 +5308,42 @@ export class VaultGateway extends TypertRemoteService {
     return { found: true, detached: true }
   }
 
+  /** Attach a file (base64 from a browser file input) to an entry. The data
+   * is stored base64 inside the encrypted entry, so it stays encrypted at
+   * rest. Capped at 8 MiB to keep invoke payloads sane. */
+  @Remote('attach')
+  async attach(id: string, name: string, dataBase64: string, mime?: string): Promise<{ found: boolean; attached: boolean; name?: string; size?: number; attachments?: number }> {
+    this.assertWritable('attach')
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) return { found: false, attached: false }
+    const clean = name.trim()
+    if (clean.length === 0) throw new Error('vault.attach: name must not be empty')
+    const size = Buffer.from(dataBase64, 'base64').length
+    if (size > 8 * 1024 * 1024) throw new Error('vault.attach: file exceeds the 8 MiB limit')
+    const attachments = { ...(entry.attachments ?? {}) }
+    attachments[clean] = {
+      data: dataBase64,
+      name: clean,
+      size,
+      ...(mime !== undefined && mime.length > 0 ? { mime } : {}),
+    }
+    await store.update(id, { attachments })
+    return { found: true, attached: true, name: clean, size, attachments: Object.keys(attachments).length }
+  }
+
+  /** Download one attachment's raw content (base64) so the UI can save it
+   * back to disk. Only the requested file leaves the host. */
+  @Remote('downloadAttachment')
+  async downloadAttachment(id: string, name: string): Promise<{ found: boolean; name?: string; size?: number; mime?: string; dataBase64?: string }> {
+    const store = await this.guardedStore()
+    const entry = store.get(id)
+    if (!entry) return { found: false }
+    const att = entry.attachments?.[name]
+    if (!att) return { found: false }
+    return { found: true, name: att.name, size: att.size, ...(att.mime !== undefined ? { mime: att.mime } : {}), dataBase64: att.data }
+  }
+
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */
   @Remote('merge')
   async merge(fromId: string, toId: string, keepSource?: boolean): Promise<{ found: boolean }> {

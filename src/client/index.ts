@@ -80,6 +80,8 @@ export function apply(ctx: ClientContext): void {
     setFavorite: (id, favorite) => invoke<{ found: boolean }>('setFavorite', { id, favorite }),
     attachments: (id) => invoke<{ found: boolean; attachments: Array<{ name: string; size: number }> }>('attachments', { id }),
     detach: (id, name) => invoke<{ found: boolean; detached: boolean }>('detach', { id, name }),
+    attach: (id, name, dataBase64, mime) => invoke<{ found: boolean; attached: boolean; name?: string; size?: number; attachments?: number }>('attach', { id, name, dataBase64, mime }),
+    downloadAttachment: (id, name) => invoke<{ found: boolean; name?: string; size?: number; mime?: string; dataBase64?: string }>('downloadAttachment', { id, name }),
     lock: () => invoke<{ locked: boolean }>('lock'),
     unlock: () => invoke<{ locked: boolean }>('unlock'),
     totpUri: (id) => invoke<{ uri: string }>('totpUri', { id }),

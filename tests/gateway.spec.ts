@@ -50,7 +50,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'attach', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'downloadAttachment', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'setFavorite', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
@@ -198,6 +198,37 @@ test('VaultGateway attachments lists and detaches files without leaking data', a
     // Missing entry.
     const miss = await gateway.attachments('no-such-id')
     expect(miss.found).toBe(false)
+  })
+})
+
+test('VaultGateway attach + downloadAttachment round-trip a file', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'FileBox' })
+    // Attach via the browser-style path: base64 + mime.
+    const data = Buffer.from('hello attachment world').toString('base64')
+    const att = await gateway.attach(added.id, 'note.txt', data, 'text/plain')
+    expect(att.found).toBe(true)
+    expect(att.attached).toBe(true)
+    expect(att.name).toBe('note.txt')
+    expect(att.size).toBe('hello attachment world'.length)
+    // Listed without the content.
+    const listed = await gateway.attachments(added.id)
+    expect(listed.attachments).toEqual([{ name: 'note.txt', size: 'hello attachment world'.length }])
+    expect(JSON.stringify(listed)).not.toContain('hello attachment')
+    // Download returns the exact bytes.
+    const dl = await gateway.downloadAttachment(added.id, 'note.txt')
+    expect(dl.found).toBe(true)
+    expect(dl.name).toBe('note.txt')
+    expect(dl.size).toBe('hello attachment world'.length)
+    expect(dl.mime).toBe('text/plain')
+    expect(Buffer.from(dl.dataBase64!, 'base64').toString('utf8')).toBe('hello attachment world')
+    // Missing entry/attachment reports not-found.
+    expect((await gateway.downloadAttachment('no-id', 'note.txt')).found).toBe(false)
+    expect((await gateway.downloadAttachment(added.id, 'missing.bin')).found).toBe(false)
+    // Empty name is rejected; oversize is rejected.
+    await expect(gateway.attach(added.id, '   ', data)).rejects.toThrow(/name must not be empty/)
+    const big = Buffer.alloc(9 * 1024 * 1024, 7).toString('base64')
+    await expect(gateway.attach(added.id, 'big.bin', big)).rejects.toThrow(/8 MiB/)
   })
 })
 

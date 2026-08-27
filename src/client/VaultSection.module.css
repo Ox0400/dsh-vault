@@ -837,3 +837,20 @@
   opacity: 0.7;
   font-weight: 600;
 }
+
+/* Attachment add/upload control inside the detail box. */
+.attachAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.attachAdd:hover {
+  opacity: 1;
+}
