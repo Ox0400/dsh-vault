@@ -854,3 +854,24 @@
 .attachAdd:hover {
   opacity: 1;
 }
+
+/* Favorites-only filter toggle (Bitwarden-style pinned view). */
+.favToggle {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dsh-color-border, #ddd);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0.75;
+}
+.favToggle:hover {
+  opacity: 1;
+}
+.favActive {
+  border-color: #e0a800;
+  background: rgba(224, 168, 0, 0.14);
+  opacity: 1;
+  font-weight: 600;
+}

@@ -234,9 +234,12 @@ const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
   symbols: 'genOptSymbols', excludeAmbiguous: 'genOptExcludeAmbiguous',
 }
 
-/** Number of entries matching the current kind/tag filters (for pagination). */
-function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string): number {
-  return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).length
+/** Number of entries matching the current kind/tag/favorites filters (for
+ * pagination and result counts). */
+function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean): number {
+  return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter)
+    && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))
+    && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)).length
 }
 
 /** Wrap case-insensitive matches of `term` inside `text` with <mark> spans for
@@ -351,6 +354,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [auditFilter, setAuditFilter] = useState('')
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
+  const [favOnly, setFavOnly] = useState(false)
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -1961,6 +1965,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <option value="favorite">{t('sortFavorite')}</option>
           <option value="smart">{t('sortSmart')}</option>
         </select>
+        <button
+          type="button"
+          className={`${css.favToggle}${favOnly ? ` ${css.favActive}` : ''}`}
+          onClick={() => setFavOnly(value => !value)}
+          aria-pressed={favOnly}
+          title={t('favOnlyHint')}
+        >★ {t('favOnly')}</button>
         {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
           <span className={css.healthSummary} title={t('healthSummaryHint')}>
             {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
@@ -2059,7 +2070,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
           {query.trim().length > 0 && state.status === 'ready' && (
-            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter)))}</span>
+            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly)))}</span>
           )}
         </div>
       )}
@@ -2693,18 +2704,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {activeTab === 'entries' && (<div className={css.tabPane}>
-      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter) > visibleCount && (
+      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly) > visibleCount && (
         <button
           type="button"
           className={css.trashButton}
           onClick={() => setVisibleCount(count => count + 50)}
-        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter) - visibleCount})</button>
+        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly) - visibleCount})</button>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <>
         <p className={css.resultCount}>
-          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter)}
+          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly)}
           {(() => {
             const byKind = new Map<string, number>()
             for (const e of state.entries) {
@@ -2719,10 +2730,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           })()}
         </p>
         <ul className={css.list}>
-          {filteredCount(state.entries, kindFilter, tagFilter) === 0 && (
+          {filteredCount(state.entries, kindFilter, tagFilter, favOnly) === 0 && (
             <li className={css.empty}>{t('noFiltered')}</li>
           )}
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
