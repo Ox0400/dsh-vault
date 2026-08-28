@@ -1601,6 +1601,56 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Bulk favorite/unfavorite the selected entries (1Password-style mass
+   * tagging of pins). Uses the existing setFavorite remote in parallel, then
+   * a single refresh so the ★ 收藏 view updates immediately. */
+  async function bulkSetFavorite(favorite: boolean): Promise<void> {
+    const count = selectedIds.size
+    if (count === 0) return
+    setBusy(true)
+    try {
+      await Promise.all([...selectedIds].map(id => setFavorite(id, favorite)))
+      setSelectedIds(new Set())
+      setSelectMode(false)
+      await refresh()
+      refreshMeta()
+      setMessage(favorite ? t('bulkFavorited').replace('{n}', String(count)) : t('bulkUnfavorited').replace('{n}', String(count)))
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Append one tag to every selected entry (1Password Bulk Tagging-style). */
+  async function bulkAddTag(): Promise<void> {
+    const count = selectedIds.size
+    if (count === 0) return
+    const asked = window.prompt(t('bulkTagPrompt'))
+    if (asked === null) return
+    const tag = asked.trim().replace(/^#/, '')
+    if (tag.length === 0) return
+    setBusy(true)
+    try {
+      await Promise.all([...selectedIds].map(async id => {
+        const r = await get(id)
+        if (!r.found || r.entry === undefined) return
+        const tags = r.entry.tags ?? []
+        if (tags.includes(tag)) return
+        await update(id, { tags: [...tags, tag] })
+      }))
+      setSelectedIds(new Set())
+      setSelectMode(false)
+      await refresh()
+      refreshMeta()
+      setMessage(t('bulkTagged').replace('{n}', String(count)))
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Clone an entry (Bitwarden/KeePassXC-style): copy every editable field
    * into a new entry with a localized title suffix. Attachments and password
    * history stay with the original; the copy gets its own timestamps. */
@@ -2029,6 +2079,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span>{t('bulkSelectAll')}</span>
           </label>
           <span className={css.bulkCount}>{t('bulkSelected')}: {selectedIds.size}</span>
+          <button type="button" className={css.dupMerge} onClick={() => void bulkSetFavorite(true)} disabled={busy || selectedIds.size === 0}>{t('bulkFavorite')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void bulkSetFavorite(false)} disabled={busy || selectedIds.size === 0}>{t('bulkUnfavorite')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void bulkAddTag()} disabled={busy || readonly || locked || selectedIds.size === 0}>{t('bulkTag')}</button>
           <button type="button" className={css.dangerButton} onClick={() => void removeSelected()} disabled={busy || selectedIds.size === 0}>{t('bulkDelete')}</button>
         </div>
       )}
