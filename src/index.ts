@@ -5267,6 +5267,20 @@ export class VaultGateway extends TypertRemoteService {
     return { renamed }
   }
 
+  /** Remove a tag from every entry that carries it. */
+  @Remote('removeTag')
+  async removeTag(tag: string): Promise<{ removed: number }> {
+    const store = await this.guardedStore()
+    let removed = 0
+    for (const e of store.list()) {
+      const tags = e.tags ?? []
+      if (!tags.includes(tag)) continue
+      await store.update(e.id, { tags: tags.filter(t => t !== tag) })
+      removed++
+    }
+    return { removed }
+  }
+
   /** Mark an entry as recently used (touches updatedAt). */
   @Remote('touch')
   async touch(id: string): Promise<{ touched: boolean }> {

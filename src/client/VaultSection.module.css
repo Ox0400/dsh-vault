@@ -1009,3 +1009,36 @@
 .recentClear:hover {
   opacity: 1;
 }
+
+/* Tag manager panel. */
+.tagManager {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 8px;
+}
+.tagManagerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.tagRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--dsh-color-border, #f0f0f0);
+}
+.tagName {
+  font-size: 13px;
+}
+.tagCount {
+  opacity: 0.6;
+  font-size: 12px;
+}
+.tagActions {
+  display: inline-flex;
+  gap: 6px;
+}

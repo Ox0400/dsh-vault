@@ -50,7 +50,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'attach', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'downloadAttachment', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'exportCsv', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'attach', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'downloadAttachment', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'exportCsv', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'removeTag', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'setFavorite', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
@@ -98,6 +98,21 @@ test('VaultGateway summary carries custom fields for the detail view', async () 
     const plain = await gateway.add({ title: 'NoFields' })
     const plainInList = (await gateway.list()).entries.find(e => e.id === plain.id)
     expect(plainInList?.fields).toBeUndefined()
+  })
+})
+
+test('VaultGateway removeTag strips a tag from every entry', async () => {
+  await withGateway(async gateway => {
+    const a = await gateway.add({ title: 'T1', tags: ['a', 'b'] })
+    await gateway.add({ title: 'T2', tags: ['a'] })
+    const r = await gateway.removeTag('a')
+    expect(r.removed).toBe(2)
+    expect((await gateway.get(a.id)).entry!.tags).toEqual(['b'])
+    // Missing tag is a no-op.
+    expect((await gateway.removeTag('zzz')).removed).toBe(0)
+    // renameTag still merges onto existing tags.
+    const renamed = await gateway.renameTag('b', 'merged')
+    expect(renamed.renamed).toBe(1)
   })
 })
 

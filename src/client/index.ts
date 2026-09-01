@@ -87,6 +87,7 @@ export function apply(ctx: ClientContext): void {
     totpUri: (id) => invoke<{ uri: string }>('totpUri', { id }),
     tags: () => invoke<Array<{ name: string; count: number }>>('tags'),
     renameTag: (from, to) => invoke<{ renamed: number }>('renameTag', { from, to }),
+    removeTag: (tag) => invoke<{ removed: number }>('removeTag', { tag }),
     generatorHistory: () => invoke<Array<{ password: string; at: number }>>('generatorHistory'),
     backups: (limit) => invoke<Array<{ path: string; at: number; vaultName: string; size: number }>>('backups', { limit: limit ?? 5 }),
     deleteBackup: (path) => invoke<{ deleted: boolean; path: string }>('deleteBackup', { path }),

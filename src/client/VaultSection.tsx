@@ -97,6 +97,7 @@ export interface VaultSectionInjected {
   totpUri: (id: string) => Promise<{ uri: string }>
   tags: () => Promise<Array<{ name: string; count: number }>>
   renameTag: (from: string, to: string) => Promise<{ renamed: number }>
+  removeTag: (tag: string) => Promise<{ removed: number }>
   generatorHistory: () => Promise<Array<{ password: string; at: number }>>
   backups: (limit?: number) => Promise<Array<{ path: string; at: number; vaultName: string; size: number }>>
   deleteBackup: (path: string) => Promise<{ deleted: boolean; path: string }>
@@ -333,7 +334,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, removeTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
@@ -355,6 +356,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [totpMap, setTotpMap] = useState<Record<string, { code: string; until: number }>>({})
   const [uriMap, setUriMap] = useState<Record<string, string>>({})
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([])
+  const [tagManagerOpen, setTagManagerOpen] = useState(false)
   const [genHistory, setGenHistory] = useState<Array<{ password: string; at: number }>>([])
   const [backupList, setBackupList] = useState<Array<{ path: string; at: number; vaultName: string; size: number }>>([])
   const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
@@ -2079,6 +2081,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <option key={tag} value={tag}>{tag}</option>
           ))}
         </select>
+        <button
+          type="button"
+          className={css.favToggle}
+          onClick={() => setTagManagerOpen(value => !value)}
+          aria-pressed={tagManagerOpen}
+          title={t('tagManagerHint')}
+        >🏷 {t('tagManager')}</button>
         <select
           className={css.sortButton}
           value={sortBy}
@@ -2126,6 +2135,52 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           </button>
         )}
       </div>
+      {tagManagerOpen && (
+        <div className={css.tagManager}>
+          <div className={css.tagManagerHead}>
+            <span className={css.reportTitle}>{t('tagManager')}</span>
+            <button type="button" className={css.recentClear} onClick={() => setTagManagerOpen(false)}>{t('cancel')}</button>
+          </div>
+          {tagList.length === 0 && <p className={css.reportSub}>{t('noTags')}</p>}
+          {tagList.map(tag => (
+            <div key={tag.name} className={css.tagRow}>
+              <span className={css.tagName}>🏷 {tag.name} <span className={css.tagCount}>({tag.count})</span></span>
+              <span className={css.tagActions}>
+                <button
+                  type="button"
+                  className={css.dupMerge}
+                  disabled={busy || readonly || locked}
+                  onClick={() => {
+                    const asked = window.prompt(`${t('tagRenamePrompt')} ${tag.name}`, tag.name)
+                    if (asked === null || asked.trim() === '' || asked.trim() === tag.name) return
+                    setBusy(true)
+                    void renameTag(tag.name, asked.trim()).then(() => {
+                      void tags().then(setTagList).catch(() => {})
+                      void refreshMeta()
+                      setBusy(false)
+                    }, () => setBusy(false))
+                  }}
+                >{t('tagRename')}</button>
+                <button
+                  type="button"
+                  className={css.dangerButton}
+                  disabled={busy || readonly || locked}
+                  onClick={() => {
+                    if (!window.confirm(t('tagRemoveConfirm').replace('{name}', tag.name))) return
+                    setBusy(true)
+                    void removeTag(tag.name).then(r => {
+                      void tags().then(setTagList).catch(() => {})
+                      void refreshMeta()
+                      setMessage(t('tagRemoved').replace('{n}', String(r.removed)))
+                      setBusy(false)
+                    }, () => setBusy(false))
+                  }}
+                >{t('tagRemove')}</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {selectMode && (
         <div className={css.bulkBar}>
           <label className={css.bulkItem}>
