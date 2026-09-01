@@ -241,11 +241,12 @@ const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
 
 /** Number of entries matching the current kind/tag/favorites/due filters (for
  * pagination and result counts). */
-function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean, dueOnly: boolean, dueMap: Record<string, { due: string; daysLeft: number }>): number {
+function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean, dueOnly: boolean, dueMap: Record<string, { due: string; daysLeft: number }>, issueOnly: boolean, watchMap: Record<string, { score: number; verdict: string; flags: string[] }>): number {
   return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter)
     && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))
     && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)
-    && (!dueOnly || dueMap[entry.id] !== undefined)).length
+    && (!dueOnly || dueMap[entry.id] !== undefined)
+    && (!issueOnly || (watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good'))).length
 }
 
 /** Wrap case-insensitive matches of `term` inside `text` with <mark> spans for
@@ -394,6 +395,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [favOnly, setFavOnly] = useState(false)
   const [dueOnly, setDueOnly] = useState(false)
+  const [issueOnly, setIssueOnly] = useState(false)
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
@@ -1339,6 +1341,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       generatorHistory().then(setGenHistory).catch(() => {})
       backups(20).then(setBackupList).catch(() => {})
       trash().then(setTrashEntries).catch(() => {})
+      watchtower().then(list => {
+        const map: Record<string, { score: number; verdict: string; flags: string[] }> = {}
+        for (const w of list) map[w.id] = { score: w.score, verdict: w.verdict, flags: w.flags }
+        setWatchMap(map)
+      }).catch(() => {})
       if (st !== null) setVaultStats(st as Record<string, unknown>)
       if (bk !== null) setBackupInfo(bk)
       setReport({ rotation: (rot ?? []) as unknown[], weak: ((hl?.weak ?? []) as unknown[]), reused: ((hl?.reused ?? []) as unknown[]), strength: (hl?.strength ?? null) as { weak: number; fair: number; strong: number } | null, no2fa: ((hl?.no2fa ?? []) as unknown[]), httpSites: ((hl?.httpSites ?? []) as unknown[]), score: Number(hl?.score ?? 100), verdict: String(hl?.verdict ?? 'good') })
@@ -1349,7 +1356,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       setDueMap(due)
       setRecentEntries((rc ?? []) as Array<Record<string, unknown>>)
     })
-  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags, generatorHistory, backups])
+  }, [stats, backupStatus, rotation, health, recent, duplicates, duplicateGroups, verifyAll, tags, generatorHistory, backups, watchtower])
 
   const refresh = useMemo(() => async () => {
     setState({ status: 'loading' })
@@ -2114,6 +2121,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           aria-pressed={dueOnly}
           title={t('dueOnlyHint')}
         >⏰ {t('dueOnly')}</button>
+        <button
+          type="button"
+          className={`${css.favToggle}${issueOnly ? ` ${css.favActive}` : ''}`}
+          onClick={() => setIssueOnly(value => !value)}
+          aria-pressed={issueOnly}
+          title={t('issueOnlyHint')}
+        >⚠️ {t('issueOnly')}</button>
         {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
           <span className={css.healthSummary} title={t('healthSummaryHint')}>
             {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
@@ -2261,7 +2275,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
           {query.trim().length > 0 && state.status === 'ready' && (
-            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap)))}</span>
+            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap)))}</span>
           )}
           {recentSearches.length > 0 && (
             <span className={css.recentSearch}>
@@ -2920,18 +2934,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {activeTab === 'entries' && (<div className={css.tabPane}>
-      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap) > visibleCount && (
+      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) > visibleCount && (
         <button
           type="button"
           className={css.trashButton}
           onClick={() => setVisibleCount(count => count + 50)}
-        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap) - visibleCount})</button>
+        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) - visibleCount})</button>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <>
         <p className={css.resultCount}>
-          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap)}
+          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap)}
           {(() => {
             const byKind = new Map<string, number>()
             for (const e of state.entries) {
@@ -2946,10 +2960,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           })()}
         </p>
         <ul className={css.list}>
-          {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap) === 0 && (
+          {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) === 0 && (
             <li className={css.empty}>{t('noFiltered')}</li>
           )}
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true) && (!dueOnly || dueMap[entry.id] !== undefined)).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true) && (!dueOnly || dueMap[entry.id] !== undefined) && (!issueOnly || (watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good'))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
