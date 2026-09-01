@@ -377,7 +377,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
-  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number; separator: string; wordDigits: boolean }>({ length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4, separator: '-', wordDigits: true })
+  const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number; separator: string; wordDigits: boolean }>(() => {
+    try {
+      const raw = window.localStorage.getItem('dsh-vault-genopts')
+      if (raw !== null) {
+        const saved = JSON.parse(raw) as Partial<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number; separator: string; wordDigits: boolean }>
+        const base = { length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4, separator: '-', wordDigits: true }
+        return { ...base, ...saved }
+      }
+    } catch { /* storage may be unavailable */ }
+    return { length: 24, uppercase: true, lowercase: true, digits: true, symbols: true, excludeAmbiguous: false, passphrase: false, words: 4, separator: '-', wordDigits: true }
+  })
+  // Persist generator preferences so they survive page reloads.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('dsh-vault-genopts', JSON.stringify(genOpts))
+    } catch { /* storage may be unavailable */ }
+  }, [genOpts])
   const [showGenOpts, setShowGenOpts] = useState(false)
   const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string; bits: number } | null>(null)
   const [tplList, setTplList] = useState<Array<{ name: string; kind: string; fields: Record<string, string> }>>([])
