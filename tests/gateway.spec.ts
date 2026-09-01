@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -50,7 +50,7 @@ test('VaultGateway exposes the expected remote method names', async () => {
   await withGateway(async gateway => {
     const methods = remoteMethods(gateway).map(m => m.exportName ?? m.method).sort()
     expect(methods).toEqual([
-      'add', 'attach', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'downloadAttachment', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
+      'add', 'attach', 'attachments', 'autoLock', 'backup', 'backupStatus', 'backups', 'breachCheck', 'config', 'delete', 'deleteBackup', 'detach', 'downloadAttachment', 'duplicateGroups', 'duplicates', 'export1pux', 'exportBitwarden', 'exportCsv', 'generatePassword', 'generateUsername', 'generatorHistory', 'get', 'health', 'history', 'import1password', 'import1pif', 'importBitwarden', 'importBitwardenEncrypted', 'importChrome', 'importEnpass', 'importFirefox', 'importKdbx', 'importKeePassXml', 'importManagerCsv', 'keychainImport', 'list', 'listVaults', 'lock', 'merge', 'passwordHistory', 'passwordRollback', 'previewImportCsv', 'purge', 'recent', 'recoveryCode', 'recoveryStatus', 'renameTag', 'restore', 'restoreBackup', 'rotation',
       'saveTemplate', 'search', 'searchSystem', 'sessionClose', 'sessionCollect', 'sessionExport', 'sessionGet', 'sessionListOpen', 'sessionListSaved', 'sessionOpen', 'sessionPrune', 'sessionSave', 'setAccessMode', 'setAutoCapture', 'setAutoLock', 'setFavorite', 'stats', 'status', 'strength', 'switchVault', 'tags', 'templates', 'totp', 'totpUri', 'touch', 'trash', 'undeleteAll', 'unlock', 'update', 'vaultDelete', 'vaultRename', 'verifyAll', 'verifyRecovery', 'watchtower',
     ])
   })
@@ -229,6 +229,41 @@ test('VaultGateway attach + downloadAttachment round-trip a file', async () => {
     await expect(gateway.attach(added.id, '   ', data)).rejects.toThrow(/name must not be empty/)
     const big = Buffer.alloc(9 * 1024 * 1024, 7).toString('base64')
     await expect(gateway.attach(added.id, 'big.bin', big)).rejects.toThrow(/8 MiB/)
+  })
+})
+
+test('VaultGateway exportCsv writes a field-selected CSV with BOM', async () => {
+  await withGateway(async gateway => {
+    await gateway.add({ title: 'CsvA', username: 'ua', password: 'pa', url: 'https://a.example', tags: ['x', 'y'] })
+    await gateway.add({ title: 'CsvB', username: 'ub', password: 'pb', otpSecret: 'GEZDGNBVGY3TQOJQ' })
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-vault-csv-'))
+    try {
+      const out = join(dir, 'out.csv')
+      const r = await gateway.exportCsv(out, ['title', 'username', 'password', 'url', 'tags', 'otpSecret'])
+      expect(r.count).toBe(2)
+      expect(r.fields).toEqual(['title', 'username', 'password', 'url', 'tags', 'otpSecret'])
+      const raw = await readFile(out, 'utf8')
+      expect(raw.charCodeAt(0)).toBe(0xFEFF) // BOM for Excel
+      const body = raw.slice(1)
+      const lines = body.split('\n').filter(l => l.length > 0)
+      expect(lines[0]).toBe('title,username,password,url,tags,otpSecret')
+      expect(lines.some(l => l.startsWith('CsvA,ua,pa,https://a.example,x;y,'))).toBe(true)
+      expect(lines.some(l => l.startsWith('CsvB,ub,pb,,,GEZDGNBVGY3TQOJQ'))).toBe(true)
+      // Field selection filters the columns; unknown fields are dropped.
+      const out2 = join(dir, 'min.csv')
+      const r2 = await gateway.exportCsv(out2, ['title', 'bogus', 'username'])
+      const raw2 = await readFile(out2, 'utf8')
+      expect(raw2.slice(1).split('\n')[0]).toBe('title,username')
+      // Empty selection falls back to title,username.
+      const out3 = join(dir, 'empty.csv')
+      const r3 = await gateway.exportCsv(out3, [])
+      expect(r3.fields).toEqual(['title', 'username'])
+      // Round-trip: re-importing into the same vault skips existing titles.
+      const round = await gateway.importManagerCsv(out)
+      expect(round.skipped).toBe(2)
+    } finally {
+      await rmSafe(dir)
+    }
   })
 })
 

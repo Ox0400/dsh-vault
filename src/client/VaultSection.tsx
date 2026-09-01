@@ -148,6 +148,7 @@ export interface VaultSectionInjected {
   passwordRollback: (id: string, at: number) => Promise<{ rolledBack: boolean; password?: string }>
   export1pux: (path: string) => Promise<{ path: string; count: number }>
   exportBitwarden: (path: string) => Promise<{ path: string; count: number }>
+  exportCsv: (path: string, fields: string[]) => Promise<{ path: string; count: number; fields: string[] }>
   recoveryCode: () => Promise<{ code: string; note: string }>
   verifyRecovery: (code: string) => Promise<{ verified: boolean }>
   recoveryStatus: () => Promise<{ set: boolean; issuedAt?: number }>
@@ -273,8 +274,24 @@ function highlightText(text: string, term: string): ReactNode {
   return parts.length > 0 ? parts : text
 }
 
-const KIND_KEYS: Record<string, VaultLocaleKey> = {
-  login: 'kindLogin',
+/** Curated columns offered in the CSV export field picker. */
+const CSV_EXPORT_FIELDS: Array<{ key: string; label: VaultLocaleKey }> = [
+  { key: 'title', label: 'fieldTitle' },
+  { key: 'kind', label: 'fieldKind' },
+  { key: 'username', label: 'fieldUsername' },
+  { key: 'email', label: 'fieldEmail' },
+  { key: 'password', label: 'fieldPassword' },
+  { key: 'apiKey', label: 'fieldApiKey' },
+  { key: 'otpSecret', label: 'fieldOtpSecret' },
+  { key: 'url', label: 'fieldUrl' },
+  { key: 'notes', label: 'fieldNotes' },
+  { key: 'tags', label: 'fieldTags' },
+  { key: 'expiresAt', label: 'fieldExpiresAt' },
+  { key: 'rotationDays', label: 'fieldRotationDays' },
+  { key: 'favorite', label: 'fieldFavorite' },
+]
+
+const KIND_KEYS: Record<string, VaultLocaleKey> = {  login: 'kindLogin',
   ssh: 'kindSsh',
   'api-key': 'kindApiKey',
   secret: 'kindSecret',
@@ -311,7 +328,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
@@ -337,6 +354,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [sysQuery, setSysQuery] = useState('')
   const [sysMatches, setSysMatches] = useState<Array<{ source: string; name: string; username: string }>>([])
   const [importPreview, setImportPreview] = useState<{ path: string; rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }>; total: number; skipped: number } | null>(null)
+  const [exportFields, setExportFields] = useState<string[]>(CSV_EXPORT_FIELDS.map(f => f.key))
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
@@ -859,6 +877,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const r = await exportBitwarden(path.trim())
       setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}) — ${r.path}`)
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Export entries as CSV with the user-selected columns. */
+  async function runExportCsv(): Promise<void> {
+    const suggested = t('exportDefaultPath').replace('{file}', `${new Date().toISOString().slice(0, 10)}.csv`)
+    const path = window.prompt(`${t('exportCsvPrompt')}\n${t('exportPathHint')}: ${suggested}`, suggested)
+    if (path === null || path.trim() === '') return
+    if (exportFields.length === 0) { setMessage(t('exportNoFields')); return }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await exportCsv(path.trim(), exportFields)
+      setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}, ${r.fields.length} ${t('exportColumns')}) — ${r.path}`)
     } catch (err) {
       setMessage(errText(err))
     } finally {
@@ -2365,6 +2401,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('exportBitwardenDesc')}</span>
           <button type="button" className={css.dupMerge} onClick={() => void runExportBitwarden()} disabled={busy || readonly || locked}>{t('exportBitwarden')}</button>
+        </div>
+        <div className={css.dupGroup}>
+          <span className={css.dupNames}>{t('exportCsvDesc')}</span>
+          <div className={css.exportChips}>
+            {CSV_EXPORT_FIELDS.map(f => (
+              <label key={f.key} className={css.exportChip}>
+                <input
+                  type="checkbox"
+                  checked={exportFields.includes(f.key)}
+                  onChange={event => setExportFields(prev => event.target.checked ? [...prev, f.key] : prev.filter(k => k !== f.key))}
+                />
+                <span>{t(f.label)}</span>
+              </label>
+            ))}
+          </div>
+          <button type="button" className={css.dupMerge} onClick={() => void runExportCsv()} disabled={busy || readonly || locked || exportFields.length === 0}>{t('exportCsv')}</button>
         </div>
       </div>
       </div>)}

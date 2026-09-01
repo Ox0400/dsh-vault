@@ -898,3 +898,25 @@
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
+
+/* CSV export column picker chips. */
+.exportChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+.exportChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+.exportChip:hover {
+  opacity: 1;
+}

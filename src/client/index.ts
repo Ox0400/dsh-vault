@@ -130,6 +130,7 @@ export function apply(ctx: ClientContext): void {
     watchtower: () => invoke<Array<{ id: string; title: string; kind: string; flags: string[]; score: number; verdict: string; bits?: number }>>('watchtower'),
     export1pux: (path) => invoke<{ path: string; count: number }>('export1pux', { path }),
     exportBitwarden: (path) => invoke<{ path: string; count: number }>('exportBitwarden', { path }),
+    exportCsv: (path, fields) => invoke<{ path: string; count: number; fields: string[] }>('exportCsv', { path, fields }),
     recoveryCode: () => invoke<{ code: string; note: string }>('recoveryCode'),
     verifyRecovery: (code) => invoke<{ verified: boolean }>('verifyRecovery', { code }),
     recoveryStatus: () => invoke<{ set: boolean; issuedAt?: number }>('recoveryStatus'),

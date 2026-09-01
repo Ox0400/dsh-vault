@@ -5344,6 +5344,37 @@ export class VaultGateway extends TypertRemoteService {
     return { found: true, name: att.name, size: att.size, ...(att.mime !== undefined ? { mime: att.mime } : {}), dataBase64: att.data }
   }
 
+  /** Export entries to a manager-style CSV with explicit column selection
+   * (UTF-8 BOM for Excel). The UI picks which columns to include. */
+  @Remote('exportCsv')
+  async exportCsv(path: string, fields: string[]): Promise<{ path: string; count: number; fields: string[] }> {
+    const store = await this.guardedStore()
+    const allowed = new Set([
+      'title', 'kind', 'username', 'email', 'phone', 'password', 'apiKey', 'secret',
+      'accessToken', 'refreshToken', 'otpSecret', 'privateKey', 'url', 'notes', 'tags',
+      'expiresAt', 'rotationDays', 'sensitivity', 'favorite', 'icon', 'color',
+      'cardNumber', 'cardExpiry', 'cardCvv', 'cardHolder', 'host', 'port', 'createdAt', 'updatedAt',
+    ])
+    const cols = Array.isArray(fields) ? fields.filter(f => allowed.has(f)) : []
+    if (cols.length === 0) cols.push('title', 'username')
+    const entries = store.list()
+    const delim = ','
+    const esc = (v: unknown): string => {
+      const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)
+      const needsQuote = str.includes(delim) || str.includes('"') || str.includes('\n') || str.includes('\r')
+      if (!needsQuote) return str
+      return `"${str.replace(/"/g, '""')}"`
+    }
+    const lines = [cols.join(delim)]
+    for (const e of entries) {
+      const rec = e as unknown as Record<string, unknown>
+      lines.push(cols.map(c => esc(rec[c])).join(delim))
+    }
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    await writeFile(path, '\uFEFF' + lines.join('\n') + '\n', { mode: 0o600 })
+    return { path, count: entries.length, fields: cols }
+  }
+
   /** Merge one entry into another (Bitwarden-style dedup); keepSource optional. */
   @Remote('merge')
   async merge(fromId: string, toId: string, keepSource?: boolean): Promise<{ found: boolean }> {
