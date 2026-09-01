@@ -471,13 +471,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }, [form.password, strength])
 
   // Ctrl/Cmd+K focuses the vault search box (1Password-style quick search);
-  // Esc closes the open ⋯ overflow menu.
+  // Ctrl/Cmd+N opens the new-entry form; Esc closes the open ⋯ overflow menu.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setActiveTab('entries')
         window.setTimeout(() => searchRef.current?.focus(), 50)
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        setActiveTab('entries')
+        startCreate()
       } else if (event.key === 'Escape') {
         setOpenMenuId(null)
       }
