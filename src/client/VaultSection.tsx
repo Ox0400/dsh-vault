@@ -3625,14 +3625,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 {genHistory.length > 0 && (
                   <div className={css.genHist}>
                     <span>{t('genHistory')}:</span>
-                    {genHistory.slice(0, 3).map((h, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className={css.revealButton}
-                        onClick={() => setForm(previous => ({ ...previous, password: h.password }))}
-                        title={new Date(h.at).toLocaleString()}
-                      >{h.password}</button>
+                    {genHistory.slice(0, 8).map((h, i) => (
+                      <span key={i} className={css.genHistItem}>
+                        <button
+                          type="button"
+                          className={css.revealButton}
+                          onClick={() => setForm(previous => ({ ...previous, password: h.password }))}
+                          title={new Date(h.at).toLocaleString()}
+                        >{h.password}</button>
+                        <button
+                          type="button"
+                          className={css.revealButton}
+                          title={t('copyPassword')}
+                          onClick={() => {
+                            void navigator.clipboard.writeText(h.password).catch(() => {})
+                            setMessage(t('copied'))
+                          }}
+                        >⧉</button>
+                      </span>
                     ))}
                   </div>
                 )}

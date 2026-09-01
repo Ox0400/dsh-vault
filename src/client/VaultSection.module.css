@@ -1058,3 +1058,11 @@
 .copyAllBtn:hover {
   opacity: 1;
 }
+
+/* Generated-password history rows. */
+.genHistItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 4px;
+}
