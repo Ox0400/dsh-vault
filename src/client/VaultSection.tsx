@@ -3162,6 +3162,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   {code !== undefined && (
                     <button type="button" className={css.actionPrimary} onClick={() => void copyValue(entry.id, code)} disabled={busy || locked}>{t('copyCode')}</button>
                   )}
+                  {entry.url !== undefined && entry.url !== '' && (
+                    <button
+                      type="button"
+                      className={css.actionPrimary}
+                      title={t('openUrl')}
+                      onClick={() => window.open(entry.url!, '_blank', 'noopener')}
+                      disabled={busy}
+                    >🌐</button>
+                  )}
                   <span className={css.moreWrap}>
                     <button
                       type="button"
