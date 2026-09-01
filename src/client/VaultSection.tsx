@@ -2919,20 +2919,30 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       <span className={css.highBadge}>{t('highSensitivity')}</span>
                     )}
                     {dueMap[entry.id] !== undefined && (
-                      <span className={`${css.dueBadge} ${dueMap[entry.id]!.due === 'expired' ? css.badgeDanger : css.badgeWarn}`}>
+                      <button
+                        type="button"
+                        className={`${css.dueBadge} ${css.badgeLink} ${dueMap[entry.id]!.due === 'expired' ? css.badgeDanger : css.badgeWarn}`}
+                        title={t('badgeEditHint')}
+                        onClick={event => { event.stopPropagation(); void startEdit(entry.id) }}
+                      >
                         {dueMap[entry.id]!.due === 'expired' ? t('dueExpired') : dueMap[entry.id]!.due === 'soon' ? `${t('dueExpiring')} ${dueMap[entry.id]!.daysLeft}d` : t('dueNow')}
-                      </span>
+                      </button>
                     )}
                     {passwordAge(entry) !== '' && (
-                      <span className={css.dueBadge} title={t('ageHint')}>{passwordAge(entry)}</span>
+                      <button type="button" className={`${css.dueBadge} ${css.badgeLink}`} title={t('ageHint')} onClick={event => { event.stopPropagation(); void startEdit(entry.id) }}>{passwordAge(entry)}</button>
                     )}
                     {cardExpiryBadge(entry) !== '' && (
-                      <span className={css.dueBadge} title={t('cardExpiryHint')}>{cardExpiryBadge(entry)}</span>
+                      <button type="button" className={`${css.dueBadge} ${css.badgeLink}`} title={t('cardExpiryHint')} onClick={event => { event.stopPropagation(); void startEdit(entry.id) }}>{cardExpiryBadge(entry)}</button>
                     )}
                     {watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good' && (
-                      <span className={`${css.dueBadge} ${watchMap[entry.id]!.verdict === 'poor' ? css.badgeDanger : css.badgeWarn}`} title={t('watchFlagsTitle') + watchMap[entry.id]!.flags.join(', ')}>
+                      <button
+                        type="button"
+                        className={`${css.dueBadge} ${css.badgeLink} ${watchMap[entry.id]!.verdict === 'poor' ? css.badgeDanger : css.badgeWarn}`}
+                        title={t('watchFlagsTitle') + watchMap[entry.id]!.flags.join(', ')}
+                        onClick={event => { event.stopPropagation(); void startEdit(entry.id) }}
+                      >
                         {t('watchScore').replace('{n}', String(watchMap[entry.id]!.score))}
-                      </span>
+                      </button>
                     )}
                   </span>
                   <span className={css.identity}>{highlightText(identityLine(entry), query)}</span>

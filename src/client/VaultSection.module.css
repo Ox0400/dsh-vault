@@ -959,3 +959,15 @@
 .colorSwatch:hover {
   transform: scale(1.15);
 }
+
+/* Badges that open the editor on click (due / weak / expiry). */
+.badgeLink {
+  cursor: pointer;
+  border: none;
+  font: inherit;
+  line-height: inherit;
+}
+.badgeLink:hover {
+  filter: brightness(1.1);
+  text-decoration: underline;
+}
