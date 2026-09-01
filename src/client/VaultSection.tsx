@@ -337,6 +337,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const raw = window.sessionStorage.getItem('dsh-vault-recent-searches')
+      const arr = raw === null ? [] : JSON.parse(raw) as unknown
+      return Array.isArray(arr) ? arr.filter((v): v is string => typeof v === 'string').slice(0, 8) : []
+    } catch {
+      return []
+    }
+  })
   const [state, setState] = useState<ViewState>({ status: 'loading' })
   const [editor, setEditor] = useState<EditorState>({ status: 'closed' })
   const [form, setForm] = useState<FormFields>(emptyForm())
@@ -1471,6 +1480,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setEditor({ status: 'creating' })
   }
 
+  /** Record a completed search term (most-recent first, deduped, ≤8). */
+  function rememberSearch(term: string): void {
+    const next = [term, ...recentSearches.filter(s => s.toLowerCase() !== term.toLowerCase())].slice(0, 8)
+    setRecentSearches(next)
+    try {
+      window.sessionStorage.setItem('dsh-vault-recent-searches', JSON.stringify(next))
+    } catch { /* storage may be unavailable */ }
+  }
+
   /** Open the editor for an existing entry (fetches full secrets). */
   async function startEdit(id: string): Promise<void> {
     setBusy(true)
@@ -2039,7 +2057,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             placeholder={t('searchPlaceholder')}
             value={query}
             onChange={event => setQuery(event.target.value)}
-            onKeyDown={event => { if (event.key === 'Escape') { setQuery(''); setKindFilter(''); setTagFilter('') } }}
+            onKeyDown={event => {
+              if (event.key === 'Escape') { setQuery(''); setKindFilter(''); setTagFilter('') }
+              if (event.key === 'Enter' && query.trim().length > 0) rememberSearch(query.trim())
+            }}
             disabled={locked}
           />
           {query.length > 0 && (
@@ -2186,6 +2207,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {query.trim().length > 0 && state.status === 'ready' && (
             <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap)))}</span>
+          )}
+          {recentSearches.length > 0 && (
+            <span className={css.recentSearch}>
+              <span className={css.recentLabel}>{t('recentSearches')}:</span>
+              {recentSearches.map(term => (
+                <button key={term} type="button" className={css.recentChip} onClick={() => setQuery(term)} title={t('recentSearchHint')}>{term}</button>
+              ))}
+              <button type="button" className={css.recentClear} onClick={() => { setRecentSearches([]); try { window.sessionStorage.removeItem('dsh-vault-recent-searches') } catch { /* noop */ } }}>{t('clearRecent')}</button>
+            </span>
           )}
         </div>
       )}

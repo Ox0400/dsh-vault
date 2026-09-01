@@ -971,3 +971,41 @@
   filter: brightness(1.1);
   text-decoration: underline;
 }
+
+/* Recent-search chips row. */
+.recentSearch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.recentLabel {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-right: 2px;
+}
+.recentChip {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  padding: 1px 8px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.recentChip:hover {
+  opacity: 1;
+}
+.recentClear {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  text-decoration: underline;
+}
+.recentClear:hover {
+  opacity: 1;
+}
