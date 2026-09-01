@@ -2898,6 +2898,29 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 </div>
                 {expandedId === entry.id && (
                   <div className={css.detailBox}>
+                    {entry.hasOtp === true && code !== undefined && (
+                      <span className={css.detailTotp} title={t('totpInlineHint')}>
+                        <svg className={css.totpRing} width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
+                          <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
+                          <circle
+                            cx="8" cy="8" r="6.5" fill="none"
+                            stroke={remaining !== undefined && remaining <= 5 ? '#cf3d3d' : '#2e9e5b'}
+                            strokeWidth="2" strokeLinecap="round"
+                            strokeDasharray={`${(frac * 2 * Math.PI * 6.5).toFixed(1)} ${(2 * Math.PI * 6.5).toFixed(1)}`}
+                            transform="rotate(-90 8 8)"
+                          />
+                        </svg>
+                        <code className={css.detailCode}>{code}</code>
+                        <span className={css.detailRemain}>{remaining !== undefined ? `${remaining}s` : ''}</span>
+                        <button
+                          type="button"
+                          className={css.revealButton}
+                          title={t('copyCode')}
+                          onClick={() => void copyValue(entry.id, code!)}
+                          disabled={busy || locked}
+                        >⧉</button>
+                      </span>
+                    )}
                     {Object.entries(entry).filter(([k]) => !['id', 'title', 'favorite'].includes(k) && entry[k as keyof VaultSummaryWire] !== undefined).map(([k, v]) => (
                       <span key={k} className={css.detailItem}>
                         <strong>{k}</strong>: {formatDetail(k, v)}

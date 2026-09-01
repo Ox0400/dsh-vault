@@ -875,3 +875,26 @@
   opacity: 1;
   font-weight: 600;
 }
+
+/* Large TOTP display inside the expanded detail box. */
+.detailTotp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--dsh-color-border, #eee);
+  border-radius: 8px;
+  background: rgba(46, 158, 91, 0.06);
+}
+.detailCode {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.detailRemain {
+  font-size: 12px;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
