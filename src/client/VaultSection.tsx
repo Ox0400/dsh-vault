@@ -55,6 +55,7 @@ export interface VaultFullWire {
   cardNumber?: string
   cardCvv?: string
   cardHolder?: string
+  cardExpiry?: string
   url?: string
   notes?: string
   tags?: string[]
@@ -1817,6 +1818,37 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Copy every field of an entry as plain text (one field per line). */
+  async function copyEntryAsText(id: string): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await get(id)
+      if (!r.found || r.entry === undefined) { setMessage(t('entryNotFound')); return }
+      const e = r.entry
+      const lines: string[] = [`${t('fieldTitle')}: ${e.title}`]
+      const order: Array<[keyof VaultFullWire, VaultLocaleKey]> = [
+        ['username', 'fieldUsername'], ['email', 'fieldEmail'], ['phone', 'fieldPhone'],
+        ['password', 'fieldPassword'], ['host', 'fieldHost'], ['port', 'fieldPort'],
+        ['apiKey', 'fieldApiKey'], ['secret', 'fieldSecret'], ['accessToken', 'fieldAccessToken'],
+        ['refreshToken', 'fieldRefreshToken'], ['otpSecret', 'fieldOtpSecret'],
+        ['cardNumber', 'fieldCardNumber'], ['cardExpiry', 'fieldCardExpiry'], ['cardCvv', 'fieldCardCvv'], ['cardHolder', 'fieldCardHolder'],
+        ['url', 'fieldUrl'], ['notes', 'fieldNotes'], ['tags', 'fieldTags'],
+      ]
+      for (const [key, label] of order) {
+        const v = e[key]
+        if (v === undefined || v === null) continue
+        const val = Array.isArray(v) ? v.join(', ') : String(v)
+        if (val.length === 0) continue
+        lines.push(`${t(label)}: ${val}`)
+      }
+      void copyValue(id, lines.join('\n'))
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Show an entry's password history (1Password-style) and allow rollback. */
   async function showPasswordHistory(id: string): Promise<void> {
     setBusy(true)
@@ -3068,6 +3100,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 </div>
                 {expandedId === entry.id && (
                   <div className={css.detailBox}>
+                    <button
+                      type="button"
+                      className={css.copyAllBtn}
+                      title={t('copyAllHint')}
+                      disabled={busy || locked}
+                      onClick={() => void copyEntryAsText(entry.id)}
+                    >⧉ {t('copyAllFields')}</button>
                     {entry.hasOtp === true && code !== undefined && (
                       <span className={css.detailTotp} title={t('totpInlineHint')}>
                         <svg className={css.totpRing} width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
