@@ -920,3 +920,42 @@
 .exportChip:hover {
   opacity: 1;
 }
+
+/* Emoji icon picker + color palette in the edit form. */
+.iconFieldWrap,
+.colorFieldWrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.emojiPicker,
+.colorPalette {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+.emojiBtn {
+  border: 1px solid var(--dsh-color-border, #ddd);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 14px;
+  padding: 2px 5px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.emojiBtn:hover {
+  opacity: 1;
+}
+.colorSwatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--dsh-color-border, #bbb);
+  cursor: pointer;
+  padding: 0;
+}
+.colorSwatch:hover {
+  transform: scale(1.15);
+}

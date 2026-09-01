@@ -275,8 +275,7 @@ function highlightText(text: string, term: string): ReactNode {
 }
 
 /** Curated columns offered in the CSV export field picker. */
-const CSV_EXPORT_FIELDS: Array<{ key: string; label: VaultLocaleKey }> = [
-  { key: 'title', label: 'fieldTitle' },
+const CSV_EXPORT_FIELDS: Array<{ key: string; label: VaultLocaleKey }> = [  { key: 'title', label: 'fieldTitle' },
   { key: 'kind', label: 'fieldKind' },
   { key: 'username', label: 'fieldUsername' },
   { key: 'email', label: 'fieldEmail' },
@@ -290,6 +289,12 @@ const CSV_EXPORT_FIELDS: Array<{ key: string; label: VaultLocaleKey }> = [
   { key: 'rotationDays', label: 'fieldRotationDays' },
   { key: 'favorite', label: 'fieldFavorite' },
 ]
+
+/** Quick-pick emoji icons for the entry icon field. */
+const EMOJI_ICONS = ['🔑', '🐙', '👤', '🔒', '💳', '🏠', '☁️', '📧', '🔐', '🛡️', '📡', '🧾', '📱', '🖥️', '🕸️', '🌐']
+
+/** Preset accent colors for the entry color field. */
+const COLOR_PRESETS = ['#2e9e5b', '#cf3d3d', '#c98a1b', '#2563eb', '#7c3aed', '#0d9488', '#db2777', '#64748b', '#e0a800', '#111827']
 
 const KIND_KEYS: Record<string, VaultLocaleKey> = {  login: 'kindLogin',
   ssh: 'kindSsh',
@@ -3349,6 +3354,36 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     value={form.cardHolder ?? ''}
                     onChange={event => setForm(previous => ({ ...previous, cardHolder: event.target.value }))}
                   />
+                ) : field.key === 'icon' ? (
+                  <span className={css.iconFieldWrap}>
+                    <input
+                      type="text"
+                      value={(form.icon as string | undefined) ?? ''}
+                      placeholder="🔑"
+                      maxLength={4}
+                      onChange={event => setForm(previous => ({ ...previous, icon: event.target.value }))}
+                    />
+                    <span className={css.emojiPicker} role="group" aria-label={t('iconPickerHint')}>
+                      {EMOJI_ICONS.map(e => (
+                        <button key={e} type="button" className={css.emojiBtn} title={e} onClick={() => setForm(previous => ({ ...previous, icon: e }))}>{e}</button>
+                      ))}
+                    </span>
+                  </span>
+                ) : field.key === 'color' ? (
+                  <span className={css.colorFieldWrap}>
+                    <input
+                      type="text"
+                      value={(form.color as string | undefined) ?? ''}
+                      placeholder="#2e9e5b"
+                      maxLength={7}
+                      onChange={event => setForm(previous => ({ ...previous, color: event.target.value }))}
+                    />
+                    <span className={css.colorPalette} role="group" aria-label={t('colorPickerHint')}>
+                      {COLOR_PRESETS.map(c => (
+                        <button key={c} type="button" className={css.colorSwatch} style={{ background: c }} title={c} aria-label={c} onClick={() => setForm(previous => ({ ...previous, color: c }))} />
+                      ))}
+                    </span>
+                  </span>
                 ) : field.key === 'username' ? (
                   <input
                     type="text"
