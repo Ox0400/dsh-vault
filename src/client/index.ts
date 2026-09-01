@@ -6,10 +6,12 @@
  * @module dsh-vault/client
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: pulls the SlotRegistry service merge (ctx.slots).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { VaultSection, type VaultSectionInjected } from './VaultSection.tsx'
 import type { VaultSectionTypes } from './VaultSection.tsx'
 import { en, zh, type VaultLocaleKey } from './locales.ts'

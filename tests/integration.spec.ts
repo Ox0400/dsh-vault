@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as VaultPlugin from '../src/index'
 
 const signal = new AbortController().signal
@@ -62,7 +62,7 @@ async function withContext<T>(
 async function call(ctx: Context, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const result = await ctx.tools.execute({
     signal,
-    callId: CallId(`dsh-vault-call-${++callCounter}`),
+    callId: ToolCallId(`dsh-vault-call-${++callCounter}`),
     name,
     arguments: args,
   })
@@ -297,7 +297,7 @@ test('vault_search enforces a sane limit and vault_update renames entries', asyn
     for (const bad of [0, 101, 1.5]) {
       const result = await ctx.tools.execute({
         signal,
-        callId: CallId(`dsh-vault-limit-${++callCounter}`),
+        callId: ToolCallId(`dsh-vault-limit-${++callCounter}`),
         name: 'vault_search',
         arguments: { query: 'u', limit: bad },
       })
@@ -344,7 +344,7 @@ test('readonly mode rejects mutations but allows reads', async () => {
   await withContext(async ctx => {
     const result = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-ro-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-ro-${++callCounter}`),
       name: 'vault_add',
       arguments: { title: 'Blocked', apiKey: 'sk-123' },
     })
@@ -354,7 +354,7 @@ test('readonly mode rejects mutations but allows reads', async () => {
     // Reads still work: search returns empty list, no error.
     const search = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-ro-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-ro-${++callCounter}`),
       name: 'vault_search',
       arguments: { query: 'anything' },
     })
@@ -407,7 +407,7 @@ test('setAccessMode persists the choice and mutates the shared policy', async ()
 
     const result = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-sam-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-sam-${++callCounter}`),
       name: 'vault_add',
       arguments: { title: 'Blocked after switch', apiKey: 'sk-1' },
     })
@@ -418,7 +418,7 @@ test('setAccessMode persists the choice and mutates the shared policy', async ()
     await gateway.setAccessMode('auto')
     const ok = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-sam-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-sam-${++callCounter}`),
       name: 'vault_add',
       arguments: { title: 'Allowed', apiKey: 'sk-2' },
     })
@@ -433,7 +433,7 @@ test('ask mode routes writes through the pre-execute approval gate', async () =>
     // (the harness seam degrades ask → deny).
     const result = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-ask-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-ask-${++callCounter}`),
       name: 'vault_add',
       arguments: { title: 'Needs approval', apiKey: 'sk-3' },
     })
@@ -443,7 +443,7 @@ test('ask mode routes writes through the pre-execute approval gate', async () =>
     // Reads are unaffected in ask mode.
     const search = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-ask-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-ask-${++callCounter}`),
       name: 'vault_search',
       arguments: { query: 'x' },
     })
@@ -461,7 +461,7 @@ test('vault_lock/vault_unlock gate reads and writes', async () => {
     const locked = await call(ctx, 'vault_lock', {})
     assert.equal(locked.locked, true)
     const readAfterLock = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-lk-${++callCounter}`), name: 'vault_get', arguments: { id },
+      signal, callId: ToolCallId(`dsh-vault-lk-${++callCounter}`), name: 'vault_get', arguments: { id },
     })
     assert.equal(readAfterLock.isError, true)
     assert.match((readAfterLock.error?.message ?? ''), /locked/i)
@@ -617,7 +617,7 @@ test('high-sensitivity entries require approval when read in ask mode', async ()
     // ask mode: reading it must be denied (no approval service composed).
     const result = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-hs-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-hs-${++callCounter}`),
       name: 'vault_get',
       arguments: { id: added.id },
     })
@@ -629,7 +629,7 @@ test('high-sensitivity entries require approval when read in ask mode', async ()
     await gateway.setAccessMode('auto')
     const stillDenied = await ctx.tools.execute({
       signal,
-      callId: CallId(`dsh-vault-hs-${++callCounter}`),
+      callId: ToolCallId(`dsh-vault-hs-${++callCounter}`),
       name: 'vault_get',
       arguments: { id: added.id },
     })
@@ -724,13 +724,13 @@ test('vault_update rejects invalid typed fields', async () => {
   await withContext(async ctx => {
     const added = await call(ctx, 'vault_add', { title: 'Type check', password: 'pw' })
     const bad = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-tc-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-tc-${++callCounter}`),
       name: 'vault_update', arguments: { id: added.id as string, sensitivity: 'ultra' },
     })
     assert.equal(bad.isError, true)
     assert.match((bad.error?.message ?? ''), /sensitivity/)
     const badDays = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-tc-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-tc-${++callCounter}`),
       name: 'vault_update', arguments: { id: added.id as string, rotationDays: 'soon' },
     })
     assert.equal(badDays.isError, true)
@@ -818,7 +818,7 @@ test('vault_pin ranks the entry first and marks it favorite', async () => {
 test('vault_totp rejects invalid short secrets with a clear error', async () => {
   await withContext(async ctx => {
     const r = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-totp-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-totp-${++callCounter}`),
       name: 'vault_totp', arguments: { secret: 'ABC' },
     })
     assert.equal(r.isError, true)
@@ -974,7 +974,7 @@ test('vault_purge refuses to purge an active entry without confirm', async () =>
   await withContext(async ctx => {
     const added = await call(ctx, 'vault_add', { title: 'Active', password: 'pw' })
     const denied = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-pg-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-pg-${++callCounter}`),
       name: 'vault_purge', arguments: { id: added.id as string },
     })
     assert.equal(denied.isError, true)
@@ -2265,7 +2265,7 @@ test('vault_breach_check supports bounded concurrency', async () => {
     assert.equal(r.checked, 2)
     assert.ok(r.weak.some(w => w.title === 'Conc1'))
     const bad = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-breach-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-breach-${++callCounter}`),
       name: 'vault_breach_check', arguments: { concurrency: 0 },
     })
     assert.equal(bad.isError, true)
@@ -2283,7 +2283,7 @@ test('vault_import_csv enforces a row safety limit', async () => {
     for (let i = 0; i < 5002; i++) rows.push(`t${i},u,pw`)
     await writeFile(file, rows.join('\n') + '\n')
     const r = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-csvlimit-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-csvlimit-${++callCounter}`),
       name: 'vault_import_csv', arguments: { path: file },
     })
     assert.equal(r.isError, true, 'over-limit import rejected')
@@ -2367,7 +2367,7 @@ test('vault_import rejects a future export format', async () => {
     await writeFile(file, JSON.stringify({ format: 999, kdf: {}, entries: [] }))
     process.env.DSH_VAULT_EXPORT_PW8 = 'export-pw-8'
     const r = await ctx.tools.execute({
-      signal, callId: CallId(`dsh-vault-fmt-${++callCounter}`),
+      signal, callId: ToolCallId(`dsh-vault-fmt-${++callCounter}`),
       name: 'vault_import', arguments: { path: file },
     })
     assert.equal(r.isError, true, 'future format rejected')
@@ -2929,7 +2929,7 @@ test('vault_session_import rejects duplicates and empty input', async () => {
   await withContext(async ctx => {
     await call(ctx, 'vault_session_import', { title: 'S', cookies: '[{"name":"a","value":"1","domain":"x.io"}]' })
     const run = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean }> =>
-      ctx.tools.execute({ signal, callId: CallId(`dsh-vault-sess-${++callCounter}`), name, arguments: args })
+      ctx.tools.execute({ signal, callId: ToolCallId(`dsh-vault-sess-${++callCounter}`), name, arguments: args })
     const dup = await run('vault_session_import', { title: 'S', cookies: '[{"name":"a","value":"1","domain":"x.io"}]' })
     assert.equal(dup.isError, true, 'duplicate title rejected')
     const empty = await run('vault_session_import', { title: 'E', cookies: 'not-cookies' })

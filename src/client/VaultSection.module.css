@@ -1066,3 +1066,9 @@
   gap: 2px;
   margin-right: 4px;
 }
+
+/* Compact list density. */
+.listCompact .row {
+  padding: 3px 8px;
+  gap: 8px;
+}

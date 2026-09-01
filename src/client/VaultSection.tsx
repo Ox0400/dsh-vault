@@ -411,6 +411,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [favOnly, setFavOnly] = useState(false)
+  const [rowDensity, setRowDensity] = useState<'compact' | 'comfortable'>(() => {
+    try { return window.localStorage.getItem('dsh-vault-density') === 'compact' ? 'compact' : 'comfortable' } catch { return 'comfortable' }
+  })
+  useEffect(() => {
+    try { window.localStorage.setItem('dsh-vault-density', rowDensity) } catch { /* noop */ }
+  }, [rowDensity])
   const [dueOnly, setDueOnly] = useState(false)
   const [issueOnly, setIssueOnly] = useState(false)
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
@@ -2176,6 +2182,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           aria-pressed={issueOnly}
           title={t('issueOnlyHint')}
         >⚠️ {t('issueOnly')}</button>
+        <button
+          type="button"
+          className={css.favToggle}
+          onClick={() => setRowDensity(value => value === 'compact' ? 'comfortable' : 'compact')}
+          title={t('densityHint')}
+        >{rowDensity === 'compact' ? '▭' : '▮'} {t('density')}</button>
         {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
           <span className={css.healthSummary} title={t('healthSummaryHint')}>
             {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
@@ -3007,7 +3019,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             ))
           })()}
         </p>
-        <ul className={css.list}>
+        <ul className={`${css.list}${rowDensity === 'compact' ? ` ${css.listCompact}` : ''}`}>
           {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) === 0 && (
             <li className={css.empty}>{t('noFiltered')}</li>
           )}

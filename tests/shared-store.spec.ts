@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as VaultPlugin from '../src/index.ts'
 
 const signal = new AbortController().signal
@@ -42,7 +42,7 @@ async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): P
 async function callTool(ctx: Context, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const result = await ctx.tools.execute({
     signal,
-    callId: CallId(`dsh-vault-shared-${++callCounter}`),
+    callId: ToolCallId(`dsh-vault-shared-${++callCounter}`),
     name,
     arguments: args,
   })
