@@ -1072,3 +1072,24 @@
   padding: 3px 8px;
   gap: 8px;
 }
+
+/* Structured custom-field editor rows. */
+.customFieldRows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.customFieldRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.customKeyInput {
+  flex: 0 0 120px;
+}
+.customValueInput {
+  flex: 1;
+}
+.customEq {
+  opacity: 0.6;
+}

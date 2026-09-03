@@ -390,7 +390,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }, [exportFields])
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
-  const [fieldsDraft, setFieldsDraft] = useState('')
+  const [fieldRows, setFieldRows] = useState<Array<{ key: string; value: string }>>([])
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [genOpts, setGenOpts] = useState<{ length: number; uppercase: boolean; lowercase: boolean; digits: boolean; symbols: boolean; excludeAmbiguous: boolean; passphrase: boolean; words: number; separator: string; wordDigits: boolean }>(() => {
     try {
@@ -1535,10 +1535,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }, [refreshMeta])
 
   /** Open the editor for a new entry. */
+  function addFieldRow(): void {
+    setFieldRows(previous => [...previous, { key: '', value: '' }])
+  }
+  function removeFieldRow(index: number): void {
+    setFieldRows(previous => previous.filter((_, i) => i !== index))
+  }
+  function updateFieldRow(index: number, which: 'key' | 'value', value: string): void {
+    setFieldRows(previous => previous.map((row, i) => (i === index ? { ...row, [which]: value } : row)))
+  }
+
   function startCreate(): void {
     setForm(emptyForm())
     setTagsDraft('')
-    setFieldsDraft('')
+    setFieldRows([])
     setMessage(null)
     setEditor({ status: 'creating' })
   }
@@ -1588,7 +1598,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         favorite: entry.favorite ?? false,
       })
       setTagsDraft((entry.tags ?? []).join(', '))
-      setFieldsDraft(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => `${k}=${String(v)}`).join('\n') : '')
+      setFieldRows(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => ({ key: k, value: String(v) })) : [])
       setEditor({ status: 'editing', entry })
     } catch (err) {
       setMessage(errText(err))
@@ -1625,12 +1635,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     try {
       const tags = tagsDraft.split(',').map(x => x.trim()).filter(x => x.length > 0)
       const fields: Record<string, string> = {}
-      for (const line of fieldsDraft.split('\n')) {
-        const trimmed = line.trim()
-        if (trimmed.length === 0) continue
-        const eq = trimmed.indexOf('=')
-        if (eq <= 0) continue
-        fields[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+      for (const row of fieldRows) {
+        const key = row.key.trim()
+        if (key.length === 0) continue
+        fields[key] = row.value
       }
       const patch: VaultPatch = {
         title: (form.title ?? '').trim(),
@@ -1845,7 +1853,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       const dataBase64 = String(reader.result ?? '').split(',')[1] ?? ''
       void attach(id, file.name, dataBase64, file.type.length > 0 ? file.type : undefined).then(r => {
         if (!r.attached) setMessage(t('entryNotFound'))
-        else void attachments(id).then(rr => { if (rr.found) setAttachmentsMap(prev => ({ ...prev, [id]: rr.attachments })) })
+        else {
+          void attachments(id).then(rr => { if (rr.found) setAttachmentsMap(prev => ({ ...prev, [id]: rr.attachments })) })
+          // Refresh the entries so the 📎 attachment-count badge updates.
+          void refresh()
+        }
         setBusy(false)
       }, () => setBusy(false))
     }
@@ -3739,12 +3751,34 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             </label>
             <label className={css.field}>
               <span>{t('fieldCustom')}</span>
-              <textarea
-                value={fieldsDraft}
-                onChange={event => setFieldsDraft(event.target.value)}
-                rows={3}
-                placeholder="region=us-east-1&#10;team=infra"
-              />
+              <div className={css.customFieldRows}>
+                {fieldRows.map((row, i) => (
+                  <span key={i} className={css.customFieldRow}>
+                    <input
+                      type="text"
+                      className={css.customKeyInput}
+                      placeholder={t('customKeyPh')}
+                      value={row.key}
+                      onChange={event => updateFieldRow(i, 'key', event.target.value)}
+                    />
+                    <span className={css.customEq}>=</span>
+                    <input
+                      type="text"
+                      className={css.customValueInput}
+                      placeholder={t('customValuePh')}
+                      value={row.value}
+                      onChange={event => updateFieldRow(i, 'value', event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={css.revealButton}
+                      title={t('customRemove')}
+                      onClick={() => removeFieldRow(i)}
+                    >✕</button>
+                  </span>
+                ))}
+              </div>
+              <button type="button" className={css.dupMerge} onClick={addFieldRow}>{t('addField')}</button>
             </label>
           </div>
           <div className={css.editorActions}>
