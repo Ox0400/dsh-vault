@@ -1609,6 +1609,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   /** Save the current form (create or update). */
   async function save(): Promise<void> {
+    if (busy) return
     if (!(form.title ?? '').trim()) {
       setMessage(t('errTitleEmpty'))
       return
@@ -3519,7 +3520,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {editor.status !== 'closed' && (
-        <div className={css.editor} role="dialog" aria-label={editor.status === 'creating' ? t('add') : t('edit')}>
+        <div
+          className={css.editor}
+          role="dialog"
+          aria-label={editor.status === 'creating' ? t('add') : t('edit')}
+          onKeyDown={event => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+              event.preventDefault()
+              void save()
+            }
+          }}
+        >
           <div className={css.editorBody}>
             <div className={css.genOpts}>
               <label className={css.genOptRow}>
@@ -3558,6 +3569,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   </select>
                 ) : field.key === 'title' ? (
                   <input
+                    autoFocus
                     value={form.title ?? ''}
                     onChange={event => setForm(previous => ({ ...previous, title: event.target.value }))}
                   />
@@ -3851,7 +3863,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           </div>
           <div className={css.editorActions}>
             <button type="button" onClick={() => setEditor({ status: 'closed' })} disabled={busy}>{t('cancel')}</button>
-            <button type="button" className={css.saveButton} onClick={() => void save()} disabled={busy}>{t('save')}</button>
+            <button type="button" className={css.saveButton} title={t('saveShortcut')} onClick={() => void save()} disabled={busy}>{t('save')}</button>
           </div>
         </div>
       )}
