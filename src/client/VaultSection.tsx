@@ -507,7 +507,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }, [form.password, strength])
 
   // Ctrl/Cmd+K focuses the vault search box (1Password-style quick search);
-  // Ctrl/Cmd+N opens the new-entry form; Esc closes the open ⋯ overflow menu.
+  // Ctrl/Cmd+N opens the new-entry form; Esc closes the ⋯ menu, collapses an
+  // expanded detail box, and dismisses open panels (editor left untouched so
+  // unsaved edits are never lost by a stray Esc).
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
@@ -519,12 +521,26 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         setActiveTab('entries')
         startCreate()
       } else if (event.key === 'Escape') {
-        setOpenMenuId(null)
+        // First Esc clears our own open UI (⋯ menu / expanded detail / import
+        // preview / tag manager) and stops propagation so the settings panel
+        // stays open; a second Esc (nothing open here) falls through to the
+        // shell, which closes the whole settings drawer.
+        const hadOpen = openMenuId !== null || expandedId !== null
+          || importPreview !== null || tagManagerOpen
+        if (hadOpen) {
+          setOpenMenuId(null)
+          setExpandedId(null)
+          setImportPreview(null)
+          setTagManagerOpen(false)
+          event.stopPropagation()
+        }
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    // Capture phase: run before document-level listeners (the settings panel
+    // closes on Escape in bubble phase), so our open UI can consume the key.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [openMenuId, expandedId, importPreview, tagManagerOpen])
 
   /** Apply a template's field values to the current form. The form is reset
    * to its empty state first (so fields the template does not set are cleared
