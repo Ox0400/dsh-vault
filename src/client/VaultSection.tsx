@@ -340,6 +340,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, removeTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
   const [query, setQuery] = useState('')
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     try {
@@ -2162,7 +2163,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               ))}
             </select>
           )}
-          <label className={css.searchBox}>
+          <label className={css.searchBox} title={t('searchShortcut')}>
             <span className={css.srOnly}>{t('searchPlaceholder')}</span>
             <input
               id={searchId}
@@ -2177,11 +2178,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               }}
               disabled={locked}
             />
+            {query.length === 0 && (
+              <kbd className={css.searchKbd} aria-hidden="true">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+            )}
             {query.length > 0 && (
               <button type="button" className={css.clearButton} onClick={() => setQuery('')} aria-label={t('clearSearch')}>×</button>
             )}
           </label>
-          <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
+          <button type="button" className={css.addButton} onClick={startCreate} title={t('addShortcut')} disabled={busy || readonly || locked}>
             + {t('add')}
           </button>
           {!readonly && !locked && (
