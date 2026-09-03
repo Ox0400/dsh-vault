@@ -2231,6 +2231,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     void renameTag(tag.name, asked.trim()).then(() => {
                       void tags().then(setTagList).catch(() => {})
                       void refreshMeta()
+                      void refresh()
                       setBusy(false)
                     }, () => setBusy(false))
                   }}
@@ -2245,6 +2246,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     void removeTag(tag.name).then(r => {
                       void tags().then(setTagList).catch(() => {})
                       void refreshMeta()
+                      void refresh()
                       setMessage(t('tagRemoved').replace('{n}', String(r.removed)))
                       setBusy(false)
                     }, () => setBusy(false))
