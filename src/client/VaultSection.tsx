@@ -2144,123 +2144,112 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       {activeTab === 'entries' && (<div className={css.tabPane}>
       <div className={css.toolbar}>
-        {locked && (
-          <span className={css.lockedTag}>{t('lockedShort')}</span>
-        )}
-        {vaults.length > 0 && (
-          <select
-            className={css.kindFilter}
-            value={vaults.find(v => v.active)?.name ?? ''}
-            onChange={event => void switchVaultTo(event.target.value)}
-            aria-label={t('vaultSelect')}
-            disabled={locked}
-          >
-            {vaults.map(v => (
-              <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}{v.entries !== undefined ? ` (${v.entries})` : ''}</option>
+        <div className={css.toolbarMain}>
+          {locked && (
+            <span className={css.lockedTag}>{t('lockedShort')}</span>
+          )}
+          {vaults.length > 0 && (
+            <select
+              className={css.kindFilter}
+              value={vaults.find(v => v.active)?.name ?? ''}
+              onChange={event => void switchVaultTo(event.target.value)}
+              aria-label={t('vaultSelect')}
+              disabled={locked}
+            >
+              {vaults.map(v => (
+                <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}{v.entries !== undefined ? ` (${v.entries})` : ''}</option>
+              ))}
+            </select>
+          )}
+          <label className={css.searchBox}>
+            <span className={css.srOnly}>{t('searchPlaceholder')}</span>
+            <input
+              id={searchId}
+              ref={searchRef}
+              type="search"
+              placeholder={t('searchPlaceholder')}
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Escape') { setQuery(''); setKindFilter(''); setTagFilter('') }
+                if (event.key === 'Enter' && query.trim().length > 0) rememberSearch(query.trim())
+              }}
+              disabled={locked}
+            />
+            {query.length > 0 && (
+              <button type="button" className={css.clearButton} onClick={() => setQuery('')} aria-label={t('clearSearch')}>×</button>
+            )}
+          </label>
+          <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
+            + {t('add')}
+          </button>
+          {!readonly && !locked && (
+            <button type="button" className={selectMode ? `${css.dupMerge} ${css.selectActive}` : css.dupMerge} onClick={toggleSelectMode} disabled={busy}>
+              {selectMode ? t('bulkDone') : t('bulkSelect')}
+            </button>
+          )}
+        </div>
+        <div className={css.toolbarFilters}>
+          <select className={css.kindFilter} value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label={t('fieldKind')}>
+            <option value="">{t('allKinds')}</option>
+            {Object.entries(KIND_KEYS).map(([value, key]) => (
+              <option key={value} value={value}>{t(key)}</option>
             ))}
           </select>
-        )}
-        <button type="button" className={css.dupMerge} onClick={() => void runVaultRename()} disabled={busy || locked} title={t('vaultRename')}>{t('vaultRename')}</button>
-        {vaults.filter(v => v.name !== 'default').map(v => (
-          <button key={v.name} type="button" className={css.dangerButton} onClick={() => void runVaultDelete(v.name)} disabled={busy || locked} title={t('vaultDelete')}>{t('vaultDelete')} {v.name}</button>
-        ))}
-        <label className={css.searchBox}>
-          <span className={css.srOnly}>{t('searchPlaceholder')}</span>
-          <input
-            id={searchId}
-            ref={searchRef}
-            type="search"
-            placeholder={t('searchPlaceholder')}
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Escape') { setQuery(''); setKindFilter(''); setTagFilter('') }
-              if (event.key === 'Enter' && query.trim().length > 0) rememberSearch(query.trim())
-            }}
-            disabled={locked}
-          />
-          {query.length > 0 && (
-            <button type="button" className={css.clearButton} onClick={() => setQuery('')} aria-label={t('clearSearch')}>×</button>
-          )}
-        </label>
-        <select className={css.kindFilter} value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label={t('fieldKind')}>
-          <option value="">{t('allKinds')}</option>
-          {Object.entries(KIND_KEYS).map(([value, key]) => (
-            <option key={value} value={value}>{t(key)}</option>
-          ))}
-        </select>
-        <select className={css.kindFilter} value={tagFilter} onChange={e => setTagFilter(e.target.value)} aria-label={t('fieldTags')}>
-          <option value="">{t('allTags')}</option>
-          {[...new Set(state.status === 'ready' ? state.entries.flatMap(e => e.tags ?? []) : [])].sort().map(tag => (
-            <option key={tag} value={tag}>{tag}</option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className={css.favToggle}
-          onClick={() => setTagManagerOpen(value => !value)}
-          aria-pressed={tagManagerOpen}
-          title={t('tagManagerHint')}
-        >🏷 {t('tagManager')}</button>
-        <select
-          className={css.sortButton}
-          value={sortBy}
-          onChange={event => setSortBy(event.target.value as 'alpha' | 'recent' | 'created' | 'favorite' | 'smart')}
-          aria-label={t('sortBy')}
-        >
-          <option value="alpha">{t('sortAlpha')}</option>
-          <option value="recent">{t('sortRecent')}</option>
-          <option value="created">{t('sortCreated')}</option>
-          <option value="favorite">{t('sortFavorite')}</option>
-          <option value="smart">{t('sortSmart')}</option>
-        </select>
-        <button
-          type="button"
-          className={`${css.favToggle}${favOnly ? ` ${css.favActive}` : ''}`}
-          onClick={() => setFavOnly(value => !value)}
-          aria-pressed={favOnly}
-          title={t('favOnlyHint')}
-        >★ {t('favOnly')}</button>
-        <button
-          type="button"
-          className={`${css.favToggle}${dueOnly ? ` ${css.favActive}` : ''}`}
-          onClick={() => setDueOnly(value => !value)}
-          aria-pressed={dueOnly}
-          title={t('dueOnlyHint')}
-        >⏰ {t('dueOnly')}</button>
-        <button
-          type="button"
-          className={`${css.favToggle}${issueOnly ? ` ${css.favActive}` : ''}`}
-          onClick={() => setIssueOnly(value => !value)}
-          aria-pressed={issueOnly}
-          title={t('issueOnlyHint')}
-        >⚠️ {t('issueOnly')}</button>
-        <button
-          type="button"
-          className={css.favToggle}
-          onClick={() => setRowDensity(value => value === 'compact' ? 'comfortable' : 'compact')}
-          title={t('densityHint')}
-        >{rowDensity === 'compact' ? '▭' : '▮'} {t('density')}</button>
-        {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
-          <span className={css.healthSummary} title={t('healthSummaryHint')}>
-            {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
-            {report.reused.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>}
-            {report.no2fa.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('no2fa')}: {report.no2fa.length}</span>}
-            {report.httpSites.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('httpSites')}: {report.httpSites.length}</span>}
-            {report.rotation.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>}
-          </span>
-        )}
-        {report !== null && report.weak.length === 0 && report.reused.length === 0 && report.no2fa.length === 0 && report.httpSites.length === 0 && report.rotation.length === 0 && (
-          <span className={`${css.badge} ${css.badgeOk}`} title={t('healthSummaryHint')}>{t('healthOk')} ✓</span>
-        )}
-        <button type="button" className={css.addButton} onClick={startCreate} disabled={busy || readonly || locked}>
-          + {t('add')}
-        </button>
-        {!readonly && !locked && (
-          <button type="button" className={selectMode ? `${css.dupMerge} ${css.selectActive}` : css.dupMerge} onClick={toggleSelectMode} disabled={busy}>
-            {selectMode ? t('bulkDone') : t('bulkSelect')}
-          </button>
-        )}
+          <select className={css.kindFilter} value={tagFilter} onChange={e => setTagFilter(e.target.value)} aria-label={t('fieldTags')}>
+            <option value="">{t('allTags')}</option>
+            {[...new Set(state.status === 'ready' ? state.entries.flatMap(e => e.tags ?? []) : [])].sort().map(tag => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={css.favToggle}
+            onClick={() => setTagManagerOpen(value => !value)}
+            aria-pressed={tagManagerOpen}
+            title={t('tagManagerHint')}
+          >🏷 {t('tagManager')}</button>
+          <select
+            className={css.sortButton}
+            value={sortBy}
+            onChange={event => setSortBy(event.target.value as 'alpha' | 'recent' | 'created' | 'favorite' | 'smart')}
+            aria-label={t('sortBy')}
+          >
+            <option value="alpha">{t('sortAlpha')}</option>
+            <option value="recent">{t('sortRecent')}</option>
+            <option value="created">{t('sortCreated')}</option>
+            <option value="favorite">{t('sortFavorite')}</option>
+            <option value="smart">{t('sortSmart')}</option>
+          </select>
+          <span className={css.toolbarDivider} aria-hidden="true" />
+          <button
+            type="button"
+            className={`${css.favToggle}${favOnly ? ` ${css.favActive}` : ''}`}
+            onClick={() => setFavOnly(value => !value)}
+            aria-pressed={favOnly}
+            title={t('favOnlyHint')}
+          >★ {t('favOnly')}</button>
+          <button
+            type="button"
+            className={`${css.favToggle}${dueOnly ? ` ${css.favActive}` : ''}`}
+            onClick={() => setDueOnly(value => !value)}
+            aria-pressed={dueOnly}
+            title={t('dueOnlyHint')}
+          >⏰ {t('dueOnly')}</button>
+          <button
+            type="button"
+            className={`${css.favToggle}${issueOnly ? ` ${css.favActive}` : ''}`}
+            onClick={() => setIssueOnly(value => !value)}
+            aria-pressed={issueOnly}
+            title={t('issueOnlyHint')}
+          >⚠️ {t('issueOnly')}</button>
+          <button
+            type="button"
+            className={css.favToggle}
+            onClick={() => setRowDensity(value => value === 'compact' ? 'comfortable' : 'compact')}
+            title={t('densityHint')}
+          >{rowDensity === 'compact' ? '▭' : '▮'} {t('density')}</button>
+        </div>
       </div>
       {tagManagerOpen && (
         <div className={css.tagManager}>
@@ -2401,6 +2390,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               ))}
               <button type="button" className={css.recentClear} onClick={() => { setRecentSearches([]); try { window.sessionStorage.removeItem('dsh-vault-recent-searches') } catch { /* noop */ } }}>{t('clearRecent')}</button>
             </span>
+          )}
+          {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
+            <span className={css.healthSummary} title={t('healthSummaryHint')}>
+              {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
+              {report.reused.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>}
+              {report.no2fa.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('no2fa')}: {report.no2fa.length}</span>}
+              {report.httpSites.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('httpSites')}: {report.httpSites.length}</span>}
+              {report.rotation.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>}
+            </span>
+          )}
+          {report !== null && report.weak.length === 0 && report.reused.length === 0 && report.no2fa.length === 0 && report.httpSites.length === 0 && report.rotation.length === 0 && (
+            <span className={`${css.badge} ${css.badgeOk}`} title={t('healthSummaryHint')}>{t('healthOk')} ✓</span>
           )}
         </div>
       )}
@@ -2843,6 +2844,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {activeTab === 'permissions' && (<div className={css.tabPane}>
+      {vaults.length > 0 && (
+        <div className={css.reportBox}>
+          <p className={css.reportTitle}>{t('vaultManageTitle')}</p>
+          <div className={css.dupGroup}>
+            <span className={css.dupNames}>{t('vaultManageDesc')}: {vaults.find(v => v.active)?.name ?? ''}</span>
+            <button type="button" className={css.dupMerge} onClick={() => void runVaultRename()} disabled={busy || locked} title={t('vaultRename')}>{t('vaultRename')}</button>
+            {vaults.filter(v => v.name !== 'default').map(v => (
+              <button key={v.name} type="button" className={css.dangerButton} onClick={() => void runVaultDelete(v.name)} disabled={busy || locked} title={t('vaultDelete')}>{t('vaultDelete')} {v.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {policy !== null && (
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('permTitle')}</p>

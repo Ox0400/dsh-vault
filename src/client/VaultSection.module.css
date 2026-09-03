@@ -1093,3 +1093,37 @@
 .customEq {
   opacity: 0.6;
 }
+
+/* Two-tier toolbar: primary actions + filter/view row. */
+.toolbarMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.toolbarFilters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--dsh-color-border, #eee);
+  opacity: 0.92;
+}
+.toolbarFilters .favToggle,
+.toolbarFilters select {
+  font-size: 12.5px;
+  padding: 4px 8px;
+}
+.toolbarFilters .favToggle {
+  padding: 4px 10px;
+}
+.toolbarDivider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--dsh-color-border, #ddd);
+  margin: 0 2px;
+}
