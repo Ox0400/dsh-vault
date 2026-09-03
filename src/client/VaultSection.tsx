@@ -372,7 +372,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [sysQuery, setSysQuery] = useState('')
   const [sysMatches, setSysMatches] = useState<Array<{ source: string; name: string; username: string }>>([])
   const [importPreview, setImportPreview] = useState<{ path: string; rows: Array<{ title: string; kind: string; username: string; hasPassword: boolean }>; total: number; skipped: number } | null>(null)
-  const [exportFields, setExportFields] = useState<string[]>(CSV_EXPORT_FIELDS.map(f => f.key))
+  const [exportFields, setExportFields] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem('dsh-vault-export-fields')
+      if (raw !== null) {
+        const arr = JSON.parse(raw) as unknown
+        const valid = Array.isArray(arr) ? arr.filter((v): v is string => typeof v === 'string' && CSV_EXPORT_FIELDS.some(f => f.key === v)) : []
+        if (valid.length > 0) return valid
+      }
+    } catch { /* storage may be unavailable */ }
+    return CSV_EXPORT_FIELDS.map(f => f.key)
+  })
+  // Persist the selected export columns so the picker remembers them.
+  useEffect(() => {
+    try { window.localStorage.setItem('dsh-vault-export-fields', JSON.stringify(exportFields)) } catch { /* noop */ }
+  }, [exportFields])
   const [nowTick, setNowTick] = useState(Date.now())
   const [tagsDraft, setTagsDraft] = useState('')
   const [fieldsDraft, setFieldsDraft] = useState('')
