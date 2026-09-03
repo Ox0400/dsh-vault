@@ -181,6 +181,31 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 
 ## Configuration
 
+> [!WARNING] Security: never put the master password in plaintext
+> A profile patch (`cordis.patch.yml` / `cordis.yml`) is a config file that is
+> easy to commit to git, screenshot, or capture in logs — so a plaintext
+> `masterPassword:` row leaks the key to your whole encrypted vault. Always use
+> `masterPasswordEnv` and export the real password into the process/shell
+> environment instead (e.g. `export DSH_VAULT_PASSWORD='…'`). See the
+> [community-plugin-audit handbook](https://github.com/sandbaseai/deepseek-harness-handbook/blob/main/docs/en/security/community-plugin-audit.md)
+> for the evidence-first checklist for credential-handling plugins.
+>
+> ```yaml
+> # ✗ DON'T — plaintext master password in a config file
+> - id: vault
+>   name: dsh-vault
+>   config:
+>     masterPassword: 'my-secret'
+> ```
+>
+> ```yaml
+> # ✓ DO — reference an environment variable; keep the file itself 0600
+> - id: vault
+>   name: dsh-vault
+>   config:
+>     masterPasswordEnv: DSH_VAULT_PASSWORD
+> ```
+
 | Option | Description |
 |---|---|
 | `masterPassword` | The master password inline (appears in cordis.yml; not recommended) |
