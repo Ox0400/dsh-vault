@@ -282,6 +282,25 @@ test('VaultGateway exportCsv writes a field-selected CSV with BOM', async () => 
   })
 })
 
+test('VaultGateway list summary carries attachmentCount without leaking data', async () => {
+  await withGateway(async gateway => {
+    const added = await gateway.add({ title: 'WithAtt', username: 'u' })
+    // No attachments yet → no badge field.
+    let listed = (await gateway.list()).entries.find(e => e.id === added.id)
+    expect(listed?.attachmentCount).toBeUndefined()
+    await gateway.update(added.id, {
+      attachments: {
+        'a.txt': { data: Buffer.from('aa').toString('base64'), name: 'a.txt', size: 2 },
+        'b.txt': { data: Buffer.from('bb').toString('base64'), name: 'b.txt', size: 2 },
+      },
+    })
+    listed = (await gateway.list()).entries.find(e => e.id === added.id)
+    expect(listed?.attachmentCount).toBe(2)
+    // The summary never carries the file contents.
+    expect(JSON.stringify(listed)).not.toContain('Buffer')
+  })
+})
+
 test('VaultGateway totp uses a stored secret', async () => {
   await withGateway(async gateway => {
     const added = await gateway.add({ title: '2FA', otpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })

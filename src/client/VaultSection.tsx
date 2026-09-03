@@ -28,6 +28,7 @@ export interface VaultSummaryWire {
   cardExpiry?: string
   cardHolder?: string
   hasOtp?: boolean
+  attachmentCount?: number
   createdAt?: number
   updatedAt?: number
 }
@@ -3137,6 +3138,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     )}
                   </span>
                   <span className={css.identity}>{highlightText(identityLine(entry), query)}</span>
+                  {entry.attachmentCount !== undefined && entry.attachmentCount > 0 && (
+                    <span className={css.dueBadge} title={t('attachmentCountHint')}>📎 {entry.attachmentCount}</span>
+                  )}
                   {uriMap[entry.id] !== undefined && uriMap[entry.id] !== '' && (
                     <span className={css.totp} title={t('totpUriHint')}>
                       <code className={css.uriCode}>{uriMap[entry.id]}</code>
