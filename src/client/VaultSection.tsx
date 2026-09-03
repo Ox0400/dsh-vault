@@ -2411,7 +2411,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <>
               <p className={css.empty}>{t('noFiltered')}</p>
               <p className={css.emptyHint}>{t('noFilteredHint')}</p>
-              <button type="button" className={css.addButton} onClick={() => { setQuery(''); setKindFilter(''); setTagFilter('') }}>{t('clearFilters')}</button>
+              {favOnly && <p className={css.emptyHint}>{t('favEmptyHint')}</p>}
+              <button type="button" className={css.addButton} onClick={() => { setQuery(''); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false) }}>{t('clearFilters')}</button>
             </>
           ) : (
             <>
@@ -3134,6 +3135,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       type="button"
                       className={`${css.pinStar} ${(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? css.pinOn : css.pinOff}`}
                       title={t('togglePinHint')}
+                      aria-label={(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? t('unfavoriteAria') : t('favoriteAria')}
+                      aria-pressed={(entry as VaultSummaryWire & { favorite?: boolean }).favorite === true}
                       disabled={busy || locked}
                       onClick={event => {
                         event.stopPropagation()
@@ -3141,7 +3144,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         void setFavorite(entry.id, next).then(() => void refresh())
                       }}
                       onKeyDown={event => event.stopPropagation()}
-                    >★</button>
+                    >{(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? '★' : '☆'}</button>
                     {highlightText(entry.title, query)}
                     {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
                       <span className={css.highBadge}>{t('highSensitivity')}</span>
@@ -3342,6 +3345,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         <button type="button" role="menuitem" onClick={() => void touch(entry.id).then(() => void refresh())} disabled={busy || readonly || locked}>{t('touch')}</button>
                         <button type="button" role="menuitem" onClick={() => void showPasswordHistory(entry.id)} disabled={busy || locked}>{t('pwHistory')}</button>
                         <button type="button" role="menuitem" onClick={() => void startEdit(entry.id)} disabled={busy || readonly || locked}>{t('edit')}</button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={busy || readonly || locked}
+                          onClick={() => {
+                            const next = !(entry as VaultSummaryWire & { favorite?: boolean }).favorite
+                            void setFavorite(entry.id, next).then(() => void refresh())
+                          }}
+                        >{(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? t('unfavorite') : t('favorite')}</button>
                         <button type="button" role="menuitem" onClick={() => void cloneEntry(entry.id)} disabled={busy || readonly || locked}>{t('clone')}</button>
                         <button type="button" role="menuitem" className={css.deleteButton} onClick={() => void removeEntry(entry.id)} disabled={busy || readonly || locked}>{t('delete')}</button>
                       </span>
