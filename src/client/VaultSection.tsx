@@ -3203,13 +3203,56 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 </div>
                 {expandedId === entry.id && (
                   <div className={css.detailBox}>
-                    <button
-                      type="button"
-                      className={css.copyAllBtn}
-                      title={t('copyAllHint')}
-                      disabled={busy || locked}
-                      onClick={() => void copyEntryAsText(entry.id)}
-                    >⧉ {t('copyAllFields')}</button>
+                    <span className={css.detailActions}>
+                      <button
+                        type="button"
+                        className={css.copyAllBtn}
+                        disabled={busy || readonly || locked}
+                        onClick={() => void startEdit(entry.id)}
+                      >✏️ {t('edit')}</button>
+                      <button
+                        type="button"
+                        className={css.copyAllBtn}
+                        disabled={busy || readonly || locked}
+                        onClick={() => {
+                          const next = !(entry as VaultSummaryWire & { favorite?: boolean }).favorite
+                          void setFavorite(entry.id, next).then(() => void refresh())
+                        }}
+                      >{(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? t('unfavorite') : t('favorite')}</button>
+                      <button
+                        type="button"
+                        className={css.copyAllBtn}
+                        disabled={busy || locked}
+                        onClick={() => {
+                          setBusy(true)
+                          void get(entry.id).then(r => {
+                            if (r.found && r.entry) {
+                              const e = r.entry
+                              const value = e.password ?? e.apiKey ?? e.secret ?? e.accessToken ?? e.refreshToken ?? e.privateKey ?? e.cardNumber ?? ''
+                              if (value.length > 0) void copyValue(entry.id, value)
+                              else setMessage(t('nothingToCopy'))
+                            }
+                            setBusy(false)
+                          }, () => setBusy(false))
+                        }}
+                      >{entry.kind === 'api-key' ? t('copyApiKey') : entry.kind === 'oauth' ? t('copyToken') : entry.kind === 'card' ? t('copyCardNumber') : entry.kind === 'secret' || entry.kind === 'custom' ? t('copyKey') : t('copyPassword')}</button>
+                      {entry.url !== undefined && entry.url !== '' && (
+                        <button type="button" className={css.copyAllBtn} disabled={busy || locked} onClick={() => window.open(entry.url!, '_blank', 'noopener')}>{t('openUrl')}</button>
+                      )}
+                      <button
+                        type="button"
+                        className={css.copyAllBtn}
+                        title={t('copyAllHint')}
+                        disabled={busy || locked}
+                        onClick={() => void copyEntryAsText(entry.id)}
+                      >⧉ {t('copyAllFields')}</button>
+                      <button
+                        type="button"
+                        className={`${css.copyAllBtn} ${css.detailDeleteBtn}`}
+                        disabled={busy || readonly || locked}
+                        onClick={() => void removeEntry(entry.id)}
+                      >{t('delete')}</button>
+                    </span>
                     {entry.hasOtp === true && code !== undefined && (
                       <span className={css.detailTotp} title={t('totpInlineHint')}>
                         <svg className={css.totpRing} width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">

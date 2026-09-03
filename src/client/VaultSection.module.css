@@ -1127,3 +1127,19 @@
   background: var(--dsh-color-border, #ddd);
   margin: 0 2px;
 }
+
+/* Detail-box quick action bar. */
+.detailActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.detailActions .copyAllBtn {
+  margin-bottom: 0;
+}
+.detailDeleteBtn {
+  color: #e5484d;
+  border-color: rgba(229, 72, 77, 0.4);
+}
