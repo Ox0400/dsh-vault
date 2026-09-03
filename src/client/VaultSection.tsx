@@ -1777,6 +1777,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Copy the titles of the selected entries as one line per entry. */
+  function bulkCopyTitles(): void {
+    if (state.status !== 'ready' || selectedIds.size === 0) return
+    const titles = state.entries
+      .filter(e => selectedIds.has(e.id))
+      .map(e => e.title)
+      .sort((a, b) => a.localeCompare(b))
+    void copyValue('bulk', titles.join('\n'))
+  }
+
   /** Clone an entry (Bitwarden/KeePassXC-style): copy every editable field
    * into a new entry with a localized title suffix. Attachments and password
    * history stay with the original; the copy gets its own timestamps. */
@@ -2310,6 +2320,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <button type="button" className={css.dupMerge} onClick={() => void bulkSetFavorite(true)} disabled={busy || selectedIds.size === 0}>{t('bulkFavorite')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void bulkSetFavorite(false)} disabled={busy || selectedIds.size === 0}>{t('bulkUnfavorite')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void bulkAddTag()} disabled={busy || readonly || locked || selectedIds.size === 0}>{t('bulkTag')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void bulkCopyTitles()} disabled={busy || selectedIds.size === 0}>{t('bulkCopyTitles')}</button>
           <button type="button" className={css.dangerButton} onClick={() => void removeSelected()} disabled={busy || selectedIds.size === 0}>{t('bulkDelete')}</button>
         </div>
       )}
