@@ -248,9 +248,20 @@ export class VaultStore {
   private static readonly MIN_PASSWORD_LENGTH = 12
   /** How many previous passwords to keep per entry (1Password-style). */
   private static readonly MAX_PASSWORD_HISTORY = 10
-  /** In-process mutation history (audit trail): newest last, capped. */
+  /** In-process audit trail: oldest first, capped at AUDIT_CAP. Persisted to
+   * an encrypted sidecar file (`<vault>-audit.json`) so activity survives
+   * restarts. Events carry only action + entry title + timestamp — the caller
+   * must never pass a secret value (see `audit()`). */
   private readonly history: Array<{ action: string; id?: string; title?: string; at: number }> = []
-  private static readonly HISTORY_CAP = 100
+  /** Audit entries retained in memory and in the encrypted log file. */
+  private static readonly AUDIT_CAP = 600
+  /** Debounce before writing non-mutation events (reads/searches/TOTP/switch)
+   * to disk; mutations flush synchronously inside persist(). */
+  private static readonly AUDIT_FLUSH_MS = 400
+  private auditFlushTimer: ReturnType<typeof setTimeout> | undefined
+  /** Serializes sidecar writes so a debounced flush and a persist-triggered
+   * flush never interleave partial files. */
+  private auditWriteChain: Promise<unknown> = Promise.resolve()
 
   constructor(path: string, masterPassword: string) {
     this.path = path
@@ -280,7 +291,10 @@ export class VaultStore {
   }
 
   /** Lock the vault: wipe the derived key and require re-unlock. */
-  lock(): void {
+  async lock(): Promise<void> {
+    // Persist the trail before the key is wiped so no recent read/search/TOTP
+    // event is lost on lock or process exit.
+    if (!this.locked) await this.flushAuditLog().catch(() => {})
     this.key?.fill(0)
     this.key = undefined
     this.locked = true
@@ -334,6 +348,15 @@ export class VaultStore {
     const verify = decrypt(file.verify!, this.key)
     if (!safeEqual(verify, Buffer.from(VERIFY_PLAINTEXT, 'utf8'))) {
       throw new Error('vault master password is incorrect')
+    }
+    // Restore the persisted audit trail (encrypted sidecar, same key). A
+    // missing or unreadable log simply starts fresh.
+    const persistedAudit = await this.readAuditLog()
+    if (persistedAudit.length > 0) {
+      this.history.push(...persistedAudit)
+      if (this.history.length > VaultStore.AUDIT_CAP) {
+        this.history.splice(0, this.history.length - VaultStore.AUDIT_CAP)
+      }
     }
     this.locked = false
     this.lastActivity = Date.now()
@@ -432,7 +455,9 @@ export class VaultStore {
     return entry
   }
 
-  /** Record one mutation in the in-process audit trail. */
+  /** Record one event in the audit trail (oldest first) and schedule a
+   * debounced sidecar flush for events that do not ride on a mutation's
+   * persist() (mutation events flush synchronously inside persist()). */
   private recordHistory(action: string, id?: string, title?: string): void {
     this.history.push({
       action,
@@ -440,7 +465,77 @@ export class VaultStore {
       ...(title !== undefined ? { title } : {}),
       at: Date.now(),
     })
-    if (this.history.length > VaultStore.HISTORY_CAP) this.history.shift()
+    if (this.history.length > VaultStore.AUDIT_CAP) this.history.shift()
+    this.scheduleAuditFlush()
+  }
+
+  private scheduleAuditFlush(): void {
+    if (this.auditFlushTimer !== undefined) return
+    this.auditFlushTimer = setTimeout(() => {
+      this.auditFlushTimer = undefined
+      void this.flushAuditLog().catch(() => { /* audit writes never break the vault */ })
+    }, VaultStore.AUDIT_FLUSH_MS)
+    // A pending debounce must not keep the process alive just to write logs.
+    this.auditFlushTimer.unref?.()
+  }
+
+  /** Encrypt the current audit trail into the sidecar file. Serialized so a
+   * debounced flush and a persist-triggered flush cannot interleave. Each
+   * flush writes the newest full trail, so a queued older flush is harmless. */
+  flushAuditLog(): Promise<void> {
+    const run = async (): Promise<void> => {
+      const key = this.key
+      if (key === undefined || this.locked || this.history.length === 0) return
+      // Only events that may be needed later are retained; a fresh read of the
+      // file just rewrites the newest AUDIT_CAP events.
+      const retained = this.history.slice(-VaultStore.AUDIT_CAP)
+      const file = {
+        kdf: this.kdf,
+        events: encrypt(Buffer.from(JSON.stringify(retained), 'utf8'), key),
+      }
+      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+      await writeFileAtomic(this.auditPath, JSON.stringify(file), {
+        mode: 0o600,
+        dirMode: 0o700,
+      })
+    }
+    const next = this.auditWriteChain.then(run, run)
+    this.auditWriteChain = next.catch(() => {})
+    return next
+  }
+
+  /** Sidecar file holding the encrypted audit trail (owner-only). */
+  private get auditPath(): string {
+    return this.path.replace(/\.json$/i, '-audit.json')
+  }
+
+  /** Read and decrypt the audit sidecar; tolerates absence and corruption
+   * (a damaged audit log must never block vault access — it is rewritten on
+   * the next flush). */
+  private async readAuditLog(): Promise<Array<{ action: string; id?: string; title?: string; at: number }>> {
+    let raw: string
+    try {
+      raw = await readFile(this.auditPath, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+    try {
+      const key = this.key
+      if (key === undefined) return []
+      const file = JSON.parse(raw) as { kdf?: unknown; events: EncryptedBlob }
+      if (!file || !file.events || typeof file.events !== 'object') return []
+      const plaintext = decrypt(file.events as EncryptedBlob, key)
+      const parsed = JSON.parse(plaintext.toString('utf8'))
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter((e): e is { action: string; id?: string; title?: string; at: number } =>
+        typeof e === 'object' && e !== null && typeof (e as { action?: unknown }).action === 'string')
+    } catch (error) {
+      // Never fail the vault because a log is unreadable (tampered/corrupt/
+      // foreign-keyed): drop it and let the next flush write a fresh one.
+      console.warn('dsh-vault: audit log unreadable — starting a fresh log', (error as Error)?.message ?? '')
+      return []
+    }
   }
 
   /** Public audit hook for host-layer read operations (vault_get, UI get,
@@ -1007,6 +1102,9 @@ export class VaultStore {
           dirMode: 0o700,
         })
       })
+      // Mutations flush the audit sidecar with the document so the trail on
+      // disk never lags the entries behind it.
+      await this.flushAuditLog()
     }
     // Append to the chain; a rejected write must not stall later writes, so
     // the chain continues with the next operation regardless of outcome.

@@ -370,7 +370,7 @@ test('store: auto-lock relocks after idle timeout and unlock restores access', a
     ;(vault as unknown as { lastActivity: number }).lastActivity = Date.now() - 1000
     assert.equal(vault.expired, true)
     assert.equal(vault.isLocked, false)
-    vault.lock()
+    await vault.lock()
     assert.equal(vault.isLocked, true)
     // Reads require unlock.
     assert.equal(vault.get('anything'), undefined)
@@ -682,5 +682,48 @@ test('store: audit trail records reads/searches/totp with secrets never leaking'
   for (const key of ['password', 'apiKey', 'username', 'otpSecret', 'secret']) {
     assert.ok(!dump.includes(key), `audit must not carry the field name "${key}"`)
   }
+  await rm(dir, { recursive: true, force: true })
+})
+
+test('store: audit trail persists across reopen and stays encrypted on disk', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-audit-persist-'))
+  const path = join(dir, 'vault.json')
+  const auditPath = join(dir, 'vault-audit.json')
+
+  const s1 = await openVault({ masterPassword: 'pw', path })
+  const entry = await s1.add({ title: 'PersistMe', username: 'u', password: 'x-super-long-secret-999' })
+  s1.audit('read', entry.id, entry.title)
+  s1.audit('switch', undefined, 'work')
+  s1.search('persist')
+  // Mutations flush synchronously inside persist(); the reads above are on a
+  // debounce — wait for the sidecar write.
+  await new Promise(r => setTimeout(r, 600))
+
+  const raw = await readFile(auditPath, 'utf8')
+  const parsed = JSON.parse(raw) as { kdf?: unknown; events?: unknown }
+  // Encrypted at rest: the log JSON must not contain titles or secrets in the
+  // clear (the whole payload is one AES-GCM blob).
+  for (const leak of ['PersistMe', 'x-super-long-secret-999', 'username']) {
+    assert.ok(!raw.includes(leak), `audit file must not contain ${leak} in plaintext`)
+  }
+  assert.ok(parsed.events && typeof parsed.events === 'object' && !Array.isArray(parsed.events))
+
+  // Reopen (simulates a restart): every event comes back.
+  const s2 = await openVault({ masterPassword: 'pw', path })
+  const h = s2.getHistory()
+  const actions = h.map(x => x.action)
+  assert.ok(actions.includes('add'), 'add restored')
+  assert.ok(actions.includes('read'), 'read restored')
+  assert.ok(actions.includes('switch'), 'switch restored')
+  assert.ok(actions.includes('search'), 'search restored')
+  const readEv = h.find(x => x.action === 'read')
+  assert.equal(readEv?.title, 'PersistMe')
+  assert.equal(readEv?.id, entry.id)
+  const searchEv = h.find(x => x.action === 'search')
+  assert.equal(searchEv?.title, 'persist')
+  const dump = JSON.stringify(h)
+  assert.ok(!dump.includes('x-super-long-secret-999'))
+  assert.ok(!dump.includes('username'))
+
   await rm(dir, { recursive: true, force: true })
 })

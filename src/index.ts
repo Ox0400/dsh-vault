@@ -207,7 +207,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   async function guardStore(): Promise<VaultStore> {
     const store = await ensureStore()
     if (store.expired) {
-      store.lock()
+      await store.lock()
       throw new Error('vault is locked (idle timeout) — call vault_unlock to re-open it')
     }
     if (store.isLocked) {
@@ -757,7 +757,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute() {
       const s = await ensureStore()
       const was = s.isLocked
-      s.lock()
+      await s.lock()
       return { locked: !was }
     },
   }))
@@ -5123,7 +5123,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('lock')
   async lock(): Promise<{ locked: boolean }> {
     const store = await this.ensureStore()
-    if (!store.isLocked) store.lock()
+    if (!store.isLocked) await store.lock()
     return { locked: store.isLocked }
   }
 
