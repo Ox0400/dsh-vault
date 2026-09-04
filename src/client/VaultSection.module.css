@@ -639,6 +639,14 @@
   font-size: 12px;
 }
 
+/* Offline brand glyph (simple-icons) rendered in place of the kind emoji. */
+.brandGlyph {
+  display: inline-block;
+  height: 14px;
+  vertical-align: -2px;
+  width: 14px;
+}
+
 .dangerButton {
   padding: 4px 8px;
   border-radius: 6px;

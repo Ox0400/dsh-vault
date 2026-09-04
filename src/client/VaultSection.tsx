@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime, InjectFace, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VaultLocaleKey } from './locales.ts'
+import { siteGlyph } from './site-icons.ts'
 import css from './VaultSection.module.css'
 
 /** Wire shapes shared with the host gateway (mirror of src/index.ts types). */
@@ -352,6 +353,34 @@ const AUDIT_DANGER = new Set(['delete', 'purge'])
 /** Convenience password lengths offered as one-click chips in the generator. */
 const PW_LENGTH_CHIPS = [12, 16, 20, 24, 32]
 
+/** Editor helper: when the URL identifies a well-known service and the user
+ * has not picked a custom icon, suggest that service's emoji. Keys are the
+ * bare first label of the host (github → 🐙) or the full host (google.com). */
+const AUTO_ICON: Record<string, string> = {
+  github: '🐙', gitlab: '🦊', google: '🔎', 'google.com': '🔎', amazon: '📦', apple: '🍎',
+  aws: '☁️', azure: '☁️', digitalocean: '🐳', docker: '🐳', npm: '📦', figma: '🎨',
+  notion: '📝', slack: '💬', discord: '🎮', twitter: '🐦', facebook: '👥', instagram: '📷',
+  linkedin: '💼', youtube: '▶️', netflix: '🎬', spotify: '🎵', dropbox: '📁', drive: '🗂️',
+  microsoft: '🪟', 'microsoft.com': '🪟', office: '🪟', outlook: '✉️', gmail: '✉️', yahoo: '✉️',
+  reddit: '👽', twitch: '🎮', steam: '🎮', epic: '🎮', origin: '🎮', pinterest: '📌',
+  tiktok: '🎵', snapchat: '👻', whatsapp: '💬', telegram: '✈️', wechat: '💬', zoom: '🎥',
+  teams: '💬', skype: '💬', stripe: '💳', paypal: '💰', venmo: '💰', coinbase: '🪙',
+  binance: '🪙', kraken: '🪙', robinhood: '📈', fidelity: '📈', chase: '🏦', citi: '🏦',
+  wellsfargo: '🏦', bankofamerica: '🏦', airbnb: '🏠', uber: '🚗', lyft: '🚗', doordash: '🍔',
+  grubhub: '🍔', instacart: '🛒', ebay: '🛒', etsy: '🧶', shopify: '🛍️', wordpress: '📝',
+  medium: '📝', substack: '✉️', hashnode: '💻', vercel: '▲', netlify: '🌐', heroku: '🌐',
+  cloudflare: '🌐', godaddy: '🌐', namecheap: '🌐', linode: '🌐', vultr: '🌐', huggingface: '🤗',
+  openai: '🤖', anthropic: '🤖', googlecloud: '☁️', firebase: '🔥', supabase: '🔥', mongodb: '🍃',
+}
+
+/** The auto-suggested emoji for a URL ('' when unknown). */
+function autoIconFor(url: string | undefined): string {
+  if (url === undefined || url.trim().length === 0) return ''
+  const host = url.trim().replace(/^https?:\/\//i, '').split('/')[0]!.toLowerCase()
+  const hostBase = host.split('.')[0] ?? ''
+  return AUTO_ICON[host] ?? AUTO_ICON[hostBase] ?? ''
+}
+
 type ViewState =
   | { readonly status: 'loading' }
   | { readonly status: 'error'; readonly reason?: string }
@@ -531,26 +560,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   useEffect(() => {
     const url = form.url ?? ''
     if (url.length === 0 || (form.icon ?? '').length > 0) return
-    const host = url.replace(/^https?:\/\//i, '').split('/')[0]!.toLowerCase()
-    const map: Record<string, string> = {
-      github: '🐙', gitlab: '🦊', google: '🔎', 'google.com': '🔎', amazon: '📦', apple: '🍎',
-      aws: '☁️', azure: '☁️', digitalocean: '🐳', docker: '🐳', npm: '📦', figma: '🎨',
-      notion: '📝', slack: '💬', discord: '🎮', twitter: '🐦', facebook: '👥', instagram: '📷',
-      linkedin: '💼', youtube: '▶️', netflix: '🎬', spotify: '🎵', dropbox: '📁', drive: '🗂️',
-      microsoft: '🪟', 'microsoft.com': '🪟', office: '🪟', outlook: '✉️', gmail: '✉️', yahoo: '✉️',
-      reddit: '👽', twitch: '🎮', steam: '🎮', epic: '🎮', origin: '🎮', pinterest: '📌',
-      tiktok: '🎵', snapchat: '👻', whatsapp: '💬', telegram: '✈️', wechat: '💬', zoom: '🎥',
-      teams: '💬', skype: '💬', stripe: '💳', paypal: '💰', venmo: '💰', coinbase: '🪙',
-      binance: '🪙', kraken: '🪙', robinhood: '📈', fidelity: '📈', chase: '🏦', citi: '🏦',
-      wellsfargo: '🏦', bankofamerica: '🏦', airbnb: '🏠', uber: '🚗', lyft: '🚗', doordash: '🍔',
-      grubhub: '🍔', instacart: '🛒', ebay: '🛒', etsy: '🧶', shopify: '🛍️', wordpress: '📝',
-      medium: '📝', substack: '✉️', hashnode: '💻', vercel: '▲', netlify: '🌐', heroku: '🌐',
-      cloudflare: '🌐', godaddy: '🌐', namecheap: '🌐', linode: '🌐', vultr: '🌐', huggingface: '🤗',
-      openai: '🤖', anthropic: '🤖', googlecloud: '☁️', firebase: '🔥', supabase: '🔥', mongodb: '🍃',
-    }
-    const hostBase = host.split('.')[0] ?? ''
-    const icon = map[host] ?? map[hostBase] ?? ''
-    if (icon) setForm(previous => ({ ...previous, icon }))
+    const icon = autoIconFor(url)
+    if (icon.length > 0) setForm(previous => ({ ...previous, icon }))
   }, [form.url, form.icon])
   useEffect(() => {
     const pw = form.password ?? ''
@@ -3222,7 +3233,25 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   }}
                 >
                   <span className={css.title} style={entry.color !== undefined && entry.color !== '' ? { borderLeft: `3px solid ${entry.color}`, paddingLeft: 6 } : undefined}>
-                    <span className={css.kindIcon}>{entry.icon ?? kindIcon(entry.kind)}</span>
+                    <span className={css.kindIcon}>
+                      {(() => {
+                        // A user-picked icon wins; the editor's auto-suggested
+                        // emoji counts as "not customized", so a known site's
+                        // offline brand glyph can replace it in the row.
+                        const autoIcon = autoIconFor(entry.url)
+                        const customIcon = entry.icon !== undefined && entry.icon.length > 0 && entry.icon !== autoIcon
+                        const glyph = siteGlyph(entry.url, entry.host)
+                        if (customIcon) return entry.icon
+                        if (glyph !== undefined) {
+                          return (
+                            <svg className={css.brandGlyph} viewBox="0 0 24 24" aria-hidden="true">
+                              <path d={glyph.p} fill={glyph.c} />
+                            </svg>
+                          )
+                        }
+                        return entry.icon ?? kindIcon(entry.kind)
+                      })()}
+                    </span>
                     <button
                       type="button"
                       className={`${css.pinStar} ${(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? css.pinOn : css.pinOff}`}
