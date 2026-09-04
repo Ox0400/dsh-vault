@@ -738,6 +738,33 @@
 .genOptRow input[type="number"] {
   width: 64px;
 }
+.lenChips {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.lenChip {
+  background: transparent;
+  border: 1px solid var(--dsh-color-border, #555);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+}
+.lenChip:hover {
+  border-color: var(--color-accent, #4f8cff);
+  color: var(--color-accent, #4f8cff);
+}
+.lenChipActive,
+.lenChipActive:hover {
+  background: var(--color-accent, #4f8cff);
+  border-color: var(--color-accent, #4f8cff);
+  color: #fff;
+}
 .pwMeter {
   align-items: center;
   display: flex;

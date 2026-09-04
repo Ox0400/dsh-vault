@@ -310,6 +310,34 @@ const KIND_KEYS: Record<string, VaultLocaleKey> = {  login: 'kindLogin',
   custom: 'kindCustom',
 }
 
+/** Field-name → localized-label mapping for the detail drawer. Keys whose
+ * values already have dedicated UI (TOTP row, attachment badge, session
+ * cookie count) are omitted here and filtered out at render time. */
+const DETAIL_FIELD_KEYS: Record<string, VaultLocaleKey> = {
+  kind: 'fieldKind',
+  sensitivity: 'fieldSensitivity',
+  username: 'fieldUsername',
+  email: 'fieldEmail',
+  phone: 'fieldPhone',
+  host: 'fieldHost',
+  port: 'fieldPort',
+  url: 'fieldUrl',
+  tags: 'fieldTags',
+  icon: 'fieldIcon',
+  color: 'fieldColor',
+  cardExpiry: 'fieldCardExpiry',
+  cardHolder: 'fieldCardHolder',
+  fields: 'fieldCustom',
+  createdAt: 'fieldCreatedAt',
+  updatedAt: 'fieldUpdatedAt',
+}
+
+/** Keys rendered by a dedicated block in the drawer — skip their generic row. */
+const DETAIL_HIDDEN_KEYS = new Set(['hasOtp', 'attachmentCount', 'cookieCount'])
+
+/** Convenience password lengths offered as one-click chips in the generator. */
+const PW_LENGTH_CHIPS = [12, 16, 20, 24, 32]
+
 type ViewState =
   | { readonly status: 'loading' }
   | { readonly status: 'error'; readonly reason?: string }
@@ -3281,18 +3309,25 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         >⧉</button>
                       </span>
                     )}
-                    {Object.entries(entry).filter(([k]) => !['id', 'title', 'favorite'].includes(k) && entry[k as keyof VaultSummaryWire] !== undefined).map(([k, v]) => (
-                      <span key={k} className={css.detailItem}>
-                        <strong>{k}</strong>: {formatDetail(k, v)}
-                        <button
-                          type="button"
-                          className={css.revealButton}
-                          title={t('copyFieldHint')}
-                          onClick={() => void copyValue(entry.id, Array.isArray(v) ? v.join(', ') : String(v))}
-                          disabled={locked}
-                        >⧉</button>
-                      </span>
-                    ))}
+                    {Object.entries(entry)
+                      .filter(([k]) => !['id', 'title', 'favorite'].includes(k)
+                        && !DETAIL_HIDDEN_KEYS.has(k)
+                        && entry[k as keyof VaultSummaryWire] !== undefined)
+                      .map(([k, v]) => {
+                        const labelKey = DETAIL_FIELD_KEYS[k]
+                        return (
+                          <span key={k} className={css.detailItem}>
+                            <strong>{labelKey !== undefined ? t(labelKey) : k}</strong>: {formatDetail(k, v)}
+                            <button
+                              type="button"
+                              className={css.revealButton}
+                              title={t('copyFieldHint')}
+                              onClick={() => void copyValue(entry.id, Array.isArray(v) ? v.join(', ') : String(v))}
+                              disabled={locked}
+                            >⧉</button>
+                          </span>
+                        )
+                      })}
                     <div className={css.attachBox}>
                       <strong>{t('attachmentsTitle')}:</strong>
                       {(attachmentsMap[entry.id] ?? []).map(a => (
@@ -3780,6 +3815,17 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                         type="number" min={6} max={64} value={genOpts.length}
                         onChange={event => setGenOpts(previous => ({ ...previous, length: Math.max(6, Math.min(64, Number(event.target.value) || 24)) }))}
                       />
+                      <span className={css.lenChips} role="group" aria-label={t('genLenChips')}>
+                        {PW_LENGTH_CHIPS.map(len => (
+                          <button
+                            key={len}
+                            type="button"
+                            className={`${css.lenChip}${genOpts.length === len ? ` ${css.lenChipActive}` : ''}`}
+                            aria-pressed={genOpts.length === len}
+                            onClick={() => setGenOpts(previous => ({ ...previous, length: len }))}
+                          >{len}</button>
+                        ))}
+                      </span>
                     </label>
                     {(['uppercase', 'lowercase', 'digits', 'symbols', 'excludeAmbiguous'] as const).map(key => (
                       <label key={key} className={css.genOptRow}>
