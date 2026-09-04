@@ -2100,6 +2100,40 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Human-friendly value formatting for the expanded detail box. */
+  /** Jump from a health/security report row to the entry it names: switch to
+   * the entries tab, clear every filter so the row is guaranteed visible,
+   * expand its detail box and scroll it into view. Pure client navigation. */
+  function jumpToEntry(entryId: string): void {
+    if (!entryId) return
+    setActiveTab('entries')
+    setQuery('')
+    setKindFilter('')
+    setTagFilter('')
+    setFavOnly(false)
+    setDueOnly(false)
+    setIssueOnly(false)
+    // Ensure the target row is rendered even when the list is paginated.
+    setVisibleCount(count => Math.max(count, 1000))
+    setExpandedId(entryId)
+    window.setTimeout(() => {
+      document.querySelector(`[data-entry-id="${CSS.escape(entryId)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }, 150)
+  }
+
+  /** One clickable entry name inside a report list. */
+  function reportJumpButton(title: string, entryId: string | undefined): ReactNode {
+    const label = title.length > 0 ? title : '?'
+    if (!entryId) return <span>{label}</span>
+    return (
+      <button
+        type="button"
+        className={css.reportJump}
+        title={t('reportJumpHint')}
+        onClick={() => jumpToEntry(entryId)}
+      >{label}</button>
+    )
+  }
+
   function formatDetail(key: string, value: unknown): string {
     if (key === 'expiresAt' || key === 'updatedAt' || key === 'createdAt') {
       const n = Number(value)
@@ -2476,9 +2510,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {report.rotation.length > 0 && (
             <>
               <p className={css.reportLine}>{t('reportRotation')}: {report.rotation.length}</p>
-              {(report.rotation as Array<{ title?: string; due?: string; daysLeft?: number }>).slice(0, 8).map((item, i) => (
+              {(report.rotation as Array<{ id?: string; title?: string; due?: string; daysLeft?: number }>).slice(0, 8).map((item, i) => (
                 <p key={i} className={css.reportSub}>
-                  · {String(item.title ?? '?')}{item.due === 'expired' ? ` (${t('dueExpired')})` : item.due === 'soon' ? ` (${t('dueExpiring')} ${item.daysLeft ?? 0}d)` : ` (${t('dueNow')})`}
+                  · {reportJumpButton(String(item.title ?? '?'), item.id)}{item.due === 'expired' ? ` (${t('dueExpired')})` : item.due === 'soon' ? ` (${t('dueExpiring')} ${item.daysLeft ?? 0}d)` : ` (${t('dueNow')})`}
                 </p>
               ))}
             </>
@@ -2486,17 +2520,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {report.weak.length > 0 && (
             <>
               <p className={css.reportLine}>{t('reportWeak')}: {report.weak.length}</p>
-              {(report.weak as Array<{ title?: string }>).slice(0, 5).map((item, i) => (
-                <p key={i} className={css.reportSub}>· {String(item.title ?? '?')}</p>
+              {(report.weak as Array<{ id?: string; title?: string }>).slice(0, 5).map((item, i) => (
+                <p key={i} className={css.reportSub}>· {reportJumpButton(String(item.title ?? '?'), item.id)}</p>
               ))}
             </>
           )}
           {report.reused.length > 0 && (
             <>
               <p className={css.reportLine}>{t('reportReused')}: {report.reused.length}</p>
-              {(report.reused as Array<{ entries?: Array<{ title?: string }> }>).slice(0, 3).map((group, i) => (
+              {(report.reused as Array<{ entries?: Array<{ id?: string; title?: string }> }>).slice(0, 3).map((group, i) => (
                 <p key={i} className={css.reportSub}>
-                  · {(group.entries ?? []).slice(0, 3).map(e => String(e.title ?? '?')).join(' / ')}
+                  · {(group.entries ?? []).slice(0, 3).map((e, j) => (
+                    <span key={j}>{j > 0 ? ' / ' : ''}{reportJumpButton(String(e.title ?? '?'), e.id)}</span>
+                  ))}
                 </p>
               ))}
             </>
@@ -2504,16 +2540,16 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {report.no2fa.length > 0 && (
             <>
               <p className={css.reportLine}>{t('no2fa')}: {report.no2fa.length}</p>
-              {(report.no2fa as Array<{ title?: string }>).slice(0, 5).map((item, i) => (
-                <p key={i} className={css.reportSub}>· {String(item.title ?? '?')}</p>
+              {(report.no2fa as Array<{ id?: string; title?: string }>).slice(0, 5).map((item, i) => (
+                <p key={i} className={css.reportSub}>· {reportJumpButton(String(item.title ?? '?'), item.id)}</p>
               ))}
             </>
           )}
           {report.httpSites.length > 0 && (
             <>
               <p className={css.reportLine}>{t('httpSites')}: {report.httpSites.length}</p>
-              {(report.httpSites as Array<{ title?: string }>).slice(0, 5).map((item, i) => (
-                <p key={i} className={css.reportSub}>· {String(item.title ?? '?')}</p>
+              {(report.httpSites as Array<{ id?: string; title?: string }>).slice(0, 5).map((item, i) => (
+                <p key={i} className={css.reportSub}>· {reportJumpButton(String(item.title ?? '?'), item.id)}</p>
               ))}
             </>
           )}
@@ -3025,7 +3061,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const evTitle = String(ev.title ?? ev.id ?? '')
             return (
               <p key={i} className={`${css.reportLine} ${cls}`}>
-                {icon} {action} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
+                {icon} {action} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
               </p>
             )
           })}
@@ -3132,7 +3168,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             const frac = remaining !== undefined ? remaining / 30 : 0
             const code = totpInfo?.code
             return (
-              <li key={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}${selectedIds.has(entry.id) ? ` ${css.rowSelected}` : ''}`}>
+              <li key={entry.id} data-entry-id={entry.id} className={`${css.row}${dueMap[entry.id] !== undefined ? ` ${dueMap[entry.id]!.due === 'expired' ? css.rowExpired : css.rowDue}` : ''}${selectedIds.has(entry.id) ? ` ${css.rowSelected}` : ''}`}>
                 {selectMode && (
                   <input
                     type="checkbox"

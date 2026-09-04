@@ -461,6 +461,22 @@
   margin: 2px 0 0 10px;
 }
 
+.reportJump {
+  background: none;
+  border: none;
+  color: var(--color-accent, #4f8cff);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent, #4f8cff) 45%, transparent);
+  text-underline-offset: 2px;
+}
+.reportJump:hover {
+  text-decoration-color: var(--color-accent, #4f8cff);
+}
+
 
 .trashButton {
   padding: 4px 8px;
