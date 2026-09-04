@@ -5,6 +5,8 @@
 [![GitHub Release](https://img.shields.io/github/v/release/Ox0400/dsh-vault?logo=github)](https://github.com/Ox0400/dsh-vault/releases)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-vault)](https://www.npmjs.com/package/dsh-vault)
 [![GitHub issues](https://img.shields.io/github/issues/Ox0400/dsh-vault)](https://github.com/Ox0400/dsh-vault/issues)
+[![已收录: awesome-dsh-plugin](https://img.shields.io/badge/已收录-awesome--dsh--plugin-2ea44f)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/README.zh.md#L2869)
+[![已收录: awesome-deepseek-harness](https://img.shields.io/badge/已收录-awesome--deepseek--harness-2ea44f)](https://github.com/Dominic789654/awesome-deepseek-harness/blob/main/README.zh-CN.md#L903)
 
 dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使用 AI 过程中产生的**用户名、邮箱、手机号、密码、二次动态密钥（TOTP）** 以及开发工作流中常用的 **SSH 连接、API Key、Secret、OAuth access/refresh token** 等敏感凭据加密存储，并通过模型工具提供增删改查、检索、密码生成与动态验证码生成能力。
 
@@ -260,3 +262,10 @@ npm publish --access public   # 发布 npm → dsh plugin add dsh-vault
 - scrypt 成本参数（N=32768, r=8, p=1）已持久化在文档中，可随版本提升，旧文档仍可解密。
 - 明文凭据仅存在于进程内存与 `vault_get` 显式读取期间；`vault_search`/`vault_update` 的输出均不含密码、密钥与令牌。`vault_get` 返回的秘密会进入该次工具调用结果（模型上下文），调用方应避免在对话中复述。
 - 本插件面向单机/个人部署；团队共享保险库不在范围内。
+
+## 已收录于
+
+- [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/README.zh.md#L2869) — 官方精选目录（安全与防护分类）
+- [awesome-deepseek-harness (Dominic789654)](https://github.com/Dominic789654/awesome-deepseek-harness/blob/main/README.zh-CN.md#L903) — 社区目录（安全分类）
+
+等待维护者合并的提交：[Anil-matcha/awesome-dsh-plugin #127](https://github.com/Anil-matcha/awesome-dsh-plugin/pull/127) · [0xsline/awesome-deepseek-harness #563](https://github.com/0xsline/awesome-deepseek-harness/pull/563) · [dsh-handbook #65](https://github.com/Electricitysheep/dsh-handbook/pull/65)

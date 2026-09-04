@@ -5,6 +5,8 @@
 [![GitHub Release](https://img.shields.io/github/v/release/Ox0400/dsh-vault?logo=github)](https://github.com/Ox0400/dsh-vault/releases)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-vault)](https://www.npmjs.com/package/dsh-vault)
 [![GitHub issues](https://img.shields.io/github/issues/Ox0400/dsh-vault)](https://github.com/Ox0400/dsh-vault/issues)
+[![Listed: awesome-dsh-plugin](https://img.shields.io/badge/Listed-awesome--dsh--plugin-2ea44f)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin#L2869)
+[![Listed: awesome-deepseek-harness](https://img.shields.io/badge/Listed-awesome--deepseek--harness-2ea44f)](https://github.com/Dominic789654/awesome-deepseek-harness#L903)
 
 **English** | [中文](README-zh.md)
 
@@ -280,3 +282,10 @@ npm publish --access public   # registry → dsh plugin add dsh-vault
 - scrypt cost parameters (N=32768, r=8, p=1) are persisted in the document and can be raised in future versions; old documents remain decryptable.
 - Plaintext credentials exist only in process memory and during explicit `vault_get` reads; `vault_search`/`vault_update` outputs never contain passwords, keys, or tokens. Secrets returned by `vault_get` enter that tool call's result (model context) — callers should avoid repeating them in conversation.
 - This plugin targets single-machine / personal deployments; team-shared vaults are out of scope.
+
+## Listed in
+
+- [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin#L2869) — official curated directory (Security & Safety section)
+- [awesome-deepseek-harness (Dominic789654)](https://github.com/Dominic789654/awesome-deepseek-harness#L903) — community directory (Security section)
+
+Submissions pending maintainer review: [Anil-matcha/awesome-dsh-plugin #127](https://github.com/Anil-matcha/awesome-dsh-plugin/pull/127) · [0xsline/awesome-deepseek-harness #563](https://github.com/0xsline/awesome-deepseek-harness/pull/563) · [dsh-handbook #65](https://github.com/Electricitysheep/dsh-handbook/pull/65)
