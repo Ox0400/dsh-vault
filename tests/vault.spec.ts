@@ -642,3 +642,45 @@ test('store: card entries persist card fields and survive reload', async () => {
   expect((sum as { cardCvv?: unknown }).cardCvv).toBeUndefined()
   await rm(dir, { recursive: true, force: true })
 })
+
+test('store: audit trail records reads/searches/totp with secrets never leaking', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-audit-'))
+  const path = join(dir, 'vault.json')
+  const store = await openVault({ masterPassword: 'pw', path })
+  const entry = await store.add({
+    title: 'My GitHub',
+    username: 'octocat-secret-user',
+    password: 'hunter2-super-secret',
+    apiKey: 'sk-very-secret-xyz-123456',
+    otpSecret: 'JBSWY3DPEHPK3PXP',
+  })
+  // Host-layer read surfaces funnel here (vault_get, UI get, TOTP by id).
+  store.audit('read', entry.id, entry.title)
+  store.audit('totp', entry.id, entry.title)
+  // A search records the caller's query (input, not a stored secret).
+  store.search('github')
+  store.audit('switch', undefined, 'work')
+
+  const history = store.getHistory()
+  const actions = history.map(h => h.action)
+  assert.ok(actions.includes('read'), 'read event recorded')
+  assert.ok(actions.includes('totp'), 'totp event recorded')
+  assert.ok(actions.includes('search'), 'search event recorded')
+  assert.ok(actions.includes('switch'), 'switch event recorded')
+
+  const readEvent = history.find(h => h.action === 'read')
+  assert.equal(readEvent?.title, 'My GitHub')
+  assert.equal(readEvent?.id, entry.id)
+  const searchEvent = history.find(h => h.action === 'search')
+  assert.equal(searchEvent?.title, 'github')
+
+  // SECURITY: no secret value or secret field name may appear in the audit.
+  const dump = JSON.stringify(history)
+  for (const leak of ['octocat-secret-user', 'hunter2-super-secret', 'sk-very-secret-xyz-123456', 'JBSWY3DPEHPK3PXP']) {
+    assert.ok(!dump.includes(leak), `audit must not contain secret value: ${leak}`)
+  }
+  for (const key of ['password', 'apiKey', 'username', 'otpSecret', 'secret']) {
+    assert.ok(!dump.includes(key), `audit must not carry the field name "${key}"`)
+  }
+  await rm(dir, { recursive: true, force: true })
+})

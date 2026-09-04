@@ -384,6 +384,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const entry = await readEntry(args.id)
       if (!entry) return { found: false }
       emitAudit('read', 'vault_get', entry.id, entry.title)
+      // Persistent audit trail: full (decryptable) entry read. Title only.
+      const s = await guardStore()
+      s.audit('read', entry.id, entry.title)
       let full = stripTimestamps(entry) as Record<string, unknown>
       if (args.redact === true) {
         const redacted: Record<string, unknown> = {}
@@ -451,6 +454,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     async execute(args) {
       const s = await guardStore()
       const limit = validateLimit(args.limit, 'vault_search')
+      // Regex searches bypass store.search()'s own audit hook, so record them
+      // here; plain searches are audited inside store.search().
+      const q = (args.query ?? '').trim()
+      if (args.regex === true && q.length > 0) s.audit('search', undefined, q)
       const results = args.regex === true
         ? s.searchRegex(args.query ?? '', limit)
         : s.search(args.query ?? '', limit)
@@ -642,6 +649,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         }
         secret = entry.otpSecret
         label = entry.title
+        // A code was just generated from the stored TOTP secret — audit the
+        // entry (title only). Bare-secret calls without an id stay silent.
+        const s = await guardStore()
+        s.audit('totp', args.id, entry.title)
       } else {
         secret = args.secret!
       }
@@ -1229,8 +1240,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ── vault_history: in-process mutation audit trail ──────────────────────────
   ctx.tools.register(defineTool({
     name: 'vault_history',
-    description: 'Show recent mutations to the vault (add/update/delete/restore/purge) within this '
-      + 'process, newest first. No secrets — an audit trail for "what changed recently".',
+    description: 'Show recent activity on the vault within this process, newest first: mutations '
+      + '(add/update/delete/restore/purge/merge/rollback) plus reads (read, totp), searches and vault '
+      + 'switches. Records only the action, entry title and timestamp — never passwords, keys, '
+      + 'usernames or other secret values.',
     parameters: {
       limit: { type: 'number', description: 'Max entries (default 20).' },
       since: { type: 'integer', description: 'Only events after this epoch millis (optional).' },
@@ -4455,7 +4468,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('history')
   async history(): Promise<{ events: unknown[] }> {
     const store = await this.guardedStore()
-    return { events: store.getHistory().slice(0, 20) }
+    return { events: store.getHistory().slice(0, 100) }
   }
 
   /** Rotation/expiry report (no secrets). */
@@ -5169,7 +5182,8 @@ export class VaultGateway extends TypertRemoteService {
       throw new Error('vault: invalid vault name')
     }
     this.activeName = name.trim()
-    await this.ensureStore()
+    const store = await this.ensureStore()
+    store.audit('switch', undefined, this.activeName)
     return { switched: true, name: this.activeName }
   }
 
@@ -5403,6 +5417,9 @@ export class VaultGateway extends TypertRemoteService {
     const store = await this.guardedStore()
     const entry = store.get(id)
     if (entry === undefined) return { found: false }
+    // Audit the read: the caller just pulled the full (decryptable) entry.
+    // Title only — never any secret field value.
+    store.audit('read', id, entry.title)
     return { found: true, entry: toWire(entry) }
   }
 

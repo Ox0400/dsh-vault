@@ -335,6 +335,20 @@ const DETAIL_FIELD_KEYS: Record<string, VaultLocaleKey> = {
 /** Keys rendered by a dedicated block in the drawer — skip their generic row. */
 const DETAIL_HIDDEN_KEYS = new Set(['hasOtp', 'attachmentCount', 'cookieCount'])
 
+/** Audit-trail action metadata: display name, icon and row tint. The audit
+ * never carries secret values — only the entry title + timestamp. */
+const AUDIT_ORDER = ['add', 'update', 'delete', 'restore', 'purge', 'merge', 'rollback', 'read', 'search', 'totp', 'switch'] as const
+const AUDIT_LABEL: Record<string, VaultLocaleKey> = {
+  add: 'auditAdd', update: 'auditUpdate', delete: 'auditDelete', restore: 'auditRestore',
+  purge: 'auditPurge', merge: 'auditMerge', rollback: 'auditRollback',
+  read: 'auditRead', search: 'auditSearch', totp: 'auditTotp', switch: 'auditSwitch',
+}
+const AUDIT_ICON: Record<string, string> = {
+  add: '➕', update: '✏️', delete: '🗑️', restore: '♻️', purge: '🔥', merge: '🔀',
+  rollback: '↩️', read: '👁️', search: '🔍', totp: '🔢', switch: '🔄',
+}
+const AUDIT_DANGER = new Set(['delete', 'purge'])
+
 /** Convenience password lengths offered as one-click chips in the generator. */
 const PW_LENGTH_CHIPS = [12, 16, 20, 24, 32]
 
@@ -1562,6 +1576,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     window.addEventListener('focus', onFocus)
     return () => { current = false; window.removeEventListener('focus', onFocus) }
   }, [refreshMeta])
+
+  // Refresh the audit list whenever the user opens the audit tab, so read /
+  // search / TOTP events recorded seconds ago show up without a page reload.
+  useEffect(() => {
+    if (activeTab !== 'audit') return
+    void history().then(events => setRecentEvents((events ?? []) as Array<Record<string, unknown>>)).catch(() => {})
+  }, [activeTab, history])
 
   /** Open the editor for a new entry. */
   function addFieldRow(): void {
@@ -3041,27 +3062,29 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {activeTab === 'audit' && (<div className={css.tabPane}>
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentActivity')}</p>
+          <p className={css.reportSub}>{t('auditSecretNote')}</p>
           <div className={css.toolbar}>
             <select className={css.kindFilter} value={auditFilter} onChange={e => setAuditFilter(e.target.value)} aria-label={t('auditFilter')}>
               <option value="">{t('auditAll')}</option>
-              <option value="add">{t('auditAdd')}</option>
-              <option value="update">{t('auditUpdate')}</option>
-              <option value="delete">{t('auditDelete')}</option>
-              <option value="restore">{t('auditRestore')}</option>
+              {AUDIT_ORDER.map(action => (
+                <option key={action} value={action}>{t(AUDIT_LABEL[action]!)}</option>
+              ))}
             </select>
             <button type="button" className={css.dupMerge} onClick={exportAuditLog} disabled={recentEvents.length === 0}>{t('auditExport')}</button>
           </div>
           {recentEvents.length === 0 && <p className={css.empty}>{t('recentActivityEmpty')}</p>}
           {recentEvents.filter(ev => auditFilter === '' || String(ev.action ?? '') === auditFilter).slice(0, 30).map((ev, i) => {
             const action = String(ev.action ?? '')
-            const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑️' : action === 'restore' ? '♻️' : action === 'purge' ? '🔥' : action === 'update' ? '✏️' : '•'
-            const cls = action === 'delete' || action === 'purge' ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
+            const icon = AUDIT_ICON[action] ?? '•'
+            const cls = AUDIT_DANGER.has(action) ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
+            const labelKey = AUDIT_LABEL[action]
+            const actionLabel = labelKey !== undefined ? t(labelKey) : action
             const ts = Number((ev as Record<string, unknown>).at)
             const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
             const evTitle = String(ev.title ?? ev.id ?? '')
             return (
               <p key={i} className={`${css.reportLine} ${cls}`}>
-                {icon} {action} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
+                {icon} {actionLabel} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
               </p>
             )
           })}

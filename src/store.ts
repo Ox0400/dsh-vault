@@ -371,6 +371,9 @@ export class VaultStore {
    * contains, then any-field matches. */
   search(query: string, limit = 20): VaultEntrySummary[] {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    // Audit non-empty searches (the query itself is the caller's input, not a
+    // stored secret); empty queries are list refreshes and stay silent.
+    if (terms.length > 0) this.audit('search', undefined, query.trim())
     const ranked: Array<{ entry: VaultEntry; rank: number }> = []
     for (const entry of this.list()) {
       // Empty terms (query omitted) match everything: rank them all equally.
@@ -438,6 +441,15 @@ export class VaultStore {
       at: Date.now(),
     })
     if (this.history.length > VaultStore.HISTORY_CAP) this.history.shift()
+  }
+
+  /** Public audit hook for host-layer read operations (vault_get, UI get,
+   * TOTP generation, searches, vault switches). SECURITY: callers must only
+   * pass the entry's *title* (user-chosen metadata) — never a username,
+   * password, key, token, OTP secret or any other secret value. */
+  audit(action: 'read' | 'totp' | 'search' | 'switch', id?: string, title?: string): void {
+    if (title !== undefined && title.length > 80) title = title.slice(0, 80)
+    this.recordHistory(action, id, title)
   }
 
   /** Recent mutation history (audit trail), newest first. No secrets. */
