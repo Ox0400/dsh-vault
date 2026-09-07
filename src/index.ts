@@ -4468,7 +4468,7 @@ export class VaultGateway extends TypertRemoteService {
   @Remote('history')
   async history(): Promise<{ events: unknown[] }> {
     const store = await this.guardedStore()
-    return { events: store.getHistory().slice(0, 100) }
+    return { events: store.getHistory().slice(0, 600) }
   }
 
   /** Rotation/expiry report (no secrets). */
@@ -5375,7 +5375,7 @@ export class VaultGateway extends TypertRemoteService {
   /** Export entries to a manager-style CSV with explicit column selection
    * (UTF-8 BOM for Excel). The UI picks which columns to include. */
   @Remote('exportCsv')
-  async exportCsv(path: string, fields: string[]): Promise<{ path: string; count: number; fields: string[] }> {
+  async exportCsv(path: string, fields: string[], ids?: string[]): Promise<{ path: string; count: number; fields: string[] }> {
     const store = await this.guardedStore()
     const allowed = new Set([
       'title', 'kind', 'username', 'email', 'phone', 'password', 'apiKey', 'secret',
@@ -5385,7 +5385,9 @@ export class VaultGateway extends TypertRemoteService {
     ])
     const cols = Array.isArray(fields) ? fields.filter(f => allowed.has(f)) : []
     if (cols.length === 0) cols.push('title', 'username')
-    const entries = store.list()
+    const all = store.list()
+    const selected = Array.isArray(ids) && ids.length > 0 ? new Set(ids) : null
+    const entries = selected !== null ? all.filter(e => selected.has(e.id)) : all
     const delim = ','
     const esc = (v: unknown): string => {
       const str = v === undefined || v === null ? '' : Array.isArray(v) ? v.join(';') : String(v)

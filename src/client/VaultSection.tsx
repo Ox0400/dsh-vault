@@ -153,7 +153,7 @@ export interface VaultSectionInjected {
   passwordRollback: (id: string, at: number) => Promise<{ rolledBack: boolean; password?: string }>
   export1pux: (path: string) => Promise<{ path: string; count: number }>
   exportBitwarden: (path: string) => Promise<{ path: string; count: number }>
-  exportCsv: (path: string, fields: string[]) => Promise<{ path: string; count: number; fields: string[] }>
+  exportCsv: (path: string, fields: string[], ids?: string[]) => Promise<{ path: string; count: number; fields: string[] }>
   recoveryCode: () => Promise<{ code: string; note: string }>
   verifyRecovery: (code: string) => Promise<{ verified: boolean }>
   recoveryStatus: () => Promise<{ set: boolean; issuedAt?: number }>
@@ -1862,6 +1862,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Copy the titles of the selected entries as one line per entry. */
+  /** Export the entries selected in bulk mode as a CSV to a user path. */
+  async function exportSelectedCsv(): Promise<void> {
+    const picked = window.prompt(t('bulkExportPath'), `~/Downloads/dsh-vault-selected-${new Date().toISOString().slice(0, 10)}.csv`)
+    if (picked === null) return
+    const path = (picked ?? '').trim()
+    if (path.length === 0) { setMessage(t('errPathEmpty')); return }
+    setBusy(true)
+    try {
+      const r = await exportCsv(path, exportFields, [...selectedIds])
+      setMessage(`${t('exportDone')} (${r.count} ${t('entryCount').toLowerCase()}, ${r.fields.length} ${t('exportColumns')}) — ${r.path}`)
+    } catch (err) {
+      setMessage(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function bulkCopyTitles(): void {
     if (state.status !== 'ready' || selectedIds.size === 0) return
     const titles = state.entries
@@ -2435,6 +2452,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <button type="button" className={css.dupMerge} onClick={() => void bulkSetFavorite(false)} disabled={busy || selectedIds.size === 0}>{t('bulkUnfavorite')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void bulkAddTag()} disabled={busy || readonly || locked || selectedIds.size === 0}>{t('bulkTag')}</button>
           <button type="button" className={css.dupMerge} onClick={() => void bulkCopyTitles()} disabled={busy || selectedIds.size === 0}>{t('bulkCopyTitles')}</button>
+          <button type="button" className={css.dupMerge} onClick={() => void exportSelectedCsv()} disabled={busy || readonly || locked || selectedIds.size === 0} title={t('bulkExportHint')}>{t('bulkExportCsv')}</button>
           <button type="button" className={css.dangerButton} onClick={() => void removeSelected()} disabled={busy || selectedIds.size === 0}>{t('bulkDelete')}</button>
         </div>
       )}
