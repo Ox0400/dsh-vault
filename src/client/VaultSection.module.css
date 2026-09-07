@@ -225,6 +225,23 @@
   color: var(--color-accent, #4f8cff);
 }
 
+/* Inline TOTP code is click-to-copy. */
+.totpCopy {
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 1px 5px;
+  user-select: none;
+}
+.totpCopy:hover {
+  background: color-mix(in srgb, var(--color-accent, #4f8cff) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent, #4f8cff) 40%, transparent);
+}
+.totpCopy:focus-visible {
+  outline: 1px solid var(--color-accent, #4f8cff);
+  outline-offset: 1px;
+}
+
 .totpRing {
   display: inline-block;
   margin-right: 4px;

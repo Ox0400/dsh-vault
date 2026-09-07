@@ -3307,7 +3307,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     </span>
                   )}
                   {entry.hasOtp === true && code !== undefined && (
-                    <span className={css.totp} title={t('totpInlineHint')}>
+                    <span
+                      className={`${css.totp} ${css.totpCopy}`}
+                      title={t('totpRowCopyHint')}
+                      onClick={event => {
+                        event.stopPropagation()
+                        void copyValue(entry.id, code!)
+                      }}
+                      onKeyDown={event => {
+                        event.stopPropagation()
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          void copyValue(entry.id, code!)
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
                       <svg className={css.totpRing} width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                         <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
                         <circle
