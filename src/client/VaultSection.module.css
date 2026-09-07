@@ -693,6 +693,20 @@
   width: 14px;
 }
 
+/* Smaller glyph next to the URL label inside the editor. */
+.brandGlyphSm {
+  display: inline-block;
+  height: 11px;
+  margin: 0 4px 0 6px;
+  vertical-align: -1px;
+  width: 11px;
+}
+.urlGlyph {
+  color: var(--dsh-color-text-2, #777);
+  font-size: 11px;
+}
+
+
 .dangerButton {
   padding: 4px 8px;
   border-radius: 6px;

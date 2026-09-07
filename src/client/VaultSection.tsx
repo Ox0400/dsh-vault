@@ -3742,7 +3742,19 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               return kind !== 'card' || f.key === 'title' || f.key === 'kind' || f.key === 'notes' || f.key === 'icon' || f.key === 'color'
             }).map(field => (
               <label key={field.key} className={css.field}>
-                <span>{t(field.label)}</span>
+                <span>
+                  {t(field.label)}
+                  {field.key === 'url' && (() => {
+                    const g = siteGlyph(form.url, undefined)
+                    if (g === undefined) return null
+                    return (
+                      <span className={css.urlGlyph} title={t('urlLogoHint')}>
+                        <svg className={css.brandGlyphSm} viewBox="0 0 24 24" aria-hidden="true"><path d={g.p} fill={g.c} /></svg>
+                        {t('urlLogoText')}
+                      </span>
+                    )
+                  })()}
+                </span>
                 {field.key === 'kind' ? (
                   <select
                     value={form.kind ?? 'login'}
