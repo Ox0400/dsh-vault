@@ -732,6 +732,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Create a brand-new empty vault by switching to a fresh name. */
+  async function runVaultCreate(): Promise<void> {
+    const name = window.prompt(t('vaultNewPrompt'))
+    if (name === null) return
+    const clean = name.trim()
+    if (clean.length === 0) { setMessage(t('errPathEmpty')); return }
+    if (!/^[A-Za-z0-9._-]+$/.test(clean) || clean.endsWith('-audit')
+      || clean === 'access' || clean === 'meta' || clean.startsWith('vault-export-')) {
+      setMessage(t('vaultNameInvalid'))
+      return
+    }
+    await switchVaultTo(clean)
+  }
+
   /** Delete a picked vault (confirms first; default vault cannot be deleted). */
   async function runVaultDelete(name: string): Promise<void> {
     if (name === 'default') { setMessage(t('vaultDeleteDefault')); return }
@@ -2983,6 +2997,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('vaultManageTitle')}</p>
           <div className={css.dupGroup}>
             <span className={css.dupNames}>{t('vaultManageDesc')}: {vaults.find(v => v.active)?.name ?? ''}</span>
+            <button type="button" className={css.dupMerge} onClick={() => void runVaultCreate()} disabled={busy || locked} title={t('vaultNew')}>＋ {t('vaultNew')}</button>
             <button type="button" className={css.dupMerge} onClick={() => void runVaultRename()} disabled={busy || locked} title={t('vaultRename')}>{t('vaultRename')}</button>
             {vaults.filter(v => v.name !== 'default').map(v => (
               <button key={v.name} type="button" className={css.dangerButton} onClick={() => void runVaultDelete(v.name)} disabled={busy || locked} title={t('vaultDelete')}>{t('vaultDelete')} {v.name}</button>

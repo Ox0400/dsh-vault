@@ -5178,10 +5178,19 @@ export class VaultGateway extends TypertRemoteService {
   /** Switch the active vault by name (same master password), then re-open. */
   @Remote('switchVault')
   async switchVault(name: string): Promise<{ switched: boolean; name: string }> {
-    if (typeof name !== 'string' || name.trim().length === 0 || /[^A-Za-z0-9._-]/.test(name)) {
+    const clean = typeof name === 'string' ? name.trim() : ''
+    if (clean.length === 0 || /[^A-Za-z0-9._-]/.test(clean)) {
       throw new Error('vault: invalid vault name')
     }
-    this.activeName = name.trim()
+    // Reserved names that exist alongside real vaults but are not vaults
+    // themselves: sidecars (audit log), access/meta metadata, exports and
+    // backups. Switching to one would open a document without a format
+    // version and fail confusingly — reject up front with a clear message.
+    if (clean.endsWith('-audit') || ['access', 'meta'].includes(clean)
+      || clean.startsWith('vault-export-') || isBackupFile(`${clean}.json`)) {
+      throw new Error('vault: that is a metadata/sidecar file, not a vault (choose a real vault from the list)')
+    }
+    this.activeName = clean
     const store = await this.ensureStore()
     store.audit('switch', undefined, this.activeName)
     return { switched: true, name: this.activeName }
@@ -5197,7 +5206,7 @@ export class VaultGateway extends TypertRemoteService {
       for (const entry of entries) {
         const m = /^(.*)\.json$/.exec(entry)
         if (!m) continue
-        if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
+        if (['access', 'meta'].includes(m[1]!) || m[1]!.endsWith('-audit') || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
         names.push(m[1]!)
       }
     } catch { /* no dir yet */ }
