@@ -864,6 +864,25 @@
 .pwFair { background: #c98a1b; }
 .pwStrong { background: #2e9e5b; }
 .pwLabel { color: var(--dsh-color-text-2, #666); }
+/* Inline editor risk banners (weak / reused password). */
+.riskBanner {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 2px 0 0;
+  padding: 5px 9px;
+}
+.riskWarn {
+  background: rgba(201, 138, 27, 0.12);
+  border-color: rgba(201, 138, 27, 0.45);
+  color: var(--dsh-color-text, inherit);
+}
+.riskDanger {
+  background: rgba(207, 61, 61, 0.1);
+  border-color: rgba(207, 61, 61, 0.5);
+}
+
 
 
 .resultCount {

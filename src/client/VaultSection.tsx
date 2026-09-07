@@ -8,6 +8,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import type { PropsLocale, PropsRuntime, InjectFace, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VaultLocaleKey } from './locales.ts'
 import { siteGlyph } from './site-icons.ts'
+import { judgePasswordRisk } from './password-risk.ts'
 import css from './VaultSection.module.css'
 
 /** Wire shapes shared with the host gateway (mirror of src/index.ts types). */
@@ -3930,6 +3931,22 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 <span className={css.pwLabel}>{t('strengthLabel')}: {pwStrength.score}/100 ({t(VERDICT_KEYS_SHORT[pwStrength.verdict] ?? 'verdictGood')}) · {t('entropyLabel')}: {pwStrength.bits} bits</span>
               </div>
             )}
+            {(() => {
+              const pw = (form.password ?? '').trim()
+              if (pw.length === 0) return null
+              const risk = judgePasswordRisk(
+                pw,
+                pwStrength !== null ? pwStrength.score : null,
+                (report?.reused ?? []) as Array<{ value?: unknown; entries?: Array<unknown> }>,
+                editor.status === 'editing' && (editor.entry?.password ?? '') === pw,
+              )
+              if (!risk.weak && risk.reusedOther === 0) return null
+              return (
+                <p className={`${css.riskBanner}${risk.weak ? ` ${css.riskWarn}` : ''}${risk.reusedOther > 0 ? ` ${css.riskDanger}` : ''}`} role="note">
+                  {risk.weak ? t('riskWeakText') : ''}{risk.weak && risk.reusedOther > 0 ? ' · ' : ''}{risk.reusedOther > 0 ? t('riskReusedText').replace('{n}', String(risk.reusedOther)) : ''}
+                </p>
+              )
+            })()}
             {showGenOpts && (
               <div className={css.genOpts}>
                 <label className={css.genOptRow}>
