@@ -350,6 +350,17 @@ const AUDIT_ICON: Record<string, string> = {
 }
 const AUDIT_DANGER = new Set(['delete', 'purge'])
 
+/** Read-style audit actions (anything that is not a mutation). */
+const AUDIT_READ_LIKE = new Set(['read', 'search', 'totp', 'switch'])
+
+/** Whether an audit event matches the active filter ('write' = any mutation). */
+function auditMatches(action: string, filter: string): boolean {
+  if (filter === '') return true
+  if (filter === 'write') return !AUDIT_READ_LIKE.has(action)
+  return action === filter
+}
+
+
 /** Convenience password lengths offered as one-click chips in the generator. */
 const PW_LENGTH_CHIPS = [12, 16, 20, 24, 32]
 
@@ -495,6 +506,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [pwHistRevealed, setPwHistRevealed] = useState<number | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [auditFilter, setAuditFilter] = useState('')
+  const [auditLimit, setAuditLimit] = useState(30)
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [favOnly, setFavOnly] = useState(false)
@@ -1592,6 +1604,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   // search / TOTP events recorded seconds ago show up without a page reload.
   useEffect(() => {
     if (activeTab !== 'audit') return
+    setAuditLimit(30)
     void history().then(events => setRecentEvents((events ?? []) as Array<Record<string, unknown>>)).catch(() => {})
   }, [activeTab, history])
 
@@ -2026,7 +2039,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   /** Export the audit log (respecting the current filter) as a CSV file. */
   function exportAuditLog(): void {
     const rows = recentEvents
-      .filter(ev => auditFilter === '' || String(ev.action ?? '') === auditFilter)
+      .filter(ev => auditMatches(String(ev.action ?? ''), auditFilter))
       .map(ev => {
         const ts = Number((ev as Record<string, unknown>).at)
         const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
@@ -3075,7 +3088,20 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('recentActivity')}</p>
           <p className={css.reportSub}>{t('auditSecretNote')}</p>
           <div className={css.toolbar}>
-            <select className={css.kindFilter} value={auditFilter} onChange={e => setAuditFilter(e.target.value)} aria-label={t('auditFilter')}>
+            <span className={css.auditChips} role="group" aria-label={t('auditQuick')}>
+              {([['', '🗂️'], ['read', '👁️'], ['search', '🔍'], ['write', '✏️']] as Array<[string, string]>).map(([value, icon]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`${css.auditChip}${auditFilter === value ? ` ${css.auditChipActive}` : ''}`}
+                  aria-pressed={auditFilter === value}
+                  onClick={() => { setAuditFilter(value); setAuditLimit(30) }}
+                >{icon} {value === '' ? t('auditAll') : value === 'write' ? t('auditWriteQuick') : t(AUDIT_LABEL[value]!)}</button>
+              ))}
+            </span>
+            <select className={css.kindFilter} value={auditFilter} onChange={e => { setAuditFilter(e.target.value); setAuditLimit(30) }} aria-label={t('auditFilter')}>
+              <option value="">{t('auditAll')}</option>
+              <option value="write">{t('auditWriteQuick')}</option>
               <option value="">{t('auditAll')}</option>
               {AUDIT_ORDER.map(action => (
                 <option key={action} value={action}>{t(AUDIT_LABEL[action]!)}</option>
@@ -3084,21 +3110,37 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <button type="button" className={css.dupMerge} onClick={exportAuditLog} disabled={recentEvents.length === 0}>{t('auditExport')}</button>
           </div>
           {recentEvents.length === 0 && <p className={css.empty}>{t('recentActivityEmpty')}</p>}
-          {recentEvents.filter(ev => auditFilter === '' || String(ev.action ?? '') === auditFilter).slice(0, 30).map((ev, i) => {
-            const action = String(ev.action ?? '')
-            const icon = AUDIT_ICON[action] ?? '•'
-            const cls = AUDIT_DANGER.has(action) ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
-            const labelKey = AUDIT_LABEL[action]
-            const actionLabel = labelKey !== undefined ? t(labelKey) : action
-            const ts = Number((ev as Record<string, unknown>).at)
-            const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
-            const evTitle = String(ev.title ?? ev.id ?? '')
+          {(() => {
+            const filtered = recentEvents.filter(ev => auditMatches(String(ev.action ?? ''), auditFilter))
+            const shown = filtered.slice(0, auditLimit)
             return (
-              <p key={i} className={`${css.reportLine} ${cls}`}>
-                {icon} {actionLabel} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
-              </p>
+              <>
+                {shown.map((ev, i) => {
+                  const action = String(ev.action ?? '')
+                  const icon = AUDIT_ICON[action] ?? '•'
+                  const cls = AUDIT_DANGER.has(action) ? css.histDanger : action === 'add' ? css.histAdd : action === 'update' ? css.histUpdate : css.histNeutral
+                  const labelKey = AUDIT_LABEL[action]
+                  const actionLabel = labelKey !== undefined ? t(labelKey) : action
+                  const ts = Number((ev as Record<string, unknown>).at)
+                  const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
+                  const evTitle = String(ev.title ?? ev.id ?? '')
+                  return (
+                    <p key={`${action}-${ts}-${i}`} className={`${css.reportLine} ${cls}`}>
+                      {icon} {actionLabel} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
+                    </p>
+                  )
+                })}
+                {filtered.length > auditLimit && (
+                  <button type="button" className={css.trashButton} onClick={() => setAuditLimit(limit => limit + 50)}>
+                    {t('loadMoreAudit').replace('{n}', String(filtered.length - auditLimit))}
+                  </button>
+                )}
+                {filtered.length > 0 && (
+                  <p className={css.reportSub}>{t('auditCount').replace('{n}', String(filtered.length))}{auditFilter !== '' ? ` · ${t('auditFiltered')}` : ''}</p>
+                )}
+              </>
             )
-          })}
+          })()}
         </div>
       </div>)}
 

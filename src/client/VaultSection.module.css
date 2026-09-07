@@ -494,6 +494,35 @@
   text-decoration-color: var(--color-accent, #4f8cff);
 }
 
+/* Audit quick-filter chips. */
+.auditChips {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.auditChip {
+  background: transparent;
+  border: 1px solid var(--dsh-color-border, #555);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 3px 9px;
+}
+.auditChip:hover {
+  border-color: var(--color-accent, #4f8cff);
+  color: var(--color-accent, #4f8cff);
+}
+.auditChipActive,
+.auditChipActive:hover {
+  background: var(--color-accent, #4f8cff);
+  border-color: var(--color-accent, #4f8cff);
+  color: #fff;
+}
+
+
 
 .trashButton {
   padding: 4px 8px;
