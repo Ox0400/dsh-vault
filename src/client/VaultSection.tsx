@@ -2323,7 +2323,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <select className={css.kindFilter} value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label={t('fieldKind')}>
             <option value="">{t('allKinds')}</option>
             {Object.entries(KIND_KEYS).map(([value, key]) => (
-              <option key={value} value={value}>{t(key)}</option>
+              <option key={value} value={value}>{kindIcon(value)} {t(key)}</option>
             ))}
           </select>
           <select className={css.kindFilter} value={tagFilter} onChange={e => setTagFilter(e.target.value)} aria-label={t('fieldTags')}>
@@ -3780,7 +3780,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     onChange={event => changeKind(event.target.value)}
                   >
                     {Object.entries(KIND_KEYS).map(([value, key]) => (
-                      <option key={value} value={value}>{t(key)}</option>
+                      <option key={value} value={value}>{kindIcon(value)} {t(key)}</option>
                     ))}
                   </select>
                 ) : field.key === 'title' ? (
