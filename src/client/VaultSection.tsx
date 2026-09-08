@@ -245,12 +245,13 @@ const GEN_OPT_KEYS: Record<string, VaultLocaleKey> = {
 
 /** Number of entries matching the current kind/tag/favorites/due filters (for
  * pagination and result counts). */
-function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean, dueOnly: boolean, dueMap: Record<string, { due: string; daysLeft: number }>, issueOnly: boolean, watchMap: Record<string, { score: number; verdict: string; flags: string[] }>): number {
+function filteredCount(entries: VaultSummaryWire[], kindFilter: string, tagFilter: string, favOnly: boolean, dueOnly: boolean, dueMap: Record<string, { due: string; daysLeft: number }>, issueOnly: boolean, watchMap: Record<string, { score: number; verdict: string; flags: string[] }>, reportFilter = '', reportIdSet?: Set<string>): number {
   return entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter)
     && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter))
     && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true)
     && (!dueOnly || dueMap[entry.id] !== undefined)
-    && (!issueOnly || (watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good'))).length
+    && (!issueOnly || (watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good'))
+    && (reportFilter === '' || reportIdSet === undefined || reportIdSet.has(entry.id))).length
 }
 
 /** Wrap case-insensitive matches of `term` inside `text` with <mark> spans for
@@ -508,6 +509,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [auditFilter, setAuditFilter] = useState('')
   const [auditLimit, setAuditLimit] = useState(30)
+
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
   const [favOnly, setFavOnly] = useState(false)
@@ -523,6 +525,28 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
+  /** Which health-report problem set is currently filtered in the list
+   * ('' = off). Weak/reused/no-2FA/http/rotation. */
+  const [reportFilter, setReportFilter] = useState<'' | 'weak' | 'reused' | 'no2fa' | 'http' | 'rotation'>('')
+  /** Entry ids per health-report group (for click-to-filter badges). */
+  const reportIdSets = useMemo(() => {
+    const out: Record<string, Set<string>> = { weak: new Set(), reused: new Set(), no2fa: new Set(), http: new Set(), rotation: new Set() }
+    if (report === null) return out
+    const add = (key: string, items: unknown): void => {
+      for (const it of (items as Array<Record<string, unknown>>) ?? []) {
+        const id = String(it.id ?? '')
+        if (id) out[key]!.add(id)
+      }
+    }
+    add('weak', report.weak)
+    add('no2fa', report.no2fa)
+    add('http', report.httpSites)
+    add('rotation', report.rotation)
+    for (const g of (report.reused as Array<{ entries?: Array<Record<string, unknown>> }>)) {
+      add('reused', g.entries)
+    }
+    return out
+  }, [report])
   const [dueMap, setDueMap] = useState<Record<string, { due: string; daysLeft: number }>>({})
   const [recentEvents, setRecentEvents] = useState<Array<Record<string, unknown>>>([])
   const [vaultStats, setVaultStats] = useState<Record<string, unknown> | null>(null)
@@ -2177,6 +2201,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   }
 
   /** Human-friendly value formatting for the expanded detail box. */
+  /** Toggle a health-report list filter and show the entries list. */
+  function filterByReport(key: '' | 'weak' | 'reused' | 'no2fa' | 'http' | 'rotation'): void {
+    setActiveTab('entries')
+    setReportFilter(reportFilter === key ? '' : key)
+  }
+
   /** Jump from a health/security report row to the entry it names: switch to
    * the entries tab, clear every filter so the row is guaranteed visible,
    * expand its detail box and scroll it into view. Pure client navigation. */
@@ -2525,7 +2555,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
           {query.trim().length > 0 && state.status === 'ready' && (
-            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap)))}</span>
+            <span className={css.badge}>{t('searchResultsCount').replace('{n}', String(filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap, reportFilter, reportIdSets[reportFilter])))}</span>
           )}
           {recentSearches.length > 0 && (
             <span className={css.recentSearch}>
@@ -2538,11 +2568,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report !== null && (report.weak.length > 0 || report.reused.length > 0 || report.no2fa.length > 0 || report.httpSites.length > 0 || report.rotation.length > 0) && (
             <span className={css.healthSummary} title={t('healthSummaryHint')}>
-              {report.weak.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>}
-              {report.reused.length > 0 && <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>}
-              {report.no2fa.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('no2fa')}: {report.no2fa.length}</span>}
-              {report.httpSites.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('httpSites')}: {report.httpSites.length}</span>}
-              {report.rotation.length > 0 && <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>}
+              {report.weak.length > 0 && (
+                <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeDanger}${reportFilter === 'weak' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'weak'} title={t('badgeFilterHint')} onClick={() => filterByReport('weak')}>{t('reportWeak')}: {report.weak.length}</button>
+              )}
+              {report.reused.length > 0 && (
+                <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeDanger}${reportFilter === 'reused' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'reused'} title={t('badgeFilterHint')} onClick={() => filterByReport('reused')}>{t('reportReused')}: {report.reused.length}</button>
+              )}
+              {report.no2fa.length > 0 && (
+                <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeWarn}${reportFilter === 'no2fa' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'no2fa'} title={t('badgeFilterHint')} onClick={() => filterByReport('no2fa')}>{t('no2fa')}: {report.no2fa.length}</button>
+              )}
+              {report.httpSites.length > 0 && (
+                <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeWarn}${reportFilter === 'http' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'http'} title={t('badgeFilterHint')} onClick={() => filterByReport('http')}>{t('httpSites')}: {report.httpSites.length}</button>
+              )}
+              {report.rotation.length > 0 && (
+                <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeWarn}${reportFilter === 'rotation' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'rotation'} title={t('badgeFilterHint')} onClick={() => filterByReport('rotation')}>{t('reportRotation')}: {report.rotation.length}</button>
+              )}
             </span>
           )}
           {report !== null && report.weak.length === 0 && report.reused.length === 0 && report.no2fa.length === 0 && report.httpSites.length === 0 && report.rotation.length === 0 && (
@@ -2587,7 +2627,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('reportTitle')}</p>
           {report.rotation.length > 0 && (
             <>
-              <p className={css.reportLine}>{t('reportRotation')}: {report.rotation.length}</p>
+              <p className={css.reportLine}><button type="button" className={css.reportLineLink} onClick={() => filterByReport('rotation')}>{t('reportRotation')}: {report.rotation.length}</button></p>
               {(report.rotation as Array<{ id?: string; title?: string; due?: string; daysLeft?: number }>).slice(0, 8).map((item, i) => (
                 <p key={i} className={css.reportSub}>
                   · {reportJumpButton(String(item.title ?? '?'), item.id)}{item.due === 'expired' ? ` (${t('dueExpired')})` : item.due === 'soon' ? ` (${t('dueExpiring')} ${item.daysLeft ?? 0}d)` : ` (${t('dueNow')})`}
@@ -2597,7 +2637,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report.weak.length > 0 && (
             <>
-              <p className={css.reportLine}>{t('reportWeak')}: {report.weak.length}</p>
+              <p className={css.reportLine}><button type="button" className={css.reportLineLink} onClick={() => filterByReport('weak')}>{t('reportWeak')}: {report.weak.length}</button></p>
               {(report.weak as Array<{ id?: string; title?: string }>).slice(0, 5).map((item, i) => (
                 <p key={i} className={css.reportSub}>· {reportJumpButton(String(item.title ?? '?'), item.id)}</p>
               ))}
@@ -2605,7 +2645,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report.reused.length > 0 && (
             <>
-              <p className={css.reportLine}>{t('reportReused')}: {report.reused.length}</p>
+              <p className={css.reportLine}><button type="button" className={css.reportLineLink} onClick={() => filterByReport('reused')}>{t('reportReused')}: {report.reused.length}</button></p>
               {(report.reused as Array<{ entries?: Array<{ id?: string; title?: string }> }>).slice(0, 3).map((group, i) => (
                 <p key={i} className={css.reportSub}>
                   · {(group.entries ?? []).slice(0, 3).map((e, j) => (
@@ -2617,7 +2657,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report.no2fa.length > 0 && (
             <>
-              <p className={css.reportLine}>{t('no2fa')}: {report.no2fa.length}</p>
+              <p className={css.reportLine}><button type="button" className={css.reportLineLink} onClick={() => filterByReport('no2fa')}>{t('no2fa')}: {report.no2fa.length}</button></p>
               {(report.no2fa as Array<{ id?: string; title?: string }>).slice(0, 5).map((item, i) => (
                 <p key={i} className={css.reportSub}>· {reportJumpButton(String(item.title ?? '?'), item.id)}</p>
               ))}
@@ -2625,7 +2665,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           )}
           {report.httpSites.length > 0 && (
             <>
-              <p className={css.reportLine}>{t('httpSites')}: {report.httpSites.length}</p>
+              <p className={css.reportLine}><button type="button" className={css.reportLineLink} onClick={() => filterByReport('http')}>{t('httpSites')}: {report.httpSites.length}</button></p>
               {(report.httpSites as Array<{ id?: string; title?: string }>).slice(0, 5).map((item, i) => (
                 <p key={i} className={css.reportSub}>· {reportJumpButton(String(item.title ?? '?'), item.id)}</p>
               ))}
@@ -3243,36 +3283,37 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {activeTab === 'entries' && (<div className={css.tabPane}>
-      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) > visibleCount && (
+      {state.status === 'ready' && filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap, reportFilter, reportIdSets[reportFilter]) > visibleCount && (
         <button
           type="button"
           className={css.trashButton}
           onClick={() => setVisibleCount(count => count + 50)}
-        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) - visibleCount})</button>
+        >{t('loadMore')} ({filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap, reportFilter, reportIdSets[reportFilter]) - visibleCount})</button>
       )}
 
       {state.status === 'ready' && state.entries.length > 0 && (
         <>
         <p className={css.resultCount}>
-          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap)}
+          {t('resultCount')}: {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap, reportFilter, reportIdSets[reportFilter])}
           {(() => {
             const byKind = new Map<string, number>()
             for (const e of state.entries) {
-              if ((kindFilter === '' || e.kind === kindFilter) && (tagFilter === '' || (e.tags ?? []).includes(tagFilter))) {
+              if ((kindFilter === '' || e.kind === kindFilter) && (tagFilter === '' || (e.tags ?? []).includes(tagFilter))
+                && (reportFilter === '' || reportIdSets[reportFilter] === undefined || reportIdSets[reportFilter].has(e.id))) {
                 const k = e.kind ?? 'login'
                 byKind.set(k, (byKind.get(k) ?? 0) + 1)
               }
             }
             return [...byKind.entries()].map(([k, n]) => (
-              <span key={k} className={css.kindChip}>{t(KIND_KEYS[k] ?? 'kindCustom')} {n}</span>
+              <button key={k} type="button" className={`${css.kindChip}${kindFilter === k ? ` ${css.kindChipActive}` : ''}`} aria-pressed={kindFilter === k} title={t('kindChipHint')} onClick={() => setKindFilter(kindFilter === k ? '' : k)}>{t(KIND_KEYS[k] ?? 'kindCustom')} {n}</button>
             ))
           })()}
         </p>
         <ul className={`${css.list}${rowDensity === 'compact' ? ` ${css.listCompact}` : ''}`}>
-          {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap) === 0 && (
+          {filteredCount(state.entries, kindFilter, tagFilter, favOnly, dueOnly, dueMap, issueOnly, watchMap, reportFilter, reportIdSets[reportFilter]) === 0 && (
             <li className={css.empty}>{t('noFiltered')}</li>
           )}
-          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true) && (!dueOnly || dueMap[entry.id] !== undefined) && (!issueOnly || (watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good'))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
+          {state.entries.filter(entry => (kindFilter === '' || entry.kind === kindFilter) && (tagFilter === '' || (entry.tags ?? []).includes(tagFilter)) && (!favOnly || (entry as VaultSummaryWire & { favorite?: boolean }).favorite === true) && (!dueOnly || dueMap[entry.id] !== undefined) && (!issueOnly || (watchMap[entry.id] !== undefined && watchMap[entry.id]!.verdict !== 'good')) && (reportFilter === '' || reportIdSets[reportFilter] === undefined || reportIdSets[reportFilter].has(entry.id))).sort((a, b) => sortBy === 'alpha' ? a.title.localeCompare(b.title) : sortBy === 'recent' ? (b.updatedAt ?? 0) - (a.updatedAt ?? 0) : sortBy === 'created' ? (b.createdAt ?? 0) - (a.createdAt ?? 0) : ((a as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) - ((b as VaultSummaryWire & { favorite?: boolean }).favorite === true ? 0 : 1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title)).slice(0, visibleCount).map(entry => {
             const totpInfo = totpMap[entry.id]
             const remaining = totpInfo !== undefined && totpInfo.until > 0 ? Math.max(0, Math.ceil((totpInfo.until - nowTick) / 1000)) : undefined
             const frac = remaining !== undefined ? remaining / 30 : 0
@@ -3673,7 +3714,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={`${css.badge} ${css.badgeWarn}`}>{t('reportRotation')}: {report.rotation.length}</span>
           )}
           {vaultStats !== null && typeof vaultStats.expired === 'number' && vaultStats.expired > 0 && (
-            <span className={`${css.badge} ${css.badgeDanger}`}>{t('dueExpired')}: {String(vaultStats.expired)}</span>
+            <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeDanger}${dueOnly ? ` ${css.badgeActive}` : ''}`} aria-pressed={dueOnly} title={t('dueFilterHint')} onClick={() => { setActiveTab('entries'); setDueOnly(v => !v) }}>{t('dueExpired')}: {String(vaultStats.expired)}</button>
           )}
           {report !== null && report.weak.length > 0 && (
             <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>

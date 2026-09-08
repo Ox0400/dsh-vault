@@ -3256,3 +3256,46 @@ test('vault_bulk_delete dry-runs then deletes by query/kind/tag/ids', async () =
     assert.ok(trash.results.length >= 2)
   })
 })
+
+test('ask mode gates ALL mutating tools (purge/notes/rename…), not just add/update/delete', async () => {
+  await withContext(async ctx => {
+    for (const [name, args] of [
+      ['vault_purge', { id: 'whatever', confirm: true }],
+      ['vault_notes', { id: 'whatever', text: 'x' }],
+      ['vault_rename', { id: 'whatever', title: 'x' }],
+      ['vault_pin', { id: 'whatever' }],
+      ['vault_set_icon', { id: 'whatever', icon: '🦄' }],
+      ['vault_apply_tags', { id: 'whatever', add: ['a'] }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const r = await ctx.tools.execute({ signal, callId: ToolCallId(`dsh-vault-write-${++callCounter}`), name, arguments: args })
+      assert.equal(r.isError, true, `${name} should be gated in ask mode`)
+      assert.match((r.error?.message ?? ''), /requires your confirmation/i, name)
+    }
+    // reads stay allowed
+    const read = await ctx.tools.execute({ signal, callId: ToolCallId(`dsh-vault-wr-${++callCounter}`), name: 'vault_search', arguments: { query: 'x' } })
+    assert.equal(read.isError, false)
+  }, { accessMode: 'ask' })
+})
+
+test('high-sensitivity clipboard read is gated like vault_get (ask and auto)', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const secret = await gateway.add({ title: 'Clipboard secret', password: 'top-secret-1', sensitivity: 'high' })
+    const plain = await gateway.add({ title: 'Normal', password: 'normal-pass-1' })
+
+    const run = (mode: 'ask' | 'auto') => async (name: string, id: string) => {
+      await gateway.setAccessMode(mode)
+      const r = await ctx.tools.execute({ signal, callId: ToolCallId(`dsh-vault-cb-${++callCounter}`), name, arguments: { id, field: 'password' } })
+      return r
+    }
+    // high entry: denied in both ask and auto
+    for (const mode of ['ask', 'auto'] as const) {
+      const r = await run(mode)('vault_clipboard', secret.id)
+      assert.equal(r.isError, true, `clipboard on high entry should gate in ${mode}`)
+      assert.match((r.error?.message ?? ''), /high-sensitivity/i, mode)
+    }
+    // normal entry clipboard in auto mode succeeds
+    const okNormal = await run('auto')('vault_clipboard', plain.id)
+    assert.equal(okNormal.isError, false)
+  }, { accessMode: 'ask' })
+})

@@ -136,7 +136,67 @@ function defaultFirefoxProfileDir(): string {
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const masterPassword = resolveMasterPassword(config)
-  const WRITE_TOOLS = new Set(['vault_add', 'vault_update', 'vault_delete'])
+  /**
+   * Every tool that writes to the vault store, its files or session metadata.
+   * Kept in sync with the assertWritable(...) call sites so that ask-mode
+   * approval and readonly-mode denial cover the SAME operations (a tool that
+   * can mutate in ask mode without approval is a review finding).
+   */
+  const WRITE_TOOLS = new Set<string>([
+    'vault_add',
+    'vault_apply_tags',
+    'vault_attach',
+    'vault_breach_check',
+    'vault_bulk_delete',
+    'vault_bulk_export',
+    'vault_copy',
+    'vault_delete',
+    'vault_detach',
+    'vault_expiry',
+    'vault_export_bitwarden',
+    'vault_export_env',
+    'vault_import',
+    'vault_import_bitwarden',
+    'vault_import_bitwarden_encrypted',
+    'vault_import_browser',
+    'vault_import_chrome',
+    'vault_import_csv',
+    'vault_import_enpass',
+    'vault_import_firefox',
+    'vault_import_kdbx',
+    'vault_import_keepass_xml',
+    'vault_import_keychain',
+    'vault_import_manager_csv',
+    'vault_import_wallet',
+    'vault_merge',
+    'vault_note_secret',
+    'vault_notes',
+    'vault_password_rollback',
+    'vault_pin',
+    'vault_purge',
+    'vault_quick_add',
+    'vault_recovery_code',
+    'vault_rekey',
+    'vault_rename',
+    'vault_restore',
+    'vault_restore_backup',
+    'vault_restore_recent',
+    'vault_rotate_password',
+    'vault_session_collect',
+    'vault_session_import',
+    'vault_session_import_file',
+    'vault_session_open',
+    'vault_set_icon',
+    'vault_templates',
+    'vault_undelete_all',
+    'vault_unpin',
+    'vault_update',
+    'vault_vault_delete',
+    'vault_vault_rename',
+  ])
+  /** Tools that read back a stored secret for a single entry; their id-scoped
+   * high-sensitivity reads are always gated (ask + auto), like vault_get. */
+  const SENSITIVE_READ_TOOLS = new Set(['vault_get', 'vault_clipboard', 'vault_totp', 'vault_totp_uri', 'vault_password_history', 'vault_attachment'])
   const lockTimeoutSeconds = config.lockTimeoutSeconds ?? 0
 
   /** Shared access policy; resolved once, mutated by the UI via setAccessMode. */
@@ -161,7 +221,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   /**
    * Route writes through the harness approval channel in `ask` mode: the user
-   * confirms every add/update/delete ("prompt before writing"). `auto` allows
+   * confirms every WRITE_TOOLS operation ("prompt before writing"). `auto` allows
    * without a prompt; `readonly` denies in assertWritable. This listener must
    * call `next()` (waterfall event).
    */
@@ -173,7 +233,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // High-sensitivity reads: reading a `high` entry's secrets (vault_get by
     // id) requires confirmation in BOTH ask and auto modes — sensitive reads
     // are always gated, unlike ordinary writes.
-    if (policy.mode !== 'readonly' && exec.name === 'vault_get') {
+    if (policy.mode !== 'readonly' && SENSITIVE_READ_TOOLS.has(exec.name)) {
       const id = (exec.arguments as { id?: string } | undefined)?.id
       if (id !== undefined) {
         try {
