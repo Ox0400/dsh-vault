@@ -3665,13 +3665,13 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       {state.status === 'ready' && (
         <div className={css.healthBar}>
           {vaultStats !== null && typeof vaultStats.total === 'number' && (
-            <span className={css.badge}>{t('entryCount')}: {String(vaultStats.total)}</span>
+            <span className={css.badge} title={t('statBadgeHint')}>{t('entryCount')}: {String(vaultStats.total)}</span>
           )}
           {vaultStats !== null && typeof vaultStats.withTotp === 'number' && (
-            <span className={css.badge}>TOTP: {String(vaultStats.withTotp)}</span>
+            <span className={css.badge} title={t('statBadgeHint')}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
           {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && (
-            <span className={css.badge}>{t('highSensitivity')}: {String(vaultStats.highSensitivity)}</span>
+            <span className={css.badge} title={t('statBadgeHint')}>{t('highSensitivity')}: {String(vaultStats.highSensitivity)}</span>
           )}
           {report !== null && report.strength !== null && (
             <span className={`${css.badge} ${report.strength.weak > 0 ? css.badgeDanger : css.badgeOk}`}>
@@ -3706,10 +3706,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeDanger}${dueOnly ? ` ${css.badgeActive}` : ''}`} aria-pressed={dueOnly} title={t('dueFilterHint')} onClick={() => { setActiveTab('entries'); setDueOnly(v => !v) }}>{t('dueExpired')}: {String(vaultStats.expired)}</button>
           )}
           {report !== null && report.weak.length > 0 && (
-            <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportWeak')}: {report.weak.length}</span>
+            <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeDanger}${reportFilter === 'weak' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'weak'} title={t('badgeFilterHint')} onClick={() => filterByReport('weak')}>{t('reportWeak')}: {report.weak.length}</button>
           )}
           {report !== null && report.reused.length > 0 && (
-            <span className={`${css.badge} ${css.badgeDanger}`}>{t('reportReused')}: {report.reused.length}</span>
+            <button type="button" className={`${css.badge} ${css.badgeBtn} ${css.badgeDanger}${reportFilter === 'reused' ? ` ${css.badgeActive}` : ''}`} aria-pressed={reportFilter === 'reused'} title={t('badgeFilterHint')} onClick={() => filterByReport('reused')}>{t('reportReused')}: {report.reused.length}</button>
           )}
           {dupGroups > 0 && (
             <span className={`${css.badge} ${css.badgeWarn}`}>{t('dupGroups')}: {dupGroups}</span>
@@ -3722,24 +3722,23 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               {t('healthBackup')}: {backupInfo.daysSinceBackup}d ({backupInfo.backups})
             </span>
           )}
-          <button type="button" className={css.backupButton} onClick={() => void exportReportCsv()} disabled={busy || report === null}>
-            {t('exportReport')}
-          </button>
-          <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>
-            {t('backupNow')}
-          </button>
-          <button type="button" className={css.backupButton} onClick={() => void runBreachCheck()} disabled={busy}>
-            {t('breachCheck')}
-          </button>
-          <button type="button" className={css.backupButton} onClick={() => void lockNow()} disabled={busy || locked}>
-            {t('lock')}
-          </button>
-          <button type="button" className={css.backupButton} onClick={() => void runRecoveryCode()} disabled={busy || locked}>
-            {t('recoveryCode')}
-          </button>
-          <button type="button" className={css.backupButton} onClick={() => void runVerifyRecovery()} disabled={busy || locked}>
-            {t('recoveryVerify')}
-          </button>
+          <span className={css.actionGroups}>
+          <span className={css.actionGroup}>
+            <span className={css.actionGroupLabel}>{t('grpChecks')}</span>
+            <button type="button" className={css.actionBtn} title={t('exportReportHint')} onClick={() => void exportReportCsv()} disabled={busy || report === null}>📄 {t('exportReport')}</button>
+            <button type="button" className={css.actionBtn} title={t('breachHint')} onClick={() => void runBreachCheck()} disabled={busy}>🛰 {t('breachCheck')}</button>
+          </span>
+          <span className={css.actionGroup}>
+            <span className={css.actionGroupLabel}>{t('grpBackup')}</span>
+            <button type="button" className={css.actionBtn} title={t('backupNowHint')} onClick={() => void backupNow()} disabled={busy}>💾 {t('backupNow')}</button>
+          </span>
+          <span className={css.actionGroup}>
+            <span className={css.actionGroupLabel}>{t('grpAccess')}</span>
+            <button type="button" className={css.actionBtn} title={t('lockHint')} onClick={() => void lockNow()} disabled={busy || locked}>🔒 {t('lock')}</button>
+            <button type="button" className={css.actionBtn} title={t('recoveryGenHint')} onClick={() => void runRecoveryCode()} disabled={busy || locked}>🛟 {t('recoveryCode')}</button>
+            <button type="button" className={css.actionBtn} title={t('recoveryVerHint')} onClick={() => void runVerifyRecovery()} disabled={busy || locked}>✓ {t('recoveryVerify')}</button>
+          </span>
+          </span>
         </div>
       )}
 

@@ -1330,3 +1330,43 @@
 .reportLineLink:hover {
   color: var(--color-accent, #4f8cff);
 }
+
+/* Security-page action groups (grouped, hint-tooltipped buttons). */
+.actionGroups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 6px;
+}
+.actionGroup {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.actionGroupLabel {
+  color: var(--dsh-color-text-2, #888);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-right: 2px;
+}
+.actionBtn {
+  background: transparent;
+  border: 1px solid var(--dsh-color-border, #555);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12.5px;
+  line-height: 1.4;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.actionBtn:hover:not(:disabled) {
+  border-color: var(--color-accent, #4f8cff);
+  color: var(--color-accent, #4f8cff);
+}
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
