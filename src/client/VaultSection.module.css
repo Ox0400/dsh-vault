@@ -1,4 +1,23 @@
 .section {
+  /* Local semantic layer mapped onto the DSH design tokens (--dsw-alias-*),
+     which flip automatically with body[data-ds-dark-theme]. Fallbacks are
+     literal values so the layer also works outside DSH. */
+  --v-text: var(--dsw-alias-label-primary, #1f2328);
+  --v-text-2: var(--dsw-alias-label-secondary, #666666);
+  --v-text-3: var(--dsw-alias-label-tertiary, #888888);
+  --v-bg-1: var(--dsw-alias-bg-layer-1, transparent);
+  --v-bg-2: var(--dsw-alias-bg-layer-2, transparent);
+  --v-bg-overlay: var(--dsw-alias-bg-overlay, rgba(0, 0, 0, 0.5));
+  --v-border: var(--dsw-alias-border-l2, #d9d9d9);
+  --v-border-strong: var(--dsw-alias-border-l3, #bdbdbd);
+  --v-accent: var(--dsw-alias-brand-primary, #4f8cff);
+  --v-accent-text: var(--dsw-alias-brand-text, #4f8cff);
+  --v-on-accent: var(--dsw-alias-label-primary-foreground, #ffffff);
+  --v-danger: var(--dsw-alias-state-error-primary, #cf3d3d);
+  --v-success: var(--dsw-alias-state-success-primary, #2e9e5b);
+  --v-warn: var(--dsw-alias-state-warn-primary, #c98a1b);
+  --v-warn-bg: var(--dsw-alias-state-warn-tertiary, rgba(201, 138, 27, 0.12));
+  --v-hover: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.1));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -36,8 +55,8 @@
 }
 
 .selectActive {
-  border-color: var(--dsh-color-primary, #2e9e5b);
-  color: var(--dsh-color-primary, #2e9e5b);
+  border-color: var(--v-accent);
+  color: var(--v-accent);
 }
 
 .bulkBar {
@@ -46,7 +65,7 @@
   gap: 10px;
   padding: 6px 10px;
   margin: 6px 0;
-  background: var(--dsh-color-surface-2, rgba(128, 128, 128, 0.08));
+  background: var(--v-bg-2);
   border-radius: 6px;
   flex-wrap: wrap;
 }
@@ -70,7 +89,7 @@
 }
 
 .rowSelected {
-  outline: 1px solid var(--dsh-color-primary, #2e9e5b);
+  outline: 1px solid var(--v-accent);
   border-radius: 4px;
 }
 
@@ -85,14 +104,14 @@
   min-width: 0;
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   font-size: 13px;
 }
 
 .searchBox input:focus {
-  outline: 1px solid var(--color-accent, #4f8cff);
+  outline: 1px solid var(--v-accent);
 }
 
 .searchKbd {
@@ -100,9 +119,9 @@
   align-self: center;
   margin-left: 6px;
   padding: 1px 5px;
-  border: 1px solid var(--color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 4px;
-  color: var(--color-text-muted, #999);
+  color: var(--v-text-2);
   font-size: 10px;
   line-height: 1.5;
   font-family: inherit;
@@ -116,8 +135,8 @@
   padding: 6px 12px;
   border-radius: 6px;
   border: 1px solid transparent;
-  background: var(--color-accent, #4f8cff);
-  color: #fff;
+  background: var(--v-accent);
+  color: var(--v-on-accent);
   cursor: pointer;
   font-size: 13px;
 }
@@ -159,8 +178,8 @@
   gap: 2px;
   min-width: 140px;
   padding: 6px;
-  background: var(--dsh-color-surface-1, #fff);
-  border: 1px solid var(--dsh-color-border, #ddd);
+  background: var(--v-bg-1);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
@@ -177,7 +196,7 @@
 }
 
 .moreMenu button:hover {
-  background: var(--dsh-color-surface-2, rgba(128, 128, 128, 0.12));
+  background: var(--v-bg-2);
 }
 
 .list {
@@ -196,7 +215,7 @@
   gap: 12px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--color-border, #333);
+  border: 1px solid var(--v-border);
 }
 
 .rowMain {
@@ -220,9 +239,9 @@
 }
 
 .totp {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--dsw-font-mono, monospace);
   font-size: 13px;
-  color: var(--color-accent, #4f8cff);
+  color: var(--v-accent);
 }
 
 /* Inline TOTP code is click-to-copy. */
@@ -234,11 +253,11 @@
   user-select: none;
 }
 .totpCopy:hover {
-  background: color-mix(in srgb, var(--color-accent, #4f8cff) 10%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent, #4f8cff) 40%, transparent);
+  background: color-mix(in srgb, var(--v-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--v-accent) 40%, transparent);
 }
 .totpCopy:focus-visible {
-  outline: 1px solid var(--color-accent, #4f8cff);
+  outline: 1px solid var(--v-accent);
   outline-offset: 1px;
 }
 
@@ -259,7 +278,7 @@
 .rowActions button {
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -267,12 +286,12 @@
 }
 
 .deleteButton {
-  color: #e5484d;
+  color: var(--v-danger);
 }
 
 .copied {
   font-size: 12px;
-  color: #30a46c;
+  color: var(--v-success);
 }
 
 .empty,
@@ -283,10 +302,10 @@
 }
 
 .lockedBanner {
-  background: #fff4e5;
-  border: 1px solid #e0a83a;
+  background: var(--v-warn-bg);
+  border: 1px solid var(--v-warn);
   border-radius: 6px;
-  color: #8a5a00;
+  color: var(--v-warn);
   font-size: 13px;
   margin: 0 0 10px;
   padding: 8px 12px;
@@ -305,18 +324,18 @@
 }
 
 .modeReadonly {
-  color: #e5484d;
-  border: 1px solid rgba(229, 72, 77, 0.5);
+  color: var(--v-danger);
+  border: 1px solid color-mix(in srgb, var(--v-danger) 50%, transparent);
 }
 
 .modeAsk {
-  color: #f5a524;
-  border: 1px solid rgba(245, 165, 36, 0.5);
+  color: var(--v-warn);
+  border: 1px solid color-mix(in srgb, var(--v-warn) 50%, transparent);
 }
 
 .modeAuto {
-  color: #30a46c;
-  border: 1px solid rgba(48, 164, 108, 0.5);
+  color: var(--v-success);
+  border: 1px solid color-mix(in srgb, var(--v-success) 50%, transparent);
 }
 
 .policyBar {
@@ -336,7 +355,7 @@
 .policyField select {
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   font-size: 13px;
@@ -355,11 +374,11 @@
 }
 
 .error {
-  color: #e5484d;
+  color: var(--v-danger);
 }
 
 .editor {
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
   padding: 12px;
 }
@@ -387,7 +406,7 @@
 .field select {
   padding: 5px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   font-size: 13px;
@@ -403,7 +422,7 @@
 .editorActions button {
   padding: 6px 12px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -416,7 +435,7 @@
   gap: 2px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(245, 165, 36, 0.4);
+  border: 1px solid color-mix(in srgb, var(--v-warn) 40%, transparent);
   font-size: 12px;
 }
 
@@ -430,14 +449,14 @@
   opacity: 0.8;
 }
 
-.histAdd { color: #2e9e5b; }
+.histAdd { color: var(--v-success); }
 
 .pwHistBox {
   margin: 8px 0;
   padding: 10px 12px;
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
-  background: var(--dsh-color-surface-2, rgba(128, 128, 128, 0.06));
+  background: var(--v-bg-2);
 }
 
 .pwHistRow {
@@ -458,22 +477,22 @@
   opacity: 0.7;
   white-space: nowrap;
 }
-.histDanger { color: #cf3d3d; }
-.histUpdate { color: #c98a1b; }
+.histDanger { color: var(--v-danger); }
+.histUpdate { color: var(--v-warn); }
 .histNeutral { opacity: 0.7; }
 
 .histLink {
   background: none;
   border: none;
   padding: 0;
-  color: var(--dsh-color-primary, #2e9e5b);
+  color: var(--v-accent);
   text-decoration: underline;
   cursor: pointer;
   font-size: inherit;
 }
 
 .reportSub {
-  color: var(--dsh-color-text-2, #666);
+  color: var(--v-text-2);
   font-size: 12px;
   margin: 2px 0 0 10px;
 }
@@ -481,17 +500,17 @@
 .reportJump {
   background: none;
   border: none;
-  color: var(--color-accent, #4f8cff);
+  color: var(--v-accent);
   cursor: pointer;
   font: inherit;
   padding: 0;
   text-align: left;
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--color-accent, #4f8cff) 45%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--v-accent) 45%, transparent);
   text-underline-offset: 2px;
 }
 .reportJump:hover {
-  text-decoration-color: var(--color-accent, #4f8cff);
+  text-decoration-color: var(--v-accent);
 }
 
 /* Audit quick-filter chips. */
@@ -503,7 +522,7 @@
 }
 .auditChip {
   background: transparent;
-  border: 1px solid var(--dsh-color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 999px;
   color: inherit;
   cursor: pointer;
@@ -512,14 +531,14 @@
   padding: 3px 9px;
 }
 .auditChip:hover {
-  border-color: var(--color-accent, #4f8cff);
-  color: var(--color-accent, #4f8cff);
+  border-color: var(--v-accent);
+  color: var(--v-accent);
 }
 .auditChipActive,
 .auditChipActive:hover {
-  background: var(--color-accent, #4f8cff);
-  border-color: var(--color-accent, #4f8cff);
-  color: #fff;
+  background: var(--v-accent);
+  border-color: var(--v-accent);
+  color: var(--v-on-accent);
 }
 
 
@@ -527,7 +546,7 @@
 .trashButton {
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -548,7 +567,7 @@
 .revealButton {
   padding: 0 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -558,7 +577,7 @@
 .kindFilter {
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   font-size: 13px;
@@ -568,15 +587,15 @@
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(229, 72, 77, 0.15);
-  color: #e5484d;
+  background: color-mix(in srgb, var(--v-danger) 15%, transparent);
+  color: var(--v-danger);
   font-size: 10px;
   font-weight: 600;
   vertical-align: middle;
 }
 
 .pinStar {
-  color: #f5a524;
+  color: var(--v-warn);
   margin-right: 4px;
   background: none;
   border: none;
@@ -587,11 +606,11 @@
 }
 
 .pinOff {
-  color: rgba(128, 128, 128, 0.45);
+  color: color-mix(in srgb, var(--v-text-2) 45%, transparent);
 }
 
 .pinOn {
-  color: #f5a524;
+  color: var(--v-warn);
 }
 
 .clearButton {
@@ -607,7 +626,7 @@
 .field textarea {
   padding: 5px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   font-size: 13px;
@@ -620,7 +639,7 @@
 }
 
 .row:hover {
-  background: var(--color-hover, rgba(128, 128, 128, 0.08));
+  background: var(--v-hover);
 }
 
 .healthBar {
@@ -630,37 +649,37 @@
   margin: 0 0 10px;
 }
 .badge {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 999px;
-  background: var(--dsh-color-surface-2, #f7f7f8);
-  color: var(--dsh-color-text-2, #555);
+  background: var(--v-bg-2);
+  color: var(--v-text-2);
   font-size: 12px;
   line-height: 1;
   padding: 4px 10px;
 }
 .backupButton {
   align-self: flex-start;
-  border: 1px solid var(--dsh-color-border, #ccc);
+  border: 1px solid var(--v-border);
   border-radius: 999px;
-  background: var(--dsh-color-surface-2, #f7f7f8);
+  background: var(--v-bg-2);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
   padding: 4px 10px;
 }
 .badgeOk {
-  border-color: #2e9e5b;
-  color: #2e9e5b;
+  border-color: var(--v-success);
+  color: var(--v-success);
 }
 .badgeWarn {
-  border-color: #c98a1b;
-  color: #b57f1a;
+  border-color: var(--v-warn);
+  color: var(--v-warn);
 }
 .rowDue {
-  border-left: 3px solid #c98a1b;
+  border-left: 3px solid var(--v-warn);
 }
 .rowExpired {
-  border-left: 3px solid #cf3d3d;
+  border-left: 3px solid var(--v-danger);
 }
 .dueBadge {
   border-radius: 999px;
@@ -671,8 +690,8 @@
   padding: 3px 8px;
 }
 .badgeDanger {
-  border-color: #cf3d3d;
-  color: #c03a3a;
+  border-color: var(--v-danger);
+  color: var(--v-danger);
 }
 .footer {
   font-size: 12px;
@@ -702,7 +721,7 @@
   width: 11px;
 }
 .urlGlyph {
-  color: var(--dsh-color-text-2, #777);
+  color: var(--v-text-2);
   font-size: 11px;
 }
 
@@ -710,9 +729,9 @@
 .dangerButton {
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(229, 72, 77, 0.5);
+  border: 1px solid color-mix(in srgb, var(--v-danger) 50%, transparent);
   background: transparent;
-  color: #e5484d;
+  color: var(--v-danger);
   cursor: pointer;
   font-size: 12px;
   align-self: flex-start;
@@ -729,7 +748,7 @@
   gap: 4px 12px;
   padding: 6px 8px;
   border-radius: 6px;
-  background: var(--color-hover, rgba(128, 128, 128, 0.06));
+  background: var(--v-hover);
   font-size: 12px;
 }
 
@@ -740,7 +759,7 @@
 .sortButton {
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #444);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -762,7 +781,7 @@
   white-space: nowrap;
 }
 .dupMerge {
-  border: 1px solid var(--dsh-color-border, #ccc);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   cursor: pointer;
   flex-shrink: 0;
@@ -778,7 +797,7 @@
   margin: 4px 0;
 }
 .auditIssues {
-  color: var(--dsh-color-text-2, #666);
+  color: var(--v-text-2);
   flex: 1;
   font-size: 12px;
   overflow: hidden;
@@ -788,7 +807,7 @@
 
 
 .retryButton {
-  border: 1px solid var(--dsh-color-border, #ccc);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
@@ -805,7 +824,7 @@
 
 
 .genOpts {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -831,7 +850,7 @@
 }
 .lenChip {
   background: transparent;
-  border: 1px solid var(--dsh-color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 5px;
   color: inherit;
   cursor: pointer;
@@ -840,14 +859,14 @@
   padding: 3px 6px;
 }
 .lenChip:hover {
-  border-color: var(--color-accent, #4f8cff);
-  color: var(--color-accent, #4f8cff);
+  border-color: var(--v-accent);
+  color: var(--v-accent);
 }
 .lenChipActive,
 .lenChipActive:hover {
-  background: var(--color-accent, #4f8cff);
-  border-color: var(--color-accent, #4f8cff);
-  color: #fff;
+  background: var(--v-accent);
+  border-color: var(--v-accent);
+  color: var(--v-on-accent);
 }
 .pwMeter {
   align-items: center;
@@ -860,10 +879,10 @@
   height: 6px;
   transition: width 0.2s ease;
 }
-.pwWeak { background: #cf3d3d; }
-.pwFair { background: #c98a1b; }
-.pwStrong { background: #2e9e5b; }
-.pwLabel { color: var(--dsh-color-text-2, #666); }
+.pwWeak { background: var(--v-danger); }
+.pwFair { background: var(--v-warn); }
+.pwStrong { background: var(--v-success); }
+.pwLabel { color: var(--v-text-2); }
 /* Inline editor risk banners (weak / reused password). */
 .riskBanner {
   border: 1px solid transparent;
@@ -874,20 +893,20 @@
   padding: 5px 9px;
 }
 .riskWarn {
-  background: rgba(201, 138, 27, 0.12);
-  border-color: rgba(201, 138, 27, 0.45);
-  color: var(--dsh-color-text, inherit);
+  background: color-mix(in srgb, var(--v-warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--v-warn) 45%, transparent);
+  color: var(--v-text);
 }
 .riskDanger {
-  background: rgba(207, 61, 61, 0.1);
-  border-color: rgba(207, 61, 61, 0.5);
+  background: color-mix(in srgb, var(--v-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--v-danger) 50%, transparent);
 }
 
 
 
 .resultCount {
   align-items: center;
-  color: var(--dsh-color-text-2, #666);
+  color: var(--v-text-2);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -899,7 +918,7 @@
   border: 0;
   cursor: pointer;
   padding: 0 1px;
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 999px;
   font-size: 11px;
   padding: 2px 8px;
@@ -925,7 +944,7 @@
 
 
 .lockedTag {
-  color: #c98a1b;
+  color: var(--v-warn);
   font-size: 12px;
   font-weight: 600;
 }
@@ -938,7 +957,7 @@
   margin: 0 0 12px;
 }
 .tab {
-  border: 1px solid var(--dsh-color-border, #ccc);
+  border: 1px solid var(--v-border);
   border-radius: 999px;
   background: transparent;
   color: inherit;
@@ -947,9 +966,9 @@
   padding: 5px 14px;
 }
 .tabActive {
-  background: var(--dsh-color-primary, #4a6cf7);
+  background: var(--v-accent);
   border-color: transparent;
-  color: #fff;
+  color: var(--v-on-accent);
 }
 .tabPane {
   margin-top: 2px;
@@ -957,7 +976,7 @@
 
 /* Search-result highlight (Bitwarden/KeePassXC-style matched term marking). */
 .hit {
-  background: rgba(255, 200, 0, 0.32);
+  background: color-mix(in srgb, var(--v-warn) 35%, transparent);
   color: inherit;
   border-radius: 3px;
   padding: 0 1px;
@@ -967,7 +986,7 @@
 
 /* CSV import preview panel (masked rows, confirm before commit). */
 .previewBox {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
   padding: 10px 12px;
   margin-top: 10px;
@@ -986,7 +1005,7 @@
 .previewTable td {
   text-align: left;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--dsh-color-border, #eee);
+  border-bottom: 1px solid var(--v-border);
 }
 .previewTable th {
   opacity: 0.7;
@@ -1000,7 +1019,7 @@
   gap: 3px;
   margin-left: 6px;
   padding: 2px 8px;
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
@@ -1014,7 +1033,7 @@
 .favToggle {
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -1025,8 +1044,8 @@
   opacity: 1;
 }
 .favActive {
-  border-color: #e0a800;
-  background: rgba(224, 168, 0, 0.14);
+  border-color: var(--v-warn);
+  background: color-mix(in srgb, var(--v-warn) 14%, transparent);
   opacity: 1;
   font-weight: 600;
 }
@@ -1038,9 +1057,9 @@
   gap: 8px;
   padding: 6px 10px;
   margin-bottom: 6px;
-  border: 1px solid var(--dsh-color-border, #eee);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
-  background: rgba(46, 158, 91, 0.06);
+  background: color-mix(in srgb, var(--v-success) 8%, transparent);
 }
 .detailCode {
   font-size: 19px;
@@ -1066,7 +1085,7 @@
   align-items: center;
   gap: 3px;
   padding: 2px 8px;
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 12px;
   font-size: 12px;
   cursor: pointer;
@@ -1092,7 +1111,7 @@
   align-items: center;
 }
 .emojiBtn {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   background: transparent;
   font-size: 14px;
@@ -1107,7 +1126,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1px solid var(--dsh-color-border, #bbb);
+  border: 1px solid var(--v-border);
   cursor: pointer;
   padding: 0;
 }
@@ -1140,7 +1159,7 @@
   margin-right: 2px;
 }
 .recentChip {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 12px;
   background: transparent;
   color: inherit;
@@ -1167,7 +1186,7 @@
 
 /* Tag manager panel. */
 .tagManager {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 8px;
   padding: 8px 12px;
   margin-top: 8px;
@@ -1184,7 +1203,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 3px 0;
-  border-bottom: 1px solid var(--dsh-color-border, #f0f0f0);
+  border-bottom: 1px solid var(--v-border);
 }
 .tagName {
   font-size: 13px;
@@ -1200,7 +1219,7 @@
 
 /* Copy-all-fields button in the detail box. */
 .copyAllBtn {
-  border: 1px solid var(--dsh-color-border, #ddd);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   background: transparent;
   color: inherit;
@@ -1265,7 +1284,7 @@
   width: 100%;
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid var(--dsh-color-border, #eee);
+  border-top: 1px solid var(--v-border);
   opacity: 0.92;
 }
 .toolbarFilters .favToggle,
@@ -1279,7 +1298,7 @@
 .toolbarDivider {
   width: 1px;
   align-self: stretch;
-  background: var(--dsh-color-border, #ddd);
+  background: var(--v-border);
   margin: 0 2px;
 }
 
@@ -1295,13 +1314,13 @@
   margin-bottom: 0;
 }
 .detailDeleteBtn {
-  color: #e5484d;
-  border-color: rgba(229, 72, 77, 0.4);
+  color: var(--v-danger);
+  border-color: color-mix(in srgb, var(--v-danger) 40%, transparent);
 }
 
 /* Click-to-filter badges (health summaries) */
 .kindChipActive {
-  color: var(--color-accent, #4f8cff);
+  color: var(--v-accent);
   font-weight: 600;
   text-decoration: underline;
 }
@@ -1314,7 +1333,7 @@
   padding: 0;
 }
 .badgeActive {
-  outline: 1px solid var(--color-accent, #4f8cff);
+  outline: 1px solid var(--v-accent);
   outline-offset: 1px;
 }
 .reportLineLink {
@@ -1328,7 +1347,7 @@
   text-underline-offset: 2px;
 }
 .reportLineLink:hover {
-  color: var(--color-accent, #4f8cff);
+  color: var(--v-accent);
 }
 
 /* Security-page action groups (grouped, hint-tooltipped buttons). */
@@ -1345,7 +1364,7 @@
   gap: 5px;
 }
 .actionGroupLabel {
-  color: var(--dsh-color-text-2, #888);
+  color: var(--v-text-2);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -1353,7 +1372,7 @@
 }
 .actionBtn {
   background: transparent;
-  border: 1px solid var(--dsh-color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   color: inherit;
   cursor: pointer;
@@ -1363,8 +1382,8 @@
   white-space: nowrap;
 }
 .actionBtn:hover:not(:disabled) {
-  border-color: var(--color-accent, #4f8cff);
-  color: var(--color-accent, #4f8cff);
+  border-color: var(--v-accent);
+  color: var(--v-accent);
 }
 .actionBtn:disabled {
   opacity: 0.5;
@@ -1387,7 +1406,7 @@
 }
 .importRow {
   align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--dsh-color-border, #ddd) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--v-border) 40%, transparent);
   display: grid;
   gap: 10px;
   grid-template-columns: 132px minmax(0, 1fr) auto;
@@ -1404,7 +1423,7 @@
   white-space: nowrap;
 }
 .importDesc {
-  color: var(--dsh-color-text-2, #888);
+  color: var(--v-text-2);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1430,7 +1449,7 @@
 }
 .vaultSwitch select,
 .vaultTarget select {
-  border: 1px solid var(--dsh-color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   background: transparent;
   color: inherit;
@@ -1456,7 +1475,7 @@
 
 /* Fixed single-line feedback slot inside the vault header. */
 .headerMessage {
-  color: var(--dsh-color-text-2, #888);
+  color: var(--v-text-2);
   flex: 1 1 220px;
   font-size: 12px;
   min-width: 0;
@@ -1469,7 +1488,7 @@
 /* Generic 3-column row: name | detail | right-aligned actions. */
 .gridRow {
   align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--dsh-color-border, #ddd) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--v-border) 40%, transparent);
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(140px, 1fr) minmax(0, 1.4fr) auto;
@@ -1486,7 +1505,7 @@
 }
 .gridInput {
   background: transparent;
-  border: 1px solid var(--dsh-color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   color: inherit;
   font-size: 12.5px;
@@ -1513,7 +1532,7 @@
 }
 .inlineInput input {
   background: transparent;
-  border: 1px solid var(--dsh-color-border, #555);
+  border: 1px solid var(--v-border);
   border-radius: 6px;
   color: inherit;
   font-size: 13px;
@@ -1522,7 +1541,7 @@
 }
 
 .gridDetail {
-  color: var(--dsh-color-text-2, #888);
+  color: var(--v-text-2);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
