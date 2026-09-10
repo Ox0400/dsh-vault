@@ -741,9 +741,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     }
   }
 
+  /** Vault the management row acts on: the explicit pick, else the active one. */
+  const vaultMgtTarget = vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? '')
+  /** True when the management target is the undeletable default vault. */
+  const vaultMgtIsDefault = vaultMgtTarget === '' || vaultMgtTarget === 'default'
+
   /** Rename the active (or picked) vault. */
   async function runVaultRename(): Promise<void> {
-    const current = vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? 'default')
+    const current = vaultMgtTarget !== '' ? vaultMgtTarget : 'default'
     const target = window.prompt(`${t('vaultRenamePrompt')} (${current})`)
     if (target === null || target.trim() === '' || target.trim() === current) return
     setBusy(true)
@@ -3045,7 +3050,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <label className={css.vaultTarget}>
               <span className={css.srOnly}>{t('vaultTargetLabel')}</span>
               <select
-                value={vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? '')}
+                value={vaultMgtTarget}
                 onChange={event => setVaultTarget(event.target.value)}
                 disabled={locked}
                 aria-label={t('vaultTargetLabel')}
@@ -3060,8 +3065,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <button
               type="button"
               className={css.dangerButton}
-              onClick={() => void runVaultDelete(vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? ''))}
-              disabled={busy || locked || (vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? '')) === 'default'}
+              onClick={() => { if (vaultMgtIsDefault) { setMessage(t('vaultDeleteDefault')); return } void runVaultDelete(vaultMgtTarget) }}
+              disabled={busy || locked || vaultMgtIsDefault}
               title={t('vaultDeleteHint')}
             >{t('vaultDelete')}</button>
             <button type="button" className={css.dupMerge} onClick={() => void runVaultCreate()} disabled={busy || locked} title={t('vaultNewHint')}>＋ {t('vaultNew')}</button>
