@@ -25,7 +25,7 @@ async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): P
   try {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(VaultPlugin, { masterPassword: 'shared-test', path: join(dir, 'vault.json'), accessMode: 'auto' })
+    await ctx.plugin(VaultPlugin, { masterPassword: 'shared-test', path: join(dir, 'vault.json'), accessMode: 'auto', tools: 'full' })
     return await run(ctx, dir)
   } finally {
     if (prevDshHome === undefined) delete process.env.DSH_HOME

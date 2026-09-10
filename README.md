@@ -181,6 +181,21 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 
 `dsh plugin --profile web remove dsh-vault` uninstalls (removes both the dependency and the layer).
 
+## Tool profiles
+
+The plugin ships 110+ model tools, but **registers only 11 core tools by default** (`vault_list/search/get/add/update/delete/fill/clipboard/totp/generate_password/strength`) to keep the model's tool catalog small and cheap.
+
+Switch profiles in **Settings → Credentials → Permissions → Model tools** — it applies instantly (no restart) and is persisted per vault:
+
+| Profile | Registers |
+|---|---|
+| **Basic** (default) | core only — everyday use |
+| **Standard** | + management: favourites, tags, icons, expiry/rotation, health, duplicates/merge, attachments, templates, env masks |
+| **Full** | everything, incl. bulk import/export, browser sessions, backups and vault-file operations |
+| **Custom…** | core + any of: Management / Import-export / Browser sessions / Backups & files |
+
+`tools: basic|standard|full|custom` can also be set in the plugin config; the UI choice wins and is stored in `<vault dir>/access.json`.
+
 ## Configuration
 
 > [!WARNING] Security: never put the master password in plaintext

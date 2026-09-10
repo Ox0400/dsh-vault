@@ -57,6 +57,7 @@ export function apply(ctx: ClientContext): void {
     t,
     config: () => invoke<VaultSectionTypes['config']>('config'),
     setAccessMode: (mode) => invoke<VaultSectionTypes['config']>('setAccessMode', { mode }),
+    setToolProfile: (profile: 'basic' | 'standard' | 'full' | 'custom', groups?: string[]) => invoke<{ toolProfile: 'basic' | 'standard' | 'full' | 'custom'; tools: number; toolGroups: string[] }>('setToolProfile', { profile, ...(groups !== undefined ? { groups } : {}) }),
     setAutoCapture: (enabled) => invoke<VaultSectionTypes['config']>('setAutoCapture', { enabled }),
     setAutoLock: (seconds) => invoke<{ seconds: number }>('setAutoLock', { seconds }),
     list: () => invoke<{ entries: VaultSectionTypes['entries'] }>('list').then(r => r.entries),

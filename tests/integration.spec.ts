@@ -38,6 +38,9 @@ async function withContext<T>(
     const mountConfig: Record<string, unknown> = {
       masterPassword: 'integration-master',
       accessMode: 'auto',
+      // Existing suites exercise every tool; the tool-profile tests pass
+      // their own `tools` value explicitly.
+      tools: 'full',
       ...pluginConfig,
     }
     // Name-based mounts (vault_switch tests) must not pin a temp-dir path.
@@ -3298,4 +3301,30 @@ test('high-sensitivity clipboard read is gated like vault_get (ask and auto)', a
     const okNormal = await run('auto')('vault_clipboard', plain.id)
     assert.equal(okNormal.isError, false)
   }, { accessMode: 'ask' })
+})
+
+test('tool profiles gate registration: basic by default, switchable at runtime', async () => {
+  await withContext(async ctx => {
+    // basic (explicit): core CRUD works, bulk/io tools are simply not registered
+    const read = await ctx.tools.execute({ signal, callId: ToolCallId(`vault-tp-${++callCounter}`), name: 'vault_search', arguments: { query: 'x' } })
+    assert.equal(read.isError, false)
+    const blocked = await ctx.tools.execute({ signal, callId: ToolCallId(`vault-tp-${++callCounter}`), name: 'vault_export_csv', arguments: { path: '/tmp/x.csv', fields: [] } })
+    assert.equal(blocked.isError, true, 'basic profile must not register vault_export_csv')
+    assert.match((blocked.error?.message ?? ''), /not registered|unknown/i)
+
+    // switching to full registers the rest immediately (no restart)
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const full = await gateway.setToolProfile('full')
+    assert.ok(full.tools > 100, `full profile registers many tools (got ${full.tools})`)
+    const ioNow = await ctx.tools.execute({ signal, callId: ToolCallId(`vault-tp-${++callCounter}`), name: 'vault_export_csv', arguments: { path: join(tmpdir(), `dsh-vault-tp-${Date.now()}.csv`), fields: [] } })
+    assert.equal(ioNow.isError, false, 'full profile registers vault_export_csv')
+
+    // custom: only the picked groups (io on, sessions off)
+    const custom = await gateway.setToolProfile('custom', ['io'])
+    assert.ok(custom.tools < full.tools, 'custom profile registers fewer tools than full')
+    const ioKeep = await ctx.tools.execute({ signal, callId: ToolCallId(`vault-tp-${++callCounter}`), name: 'vault_export_csv', arguments: { path: join(tmpdir(), `dsh-vault-tp2-${Date.now()}.csv`), fields: [] } })
+    assert.equal(ioKeep.isError, false)
+    const sessOff = await ctx.tools.execute({ signal, callId: ToolCallId(`vault-tp-${++callCounter}`), name: 'vault_session_list', arguments: {} })
+    assert.equal(sessOff.isError, true, 'sessions group is off in this custom profile')
+  }, { tools: 'basic' })
 })

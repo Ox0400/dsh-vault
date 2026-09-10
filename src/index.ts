@@ -80,6 +80,9 @@ export interface Config {
   /** Number of encrypted backups to keep; vault_backup prunes older copies.
    * Default 10. */
   backupRetention?: number
+  /** Which model tools to register (default: basic). Persisted per vault when
+   * changed from the Settings UI. */
+  tools?: ToolProfile
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -94,6 +97,12 @@ export const Config: Schema<Config> = Schema.object({
   ]),
   autoCapture: Schema.boolean(),
   lockTimeoutSeconds: Schema.number(),
+  tools: Schema.union([
+    Schema.const('basic'),
+    Schema.const('standard'),
+    Schema.const('full'),
+    Schema.const('custom'),
+  ]).description('Which model tools to register: basic (default) = everyday CRUD/search/generate/TOTP; standard = adds vault management (favorites, tags, expiry, health, duplicates, trash, attachments, backups); full = everything incl. bulk import/export, sessions and vault-file operations.'),
   exportPasswordEnv: Schema.string(),
   backupRetention: Schema.number().description('How many encrypted backups to keep (default 10; vault_backup prunes older copies).'),
 })
@@ -132,6 +141,79 @@ function defaultFirefoxProfileDir(): string {
   } catch (error) {
     throw new Error(`Firefox profile not found: ${(error as Error).message}`)
   }
+}
+
+/** Tool groups: the model's tool catalog is assembled from these.
+ *  core       — everyday vault use (CRUD, search, compare, rename, trash,
+ *               lock/unlock, TOTP, password generation/strength, password
+ *               history). Registered by default ("basic").
+ *  management — vault management: listings/find/has, favourites, tags, icons,
+ *               expiry & rotation, health/duplicates/merge, attachments,
+ *               clipboard reads, templates, env masks.
+ *  io         — bulk import/export (every *import_* / *export_* tool,
+ *               bulk export/delete, KeePass migration).
+ *  sessions   — browser login sessions (open/collect/list/export/import/prune).
+ *  files      — backups and vault-file operations (backup, restore, switch,
+ *               rename/delete vault, rekey, recovery codes, system search,
+ *               search history).
+ * Anything not listed defaults to `management`. */
+export type ToolGroup = 'core' | 'management' | 'io' | 'sessions' | 'files'
+export type ToolProfile = 'basic' | 'standard' | 'full' | 'custom'
+
+/** Extra groups a "custom" profile may switch on (core is always on). */
+export const OPTIONAL_TOOL_GROUPS: ToolGroup[] = ['management', 'io', 'sessions', 'files']
+
+const CORE_TOOLS = new Set([
+  // Everyday use: find, read, create, edit, remove, code generation, copy,
+  // password quality and autofill. Everything else is management/io/sessions/
+  // files and can be switched on on demand.
+  'vault_list', 'vault_search', 'vault_get', 'vault_add', 'vault_update', 'vault_delete',
+  'vault_fill', 'vault_clipboard', 'vault_totp', 'vault_generate_password', 'vault_strength',
+])
+
+const IO_TOOLS = new Set([
+  'vault_import', 'vault_import_browser', 'vault_import_chrome', 'vault_import_csv', 'vault_import_enpass',
+  'vault_import_firefox', 'vault_import_kdbx', 'vault_import_keychain', 'vault_import_keepass_xml',
+  'vault_import_manager_csv', 'vault_import_1password', 'vault_import_1pif', 'vault_import_bitwarden',
+  'vault_import_bitwarden_encrypted', 'vault_import_wallet', 'vault_import_keepass_xml',
+  'vault_export', 'vault_export_1password', 'vault_export_bitwarden', 'vault_export_browser',
+  'vault_export_csv', 'vault_export_env', 'vault_export_keepass_xml', 'vault_export_totp',
+  'vault_export_wallet', 'vault_bulk_export', 'vault_bulk_delete', 'vault_migrate_keepass',
+])
+
+const SESSION_TOOLS = new Set([
+  'vault_session_open', 'vault_session_collect', 'vault_session_close', 'vault_session_list',
+  'vault_session_export', 'vault_session_import', 'vault_session_import_file', 'vault_session_prune',
+])
+
+const FILE_TOOLS = new Set([
+  'vault_backup', 'vault_backups', 'vault_backup_now', 'vault_backup_status', 'vault_restore_backup',
+  'vault_switch', 'vault_vault_rename', 'vault_vault_delete', 'vault_rekey',
+  'vault_recovery_code', 'vault_verify_recovery', 'vault_recovery_status',
+  'vault_search_system', 'vault_search_history',
+])
+
+/** Which group a tool belongs to (unknown names → management). */
+export function toolGroup(name: string): ToolGroup {
+  if (CORE_TOOLS.has(name)) return 'core'
+  if (IO_TOOLS.has(name)) return 'io'
+  if (SESSION_TOOLS.has(name)) return 'sessions'
+  if (FILE_TOOLS.has(name)) return 'files'
+  return 'management'
+}
+
+/** Resolve the enabled groups for a profile (custom = core + picked groups). */
+export function enabledGroups(profile: ToolProfile, customGroups: readonly string[] | undefined): Set<ToolGroup> {
+  if (profile === 'full') return new Set<ToolGroup>(['core', 'management', 'io', 'sessions', 'files'])
+  if (profile === 'standard') return new Set<ToolGroup>(['core', 'management'])
+  if (profile === 'custom') {
+    const picked = new Set<ToolGroup>(['core'])
+    for (const g of customGroups ?? []) {
+      if (g === 'management' || g === 'io' || g === 'sessions' || g === 'files') picked.add(g)
+    }
+    return picked
+  }
+  return new Set<ToolGroup>(['core'])
 }
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -194,6 +276,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     'vault_vault_delete',
     'vault_vault_rename',
   ])
+  /** Every tool definition declared below, registered selectively according to
+   * the active tool profile so the model's tool catalog stays small. */
+  const allTools: Array<Parameters<typeof ctx.tools.register>[0]> = []
+  const registerTool = (def: Parameters<typeof ctx.tools.register>[0]): void => { allTools.push(def) }
+  let toolDisposers: Array<() => void> = []
+  /** Resolve the active profile (persisted policy wins over config). */
+  const activeProfile = (): ToolProfile => policy.toolProfile ?? config.tools ?? 'basic'
+  /** (Re)register exactly the tools allowed by the current profile. */
+  function applyToolProfile(): void {
+    for (const dispose of toolDisposers) { try { dispose() } catch { /* already gone */ } }
+    toolDisposers = []
+    const groups = enabledGroups(activeProfile(), policy.toolGroups)
+    for (const def of allTools) {
+      if (groups.has(toolGroup(def.name))) toolDisposers.push(ctx.tools.register(def))
+    }
+  }
+
+
   /** Tools that read back a stored secret for a single entry; their id-scoped
    * high-sensitivity reads are always gated (ask + auto), like vault_get. */
   const SENSITIVE_READ_TOOLS = new Set(['vault_get', 'vault_clipboard', 'vault_totp', 'vault_totp_uri', 'vault_password_history', 'vault_attachment'])
@@ -201,6 +301,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   /** Shared access policy; resolved once, mutated by the UI via setAccessMode. */
   const policy = await sharedAccessPolicy(config)
+
 
   /** Audit events: other plugins / session logging can subscribe. Payload is
    * non-secret (tool name + entry id/title only). */
@@ -302,6 +403,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         'Use vault_search to find entries by title/username/host and vault_get (by id) to read full credentials when the task needs them.',
         'Do not repeat secrets in the conversation when a credential was obtained via vault_get.',
       ]
+      const profile = policy.toolProfile ?? config.tools ?? 'basic'
+      if (profile !== 'full') {
+        lines.push(`Tool profile: ${profile.toUpperCase()} — only a subset of vault tools is registered. `
+          + 'If a task needs import/export, browser sessions, backups or vault-file operations, ask the user to switch the profile to "full" in Settings → Credentials → Permissions.')
+      }
       if (policy.autoCapture) {
         lines.push(
           'Auto-capture is ON: when the user shares an API key, token, password, or other credential in conversation',
@@ -318,7 +424,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   })
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_add',
     description: 'Add a new credential entry to the encrypted vault. '
       + 'Stores login credentials (username/email/phone/password), SSH connections (host/port/privateKey), '
@@ -419,7 +525,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_get',
     description: 'Read one credential entry from the vault by its id, including the stored password and TOTP secret. '
       + 'Secrets are returned only to this tool call; prefer vault_search for non-secret summaries.',
@@ -474,7 +580,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_search',
     description: 'Search the encrypted vault across titles, categories, usernames, emails, phone numbers, hosts, ports, '
       + 'URLs, notes, tags, and custom field values. '
@@ -564,7 +670,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_update',
     description: 'Update fields of an existing vault entry by id. Only the provided fields change; secrets and other '
       + 'fields are preserved. Pass an empty-string value to clear a field. Returns the updated entry summary.',
@@ -643,7 +749,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_delete',
     description: 'Delete a vault entry by id. Returns whether the entry existed. This cannot be undone.',
     parameters: {
@@ -669,7 +775,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_totp',
     description: 'Generate the current time-based one-time password (TOTP) for a secret stored in the vault or for a '
       + 'bare Base32 secret / otpauth:// URI passed directly. Useful for two-factor authentication codes. '
@@ -739,7 +845,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_generate_password',
     description: 'Generate a cryptographically strong random password (configurable length/classes) or a '
       + 'memorable passphrase (passphrase: true, EFF-style word list). Use when a user needs a new password; '
@@ -808,7 +914,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_lock / vault_unlock: explicit lock & unlock ──────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_lock',
     description: 'Lock the vault immediately: wipe the derived key from memory so every '
       + 'subsequent read/write requires vault_unlock. Use when leaving the machine.',
@@ -822,7 +928,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_unlock',
     description: 'Unlock the vault with the master password (the deployment owns the password; '
       + 'the model never supplies it). Needed after an explicit vault_lock or an auto-lock idle timeout.',
@@ -843,7 +949,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_totp_uri: build an otpauth:// provisioning URI ────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_totp_uri',
     description: 'Build an otpauth://totp/ provisioning URI for a stored otpSecret (or a bare secret), '
       + 'so the user can scan it into an authenticator app. Returns the URI string.',
@@ -880,7 +986,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_clipboard: return a secret for copy with a caution notice ─────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_clipboard',
     description: 'Fetch one entry secret field for direct copy (username/password/apiKey/...). '
       + 'Returns the value plus a caution note: prefer handing the value to a clipboard/paste action '
@@ -907,7 +1013,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_notes: append/replace an entry's notes ────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_notes',
     description: 'Append to or replace the free-form notes of an entry (a convenient shortcut for '
       + 'vault_update). Returns the updated entry summary.',
@@ -932,7 +1038,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_attach: attach a file to an entry ────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_attach',
     description: 'Attach a file to an entry (1Password/KeePass-style). The file is read from disk '
       + 'and stored base64 inside the encrypted entry, so attachments are encrypted at rest. Useful '
@@ -965,7 +1071,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_attachments: list an entry's attachments ─────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_attachments',
     description: 'List the files attached to an entry (names and sizes only — never the content). '
       + 'Use vault_attachment with the entry id and a name to read the content, or vault_detach to '
@@ -983,7 +1089,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_attachment: read an attachment's content ─────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_attachment',
     description: 'Read the content of one attached file: returns the base64 data, decoded bytes '
       + 'count, and MIME type. Prefer decoding the base64 to the target format (e.g. write to a '
@@ -1008,7 +1114,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_detach: remove an attachment ─────────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_detach',
     description: 'Remove one attached file from an entry.',
     parameters: {
@@ -1030,7 +1136,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_recovery_code: generate a one-time recovery code ────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_recovery_code',
     description: 'Generate a one-time vault recovery code (1Password/Bitwarden recovery-code style): '
       + 'a high-entropy code shown ONCE and printed to the caller — store it somewhere safe (e.g. a '
@@ -1061,7 +1167,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_verify_recovery: prove possession of the recovery code ──────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_verify_recovery',
     description: 'Verify a recovery code against the stored hash (proves you hold the code issued by '
       + 'vault_recovery_code — e.g. as a second factor when the master password is unavailable). '
@@ -1077,7 +1183,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_recovery_status: whether a recovery code is set ─────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_recovery_status',
     description: 'Report whether a one-time recovery code has been issued (vault_recovery_code) and '
       + 'when. Never returns the code itself.',
@@ -1093,7 +1199,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_expiry: set/update an entry's expiry ──────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_expiry',
     description: 'Set or update the expiry (epoch millis) of an entry; pass expiresAt as 0 to clear it. '
       + 'vault_rotation reports entries whose expiry is near or past.',
@@ -1121,7 +1227,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_changes: recent activity (created/updated/deleted) ────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_changes',
     description: 'List vault activity within a time window (default 24h): entries created, updated, or '
       + 'soft-deleted, newest first. No secrets — a lightweight audit view.',
@@ -1150,7 +1256,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_find: fuzzy, normalization-agnostic lookup ─────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_find',
     description: 'Fuzzy-find entries: matches are case-insensitive and ignore punctuation/whitespace '
       + '(e.g. "db.internal", "dbinternal", "DB Internal" all match host "db.internal"). Returns '
@@ -1181,7 +1287,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_verify: integrity/completeness check of one entry ─────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_verify',
     description: 'Verify one entry (or every entry with all: true) for completeness and plausibility: '
       + 'required fields per kind, valid port/expiry, and that required secrets are present. No secrets in the report.',
@@ -1279,7 +1385,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_mask: redact likely secrets in free text ──────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_mask',
     description: 'Redact likely credentials in arbitrary text (API keys, tokens, passwords, private keys) '
       + 'so it can be logged or quoted safely. Returns the masked text and a count of redactions.',
@@ -1298,7 +1404,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_history: in-process mutation audit trail ──────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_history',
     description: 'Show recent activity on the vault within this process, newest first: mutations '
       + '(add/update/delete/restore/purge/merge/rollback) plus reads (read, totp), searches and vault '
@@ -1319,7 +1425,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_recent: most recently touched entries ─────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_recent',
     description: 'List the most recently created or updated entries (newest first), as secret-free '
       + 'summaries. Useful to pick up where you left off or surface what changed.',
@@ -1345,7 +1451,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_stats: vault overview statistics ───────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_stats',
     description: 'Vault overview: total entries, counts by kind, entries with TOTP, high-sensitivity '
       + 'entries, and expired credentials. No secrets returned. Useful for a quick health glance.',
@@ -1360,7 +1466,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_pin / vault_unpin: favorites ──────────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_pin',
     description: 'Pin (favorite) an entry so it ranks first in search and list. Pinned entries show '
       + 'a star in the Settings UI.',
@@ -1374,7 +1480,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_unpin',
     description: 'Unpin an entry (remove its favorite flag).',
     parameters: { id: { type: 'string', required: true, description: 'Entry id to unpin.' } },
@@ -1388,7 +1494,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_report: human-readable inventory (no secrets) ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_report',
     description: 'Generate a human-readable inventory of the vault: title, kind, username/email, host, '
       + 'expiry and pin status per entry — NEVER the secret values. Useful for a printable overview.',
@@ -1436,7 +1542,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_tags: tag inventory with counts ────────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_tags',
     description: 'List every tag used across entries with the number of entries per tag. No secrets.',
     parameters: {},
@@ -1453,7 +1559,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_apply_tags: bulk tag management across matching entries ──────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_apply_tags',
     description: 'Bulk add, remove, or replace tags on every entry matching a search query. '
       + 'Give at least one of add/remove/replace. Matches titles, usernames, emails, hosts, urls, notes, '
@@ -1510,7 +1616,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_bulk_delete: soft-delete entries matching a filter ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_bulk_delete',
     description: 'Soft-delete (move to trash) the entries matching a filter: a search query, a kind, '
       + 'a tag, or an explicit list of ids. Pass confirm: true to actually delete — otherwise it only '
@@ -1562,7 +1668,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_generate_username: random username/email suggestion ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_generate_username',
     description: 'Generate a random username or anonymous email suggestion (e.g. "orca_4921" or '
       + '"plover7391@example.com") for accounts that let you pick a name. Uses crypto randomness.',
@@ -1583,7 +1689,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_rotate_password: generate + store a new password ──────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_rotate_password',
     description: 'Generate a new strong password, store it on the entry, and return the new value '
       + 'for the caller to hand to the target service. A one-call convenience for vault_generate_password + vault_update.',
@@ -1605,7 +1711,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_password_history: list an entry's previous passwords ────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_password_history',
     description: 'List the password history of an entry (1Password/Bitwarden-style): previous '
       + 'passwords with the time each was superseded, newest first, capped at 10. The current '
@@ -1623,7 +1729,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_password_rollback: restore a previous password ──────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_password_rollback',
     description: 'Roll an entry\'s password back to a stored history entry (see vault_password_history '
       + 'for the `at` values). The current password is pushed onto the history first, so the rollback '
@@ -1646,7 +1752,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_duplicates: exact-title+kind duplicates ───────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_duplicates',
     description: 'Find duplicate entries: same title+kind (mode: title), same username+secret (mode: '
       + 'content), or both. Returns groups of summaries (no secrets) so the caller can merge or delete them.',
@@ -1688,7 +1794,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_totp: list all TOTP entries with their labels ─────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_totp',
     description: 'List every entry that has a TOTP secret, with its title and issuer label. '
       + 'Intended for migrating authenticator apps; never returns the otpSecret itself.',
@@ -1709,7 +1815,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_backup_status: days since last backup ─────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_backup_status',
     description: 'Report how many days have passed since the last backup file was written '
       + '(1Password-style backup reminder; new-style `<vault>-backups-<date>.json` and legacy '
@@ -1737,7 +1843,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_bulk_export: JSON dump of all entries (non-encrypted) ─────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_bulk_export',
     description: 'Export ALL entries (including secrets) as a JSON file for audit or migration. '
       + 'WARNING: the output file is PLAINTEXT — protect it like a password. For encrypted transfer '
@@ -1755,7 +1861,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_quick_add: minimal-entry fast add ─────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_quick_add',
     description: 'Add an entry with minimal arguments (title + one secret field). A convenience for '
       + 'capturing a credential fast without the full vault_add field list.',
@@ -1792,7 +1898,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_merge: merge duplicate entries ─────────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_merge',
     description: 'Merge one entry INTO another (Bitwarden-style duplicate cleanup): non-empty fields of '
       + 'the source fill gaps in the target, then the source is permanently removed (unless keepSource). '
@@ -1812,7 +1918,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_copy: copy an entry into another named vault ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_copy',
     description: 'Copy an entry (including secrets) into another named vault (same master password). '
       + 'Useful for 1Password-style vault organization. Returns copied or a reason when skipped.',
@@ -1877,7 +1983,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_touch: mark an entry as recently used ─────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_touch',
     description: 'Mark an entry as recently used (update its updatedAt without changing content). '
       + 'Affects vault_recent ordering and the rotation clock.',
@@ -1891,7 +1997,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_browser: Chrome/Firefox-compatible CSV export ─────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_browser',
     description: 'Export login entries in the browser password-manager CSV format '
       + '(name,url,username,password) for importing into Chrome/Firefox/Edge. Writes the file and '
@@ -1914,7 +2020,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_note_secret: store a secret quickly with an auto title ───────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_note_secret',
     description: 'Store a single secret under a generated title (e.g. "secret-2026-08-14-1423") when '
       + 'you just need it saved without choosing a title. Returns the entry id.',
@@ -1945,7 +2051,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_search_advanced: multi-criteria filter ────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_search_advanced',
     description: 'Search with multiple optional criteria: title substring, username/email substring, '
       + 'kind, tag, created-after/before (epoch millis), and favorite-only. All provided criteria must '
@@ -1977,7 +2083,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_count: lightweight entry count ────────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_count',
     description: 'Return the number of active entries (optionally filtered by kind and/or tag). Lightweight '
       + 'alternative to vault_stats when you only need a count.',
@@ -2002,7 +2108,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_set_icon: set icon/color on an entry ──────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_set_icon',
     description: 'Set the UI icon (emoji) and/or accent color on an entry. Quick visual customization.',
     parameters: {
@@ -2024,7 +2130,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_describe: human-friendly summary of an entry ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_describe',
     description: 'Describe an entry in plain language (kind, identity, host/url, tags, expiry) '
       + 'without revealing secrets. Useful for a quick "what is this entry?" answer.',
@@ -2049,7 +2155,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_migrate_keepass: KeePass-compatible CSV export ────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_migrate_keepass',
     description: 'Export entries in KeePass 2.x import CSV format '
       + '(Group,Title,Username,Password,URL,Notes) for migrating into KeePass. Writes the file.',
@@ -2071,7 +2177,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_last_modified: most recently updated entries ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_last_modified',
     description: 'List entries most recently modified (updatedAt), newest first. Similar to vault_recent '
       + 'but includes updates (not just creation). No secrets.',
@@ -2086,7 +2192,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_keepass_xml: KeePassXC-compatible XML export ──────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_keepass_xml',
     description: 'Export entries as a KeePassXC-compatible XML document (KeePass 2.x schema). '
       + 'Writes the file and returns its path.',
@@ -2144,7 +2250,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_has: check whether a credential exists ────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_has',
     description: 'Quickly check whether the vault contains a credential matching a title/username/host '
       + '(substring, or exact title when exact is set). Returns found + which entry matched. Useful '
@@ -2171,7 +2277,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_browser: import browser-exported CSV ───────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_browser',
     description: 'Import a browser password-manager CSV (name,url,username,password — Chrome/Firefox/'
       + 'Edge export format). Rows without a name are skipped; returns added/skipped counts.',
@@ -2251,7 +2357,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_autofill_check: does a target have usable credentials? ────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_autofill_check',
     description: 'Check whether the vault has a credential usable for a URL/host: returns the best '
       + 'matching entry (username/email only, never the secret) or a not-found verdict. Use before '
@@ -2282,7 +2388,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_match_url: find login entries matching a URL ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_match_url',
     description: 'Find the login entries whose stored URL/host best match a target URL (Bitwarden/'
       + '1Password-style URL matching): exact host, subdomain, parent domain, and path-prefix are '
@@ -2313,7 +2419,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_backup_now: explicit alias for an immediate backup ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_backup_now',
     description: 'Create an immediate timestamped backup of the vault file (alias of vault_backup). '
       + 'The file is named `<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` so the owning vault and date '
@@ -2333,7 +2439,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_restore_backup: restore the vault from an encrypted backup ──────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_restore_backup',
     description: 'Restore entries from one of the vault encrypted backup files (new-style '
       + '`<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` or legacy `vault-backup-<epoch>.json`). By '
@@ -2365,7 +2471,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_search_history: search including deleted entries ─────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_search_history',
     description: 'Search including soft-deleted (trashed) entries, marked with their deleted state. '
       + 'Returns summaries plus a deleted flag — useful to find something you deleted.',
@@ -2389,7 +2495,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_undelete_all: restore every trashed entry ─────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_undelete_all',
     description: 'Restore ALL soft-deleted (trashed) entries back to the active set. Returns how many '
       + 'were restored.',
@@ -2408,7 +2514,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_wallet: pass (standard Unix) compatible export ────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_wallet',
     description: 'Export entries as a directory tree of files compatible with pass (the standard Unix '
       + 'password manager): one file per entry containing the password, with metadata in comments. '
@@ -2438,7 +2544,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_get_many: batch read with a fields whitelist ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_get_many',
     description: 'Read multiple entries by id, returning only the requested fields for each. '
       + 'More efficient than repeated vault_get when you need several entries.',
@@ -2473,7 +2579,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_wallet: import from a pass directory ──────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_wallet',
     description: 'Import entries from a pass directory tree: each .gpg file (or plaintext file) becomes '
       + 'an entry titled by its filename; the first line is the password, remaining lines are parsed as '
@@ -2528,7 +2634,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_compare: field-by-field diff of two entries ───────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_compare',
     description: 'Compare two entries field by field and report which fields differ, are only in one, '
       + 'or are equal. Secret VALUES are not shown — only the field names and a difference summary.',
@@ -2565,7 +2671,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_rename: rename an entry quickly ───────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_rename',
     description: 'Rename an entry (set a new title). Convenience shortcut for vault_update.',
     parameters: { id: { type: 'string', required: true, description: 'Entry id.' }, title: { type: 'string', required: true, description: 'New title.' } },
@@ -2580,7 +2686,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_rotation: expiry / rotation report ───────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_rotation',
     description: 'Report credentials that are expired, due for rotation (rotationDays elapsed), '
       + 'or expiring soon. Returns summaries with a due state — never secrets.',
@@ -2600,7 +2706,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_integrity: verify the on-disk vault document ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_integrity',
     description: 'Verify the on-disk vault file: decrypts the password-verification envelope with the '
       + 'live key and compares the stored entry count against the in-memory store. Catches a corrupted '
@@ -2614,7 +2720,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_breach_check: Watchtower-style breach scan ──────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_breach_check',
     description: 'Watchtower-style breach scan: check every stored password against the Have I Been '
       + 'Pwned Pwned Passwords database using the k-anonymity protocol (only the first 5 hex chars of '
@@ -2661,7 +2767,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_health: weak / reused credential scan ────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_health',
     description: 'Scan the vault for weak passwords (shorter than 12 chars) and credentials reused '
       + 'across entries. Returns non-secret findings (entry summaries grouped by the reused value).',
@@ -2677,7 +2783,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_watchtower: per-entry risk analysis (1Password Watchtower-style) ─
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_watchtower',
     description: 'Watchtower-style per-entry risk analysis (inspired by 1Password Watchtower / '
       + 'Bitwarden reports): every active entry is rated with concrete risk flags — short or weak '
@@ -2702,7 +2808,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_restore / vault_purge: trash management ──────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_restore',
     description: 'Restore a soft-deleted entry from the vault trash back into the active set.',
     parameters: { id: { type: 'string', required: true, description: 'The trashed entry id.' } },
@@ -2715,7 +2821,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_restore_recent: undo the last delete ─────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_restore_recent',
     description: 'Undo the most recent delete: restore the trashed entry that was deleted last. '
       + 'Returns the restored summary or restored=false when the trash is empty.',
@@ -2729,7 +2835,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_purge',
     description: 'Permanently delete an entry (active or trashed). Cannot be undone — prefer vault_delete '
       + '(soft delete) unless the entry must be removed from disk.',
@@ -2750,7 +2856,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export / vault_import: portable encrypted transfer ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export',
     description: 'Export the entire vault (including trash) as a single encrypted document under a '
       + 'separate export password (from the exportPasswordEnv config). Use for backup or migration; '
@@ -2785,7 +2891,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import',
     description: 'Import a previously exported vault document (see vault_export), merging entries by '
       + 'id (gaps filled) or replacing them with overwrite. dryRun previews without writing. Pass the '
@@ -2853,7 +2959,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_fill: find the credential that fits a target ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_fill',
     description: 'Find the vault entry that fits a target (host/URL/username/title) and return the '
       + 'ready-to-use credentials (secrets included, as the caller needs them for the actual login). '
@@ -2906,7 +3012,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_env: environment-variable export ─────────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_env',
     description: 'Render entries flagged for environment export (tags contain "env") as KEY=VALUE lines '
       + 'suitable for .env or export statements. Keys derive from the title + field name; values are the '
@@ -2931,7 +3037,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_env: write env-flagged entries to a .env file ──────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_env',
     description: 'Write env-flagged entries (tags contain "env") to a .env file at the given path '
       + 'as KEY=VALUE lines (values shell-quoted). Returns the path and how many lines were written.',
@@ -2951,7 +3057,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_templates: field templates by kind ───────────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_templates',
     description: 'Return the recommended fields for a credential kind, so vault_add can be called with '
       + 'the right field names (e.g. kind ssh → host/port/username/password/privateKey). Also supports '
@@ -3007,7 +3113,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_strength: zero-dependency password strength estimation ────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_strength',
     description: 'Estimate the strength of a password with a zero-dependency heuristic '
       + '(length, character-class diversity, common-pattern penalties). Returns a score 0–100 '
@@ -3024,7 +3130,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_csv: export entries to a CSV file ──────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_csv',
     description: 'Export vault entries to a CSV file (the same shape vault_import_csv accepts), '
       + 'optionally filtered by kind. Writes to <vault dir>/vault-export-<ts>.csv and returns the path.',
@@ -3082,7 +3188,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_search_system: search Chrome / Keychain without exposing secrets ─
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_search_system',
     description: 'Search system credential stores (Chrome Login Data and the macOS keychain) for a '
       + 'keyword, returning matching sites/services and usernames WITHOUT any passwords. Use this to '
@@ -3129,7 +3235,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_firefox: import passwords from a Firefox profile ──────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_firefox',
     description: 'Import passwords from a Firefox profile (logins.json + key4.db) using the NSS '
       + 'decryption scheme from the open-source firepwd tool. Both legacy 3DES and modern PBES2/AES '
@@ -3166,7 +3272,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_kdbx: import from a KeePass KDBX4 database ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_kdbx',
     description: 'Import entries from a KeePass KDBX database: KDBX 3.1 and 4.x, AES-KDF or Argon2 KDF, '
       + 'AES-256-CBC or ChaCha20 payload cipher, ChaCha20/Salsa20 protected fields, using the open-source '
@@ -3221,7 +3327,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_1password: import a 1Password 1PUX export ────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_1password',
     description: 'Import credentials from a 1Password 1PUX export file (an unencrypted ZIP archive '
       + 'containing export.data). Parses accounts → vaults → items → fields per the official 1PUX '
@@ -3265,7 +3371,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_manager_csv: import a password-manager CSV ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_manager_csv',
     description: 'Import credentials from a password-manager CSV export. The header row is matched '
       + 'against known column names so Bitwarden, 1Password (CSV), Dashlane, NordPass, Keeper, LastPass '
@@ -3313,7 +3419,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_1pif: import a 1Password 1PIF export ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_1pif',
     description: 'Import credentials from a legacy 1Password 1PIF export (1Password 4–7 text '
       + 'format): JSON records separated by "***Top of File***" markers. Login/WebForm items are '
@@ -3359,7 +3465,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_keepass_xml: import a KeePass 2.x XML export ─────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_keepass_xml',
     description: 'Import credentials from a KeePass 2.x XML export (File > Export > XML). Values are '
       + 'imported as written: protected values appear as plaintext when "Export passwords" was checked, '
@@ -3401,7 +3507,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_enpass: import an Enpass JSON export ─────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_enpass',
     description: 'Import credentials from an Enpass JSON export (File > Export > .json). Parses the '
       + 'open-source enpass2keepassxc schema: items[] with typed fields (username/password/url/totp), '
@@ -3447,7 +3553,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_chrome: import passwords from Chrome's Login Data ─────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_chrome',
     description: 'Import passwords from the Chrome (or Chromium/Brave) password manager. Reads the '
       + 'Login Data SQLite database, decrypts v10/v11 entries using the macOS keychain "Chrome Safe '
@@ -3487,7 +3593,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_keychain: import internet/generic passwords from the macOS keychain ─
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_keychain',
     description: 'Import passwords from the macOS login keychain via the security CLI. '
       + 'By default only internet-password entries (class "inet" — the ones that actually back website '
@@ -3548,7 +3654,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_open: open a headed browser login session ──────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_open',
     description: 'Open a real browser window at the given URL so the user can log in manually '
       + '(password, 2FA, captcha, …). The session stays open until vault_session_collect or '
@@ -3571,7 +3677,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_collect: save a browser session's cookies into the vault ─
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_collect',
     description: 'Collect the cookies of a browser login session (opened with vault_session_open) and '
       + 'save them into the vault as a "cookie" entry under the given title. By default only cookies '
@@ -3611,7 +3717,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_close: close an open browser login session ──────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_close',
     description: 'Close a browser login session opened with vault_session_open (closes the window). '
       + 'Collected cookies are already stored in the vault and are unaffected. Safe to call more than once.',
@@ -3627,7 +3733,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_list: list saved cookie entries ─────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_list',
     description: 'List saved browser login sessions (entries of kind "cookie") with their cookie counts '
       + 'and how many are expired — no cookie values are returned. Use vault_session_export to get a '
@@ -3649,7 +3755,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_export: export a saved session as Cookie header / Netscape jar ─
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_export',
     description: 'Export a saved browser login session (kind "cookie") for automation: as a `Cookie` '
       + 'request-header value (format "header"), a Netscape cookie-jar file (format "netscape", '
@@ -3686,7 +3792,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_import: save cookies pasted as JSON/header text ─────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_import',
     description: 'Save browser session cookies directly from pasted text: a JSON array of '
       + '{name, value, domain, path?, expires?, httpOnly?, secure?, sameSite?} objects (the shape '
@@ -3732,7 +3838,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_import_file: import a Netscape cookie-jar file ──────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_import_file',
     description: 'Save session cookies from a Netscape cookie-jar file (the format curl -b / wget '
       + 'and browser extensions export; the same format vault_session_export writes). Parses the '
@@ -3770,7 +3876,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_session_prune: remove expired cookies from a saved session ──────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_session_prune',
     description: 'Remove expired cookies from a saved login session: cookies whose expiry time has '
       + 'passed are deleted (session cookies with expires <= 0 are always kept). Use preview: true to '
@@ -3803,7 +3909,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_bitwarden: import a Bitwarden JSON export ─────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_bitwarden',
     description: 'Import a Bitwarden (or Vaultwarden) JSON export: maps each item into a vault entry '
       + '(title, username/password, totp, notes, url, favorite, custom fields). Same-title entries are '
@@ -3871,7 +3977,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_bitwarden_encrypted: decrypt + import ────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_bitwarden_encrypted',
     description: 'Import a Bitwarden password-protected JSON export (File > Export > "Encrypted .json"). '
       + 'Derives the enc/mac keys from the passphrase per the official Bitwarden export scheme '
@@ -3919,7 +4025,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_bitwarden: Bitwarden-compatible JSON export ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_bitwarden',
     description: 'Export entries in the Bitwarden JSON format (encrypted:false) so they can be '
       + 'imported into Bitwarden, Vaultwarden, or other tools that accept that format. Contains '
@@ -3938,7 +4044,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_export_1password: export as a 1Password 1PUX archive ───────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_export_1password',
     description: 'Export entries in the 1Password 1PUX format (a ZIP archive with export.data) so '
       + 'they can be imported into 1Password, 1Password-compatible tools, or re-imported here with '
@@ -3958,7 +4064,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_backups: list available encrypted backups ────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_backups',
     description: 'List available encrypted `vault-backup-*.json` files (newest first) with their '
       + 'absolute paths and timestamps. Use the returned path with vault_restore_backup to restore.',
@@ -3982,7 +4088,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_backup: one-shot backup with a timestamped filename ───────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_backup',
     description: 'Create a timestamped backup of the vault file (a copy of the on-disk encrypted '
       + 'document, not a plaintext export). The file is named `<vault>-backups-YYYY-MM-DD_HH-MM-SS.json` '
@@ -4033,7 +4139,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_import_csv: bulk import from a CSV file ───────────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_import_csv',
     description: 'Bulk-import credentials from a CSV file. Expected columns (header row): '
       + 'title,username,password,url,email,phone,host,port,apiKey,secret,notes,tags,kind. '
@@ -4136,7 +4242,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_switch / vault_list: multi-vault navigation ───────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_list',
     description: 'List available vaults in the vault directory (one .json file per vault, excluding '
       + 'access/meta/export files). Marks the currently active one.',
@@ -4172,7 +4278,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_switch',
     description: 'Switch the active vault for this session. Future vault_* calls operate on the named '
       + 'vault (created on first use). Returns the newly active vault name.',
@@ -4199,7 +4305,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_vault_rename: rename a named vault (file) ───────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_vault_rename',
     description: 'Rename a named vault: the vault file (and its access policy file, if any) is '
       + 'moved to the new name. The active session switches to the new name. Default vault "default" '
@@ -4233,7 +4339,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_vault_delete: delete a named vault (file) ───────────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_vault_delete',
     description: 'Permanently delete a named vault and its access-policy file. The default vault '
       + 'cannot be deleted. Consider vault_backup first — deletion is irreversible. If the deleted '
@@ -4263,7 +4369,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }))
 
   // ── vault_rekey: upgrade the scrypt KDF parameters in place ────────────────
-  ctx.tools.register(defineTool({
+  registerTool(defineTool({
     name: 'vault_rekey',
     description: 'Upgrade the vault encryption to fresh scrypt KDF parameters (higher cost) and '
       + 're-encrypt every entry in place. Safe to run periodically or after raising the vault '
@@ -4291,6 +4397,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // model-tool layer entirely. Secrets are returned because the UI is the
   // user's own browser on their own machine; the RPC authority is
   // trusted-host/loopback (see packages/client/connection).
+  /** Register the profile's tools now that every definition is collected, and
+   * hand the disposers to the fiber so an unload removes them. Runtime
+   * switches call the same applier through `reapplyToolProfile`. */
+  reapplyToolProfile = () => { applyToolProfile(); return toolDisposers.length }
+  applyToolProfile()
+  ctx.effect(() => () => {
+    for (const dispose of toolDisposers) { try { dispose() } catch { /* noop */ } }
+    toolDisposers = []
+  })
+
   ctx.plugin(VaultGateway, {
     masterPassword,
     ...(config.path !== undefined ? { path: config.path } : {}),
@@ -4305,6 +4421,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
  * `typertRemote` binding and `@Remote` methods at runtime (source-mode), so
  * no code generation is required for an independently distributed plugin.
  */
+/** Lets the UI switch the tool profile at runtime (set by apply(); one plugin
+ * instance per process). Returns the number of registered tools. */
+let reapplyToolProfile: (() => number) | undefined
+
+/** Set by tests to observe profile switches outside a gateway. */
+export function __getToolProfileApplier(): (() => number) | undefined {
+  return reapplyToolProfile
+}
+
 export class VaultGateway extends TypertRemoteService {
   static inject = ['tools']
 
@@ -4313,6 +4438,8 @@ export class VaultGateway extends TypertRemoteService {
   private readonly vaultName: string | undefined
   private readonly accessPolicy: AccessPolicy
   private readonly backupRetention: number
+  /** Tool profile from the plugin config (fallback when the policy has none). */
+  private readonly configTools: ToolProfile | undefined
   private activeName: string | undefined
   private readonly genHistory: Array<{ password: string; at: number }> = []
 
@@ -4324,6 +4451,7 @@ export class VaultGateway extends TypertRemoteService {
     this.activeName = config.name
     this.accessPolicy = config.accessPolicy ?? { mode: config.accessMode ?? 'ask', autoCapture: config.autoCapture ?? false }
     this.backupRetention = config.backupRetention ?? 10
+    this.configTools = config.tools
   }
 
   private async ensureStore(): Promise<VaultStore> {
@@ -4349,14 +4477,33 @@ export class VaultGateway extends TypertRemoteService {
     }
   }
 
-  /** Current access policy and capture preference, for the Settings UI. */
+  /** Current access policy, capture preference and tool profile, for the UI. */
   @Remote('config')
-  async config(): Promise<{ accessMode: AccessMode; autoCapture: boolean; autoLockSeconds: number }> {
+  async config(): Promise<{ accessMode: AccessMode; autoCapture: boolean; autoLockSeconds: number; toolProfile: ToolProfile; toolGroups: string[] }> {
     return {
       accessMode: this.accessPolicy.mode,
       autoCapture: this.accessPolicy.autoCapture,
       autoLockSeconds: this.accessPolicy.autoLockSeconds ?? 0,
+      toolProfile: this.accessPolicy.toolProfile ?? this.configTools ?? 'basic',
+      toolGroups: this.accessPolicy.toolGroups ?? [],
     }
+  }
+
+  /** Switch which model tools are registered (basic / standard / full) and
+   * persist it. Takes effect immediately — no restart. */
+  @Remote('setToolProfile')
+  async setToolProfile(profile: ToolProfile, groups?: string[]): Promise<{ toolProfile: ToolProfile; tools: number; toolGroups: string[] }> {
+    if (profile !== 'basic' && profile !== 'standard' && profile !== 'full' && profile !== 'custom') {
+      throw new Error(`vault: invalid tool profile "${String(profile)}" (expected basic, standard, full, or custom)`)
+    }
+    this.accessPolicy.toolProfile = profile
+    if (profile === 'custom') {
+      const allowed = new Set<string>(OPTIONAL_TOOL_GROUPS)
+      this.accessPolicy.toolGroups = (Array.isArray(groups) ? groups : []).filter(g => allowed.has(g))
+    }
+    await this.persistPolicy()
+    const applied = reapplyToolProfile?.() ?? 0
+    return { toolProfile: profile, tools: applied, toolGroups: this.accessPolicy.toolGroups ?? [] }
   }
 
   /** Switch the runtime access mode from the Settings UI and persist it. */
@@ -5818,6 +5965,10 @@ interface AccessPolicy {
   autoCapture: boolean
   /** Auto-lock idle timeout in seconds (0 = never); persisted with the policy. */
   autoLockSeconds?: number
+  /** Tool profile (which model tools are registered); persisted with the policy. */
+  toolProfile?: ToolProfile
+  /** Groups switched on when toolProfile is 'custom'. */
+  toolGroups?: string[]
 }
 
 const sharedAccessPolicies = new Map<string, AccessPolicy>()
@@ -5855,6 +6006,10 @@ async function loadAccessPolicy(config: Config): Promise<AccessPolicy> {
       ...(typeof parsed.autoLockSeconds === 'number' && Number.isFinite(parsed.autoLockSeconds) && parsed.autoLockSeconds >= 0
         ? { autoLockSeconds: parsed.autoLockSeconds }
         : {}),
+      ...(parsed.toolProfile === 'basic' || parsed.toolProfile === 'standard' || parsed.toolProfile === 'full' || parsed.toolProfile === 'custom'
+        ? { toolProfile: parsed.toolProfile }
+        : {}),
+      ...(Array.isArray(parsed.toolGroups) ? { toolGroups: parsed.toolGroups.filter((g): g is string => typeof g === 'string') } : {}),
     }
   } catch {
     return fallback

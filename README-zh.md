@@ -179,6 +179,21 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 
 `dsh plugin --profile web remove dsh-vault` 卸载(同时移除依赖与 layer)。
 
+## 工具分级(工具集)
+
+插件内置 110+ 个模型工具,但**默认只注册 11 个基础工具**(`vault_list/search/get/add/update/delete/fill/clipboard/totp/generate_password/strength`),让模型的工具目录保持精简、减少 token 开销。
+
+在 **设置 → 凭据库 → 权限 → 模型工具集** 切换,**立即生效、无需重启**,并按保险库持久化:
+
+| 档位 | 注册内容 |
+|---|---|
+| **基础**(默认) | 仅核心 —— 日常增删改查/搜索/生成/验证码/填充 |
+| **标准** | + 管理: 收藏、标签、图标、到期轮换、健康、重复合并、附件、模板、env 掩码 |
+| **完整** | 全部,含批量导入导出、浏览器会话、备份与保险库文件操作 |
+| **自定义…** | 基础 + 任选: 管理 / 导入导出 / 浏览器会话 / 备份与文件 |
+
+也可在插件配置里写 `tools: basic|standard|full|custom`;界面选择优先,并保存在 `<vault 目录>/access.json`。
+
 ## 配置
 
 | 配置项 | 说明 |

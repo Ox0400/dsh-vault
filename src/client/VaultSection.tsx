@@ -73,9 +73,10 @@ export type VaultPatch = Partial<Omit<VaultFullWire, 'id'>>
 /** Registration-side business face supplied by the plugin entry. */
 export interface VaultSectionInjected {
   t: TranslateNS<'settings.vault'>
-  config: () => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }>
-  setAccessMode: (mode: 'readonly' | 'ask' | 'auto') => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }>
-  setAutoCapture: (enabled: boolean) => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }>
+  config: () => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number; toolProfile: 'basic' | 'standard' | 'full' | 'custom'; toolGroups: string[] }>
+  setToolProfile: (profile: 'basic' | 'standard' | 'full' | 'custom', groups?: string[]) => Promise<{ toolProfile: 'basic' | 'standard' | 'full' | 'custom'; tools: number; toolGroups: string[] }>
+  setAccessMode: (mode: 'readonly' | 'ask' | 'auto') => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number; toolProfile: 'basic' | 'standard' | 'full' | 'custom'; toolGroups: string[] }>
+  setAutoCapture: (enabled: boolean) => Promise<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number; toolProfile: 'basic' | 'standard' | 'full' | 'custom'; toolGroups: string[] }>
   setAutoLock: (seconds: number) => Promise<{ seconds: number }>
   list: () => Promise<VaultSummaryWire[]>
   search: (query: string, limit?: number) => Promise<VaultSummaryWire[]>
@@ -164,7 +165,8 @@ export type VaultSectionTypes = {
   entries: VaultSummaryWire[]
   fullEntry: VaultFullWire
   summaryEntry: VaultSummaryWire
-  config: { accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number }
+  config: { accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number; toolProfile: 'basic' | 'standard' | 'full' | 'custom'; toolGroups: string[] }
+  setToolProfile: (profile: 'basic' | 'standard' | 'full' | 'custom', groups?: string[]) => Promise<{ toolProfile: 'basic' | 'standard' | 'full' | 'custom'; tools: number; toolGroups: string[] }>
   accessModes: Array<'readonly' | 'ask' | 'auto'>
 }
 
@@ -421,7 +423,7 @@ function templateLabel(name: string): string {
 
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
-  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, removeTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
+  const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, setToolProfile, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, removeTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
   const searchId = useId()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -522,7 +524,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [dueOnly, setDueOnly] = useState(false)
   const [issueOnly, setIssueOnly] = useState(false)
   const [activeTab, setActiveTab] = useState<'entries' | 'security' | 'transfer' | 'backup' | 'permissions' | 'sessions' | 'audit' | 'trash'>('entries')
-  const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number } | null>(null)
+  const [policy, setPolicy] = useState<{ accessMode: 'readonly' | 'ask' | 'auto'; autoCapture: boolean; autoLockSeconds: number; toolProfile: 'basic' | 'standard' | 'full' | 'custom'; toolGroups: string[] } | null>(null)
   const [trashEntries, setTrashEntries] = useState<VaultSummaryWire[]>([])
   const [report, setReport] = useState<{ rotation: unknown[]; weak: unknown[]; reused: unknown[]; strength: { weak: number; fair: number; strong: number } | null; no2fa: unknown[]; httpSites: unknown[]; score: number; verdict: string } | null>(null)
   /** Which health-report problem set is currently filtered in the list
@@ -3106,6 +3108,57 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   : t('modeAutoHint')}
               {policy.autoCapture ? ` · ${t('autoCaptureOn')}` : ` · ${t('autoCaptureOff')}`}
               {policy.autoLockSeconds > 0 ? ` · ${t('autoLockHint')}: ${formatAutoLock(policy.autoLockSeconds)}` : ` · ${t('autoLockNeverHint')}`}
+            </p>
+            <div className={css.dupGroup}>
+              <span className={css.dupNames}>{t('toolProfile')}</span>
+              <select
+                className={css.kindFilter}
+                value={policy.toolProfile}
+                disabled={busy}
+                title={t('toolProfileHint')}
+                onChange={event => {
+                  const next = event.target.value as 'basic' | 'standard' | 'full' | 'custom'
+                  setBusy(true)
+                  setMessage(null)
+                  const groups = next === 'custom' ? (policy.toolGroups.length > 0 ? policy.toolGroups : ['management']) : undefined
+                  void setToolProfile(next, groups).then(
+                    r => { setPolicy(previous => previous === null ? previous : { ...previous, toolProfile: r.toolProfile, toolGroups: r.toolGroups }); setMessage(t('toolProfileApplied').replace('{n}', String(r.tools))); setBusy(false) },
+                    (err) => { setMessage(errText(err)); setBusy(false) },
+                  )
+                }}
+              >
+                <option value="basic">{t('toolProfileBasic')}</option>
+                <option value="standard">{t('toolProfileStandard')}</option>
+                <option value="full">{t('toolProfileFull')}</option>
+                <option value="custom">{t('toolProfileCustom')}</option>
+              </select>
+              {policy.toolProfile === 'custom' && (
+                <span className={css.exportChips} role="group" aria-label={t('toolProfileCustom')}>
+                  {([['management', 'toolGroupManagement'], ['io', 'toolGroupIo'], ['sessions', 'toolGroupSessions'], ['files', 'toolGroupFiles']] as Array<[string, string]>).map(([group, labelKey]) => (
+                    <label key={group} className={css.exportChip} title={t('toolProfileHint')}>
+                      <input
+                        type="checkbox"
+                        checked={policy.toolGroups.includes(group)}
+                        disabled={busy}
+                        onChange={event => {
+                          const next = event.target.checked
+                            ? [...policy.toolGroups, group]
+                            : policy.toolGroups.filter(g => g !== group)
+                          setBusy(true)
+                          setMessage(null)
+                          void setToolProfile('custom', next).then(
+                            r => { setPolicy(previous => previous === null ? previous : { ...previous, toolProfile: r.toolProfile, toolGroups: r.toolGroups }); setMessage(t('toolProfileApplied').replace('{n}', String(r.tools))); setBusy(false) },
+                            (err) => { setMessage(errText(err)); setBusy(false) },
+                          )
+                        }}
+                      />
+                      <span>{t(labelKey as 'toolGroupManagement')}</span>
+                    </label>
+                  ))}
+                </span>
+              )}
+            </div>
+            <p className={css.reportSub}>{t('toolProfileHint')}
             </p>
           </div>
         </div>
