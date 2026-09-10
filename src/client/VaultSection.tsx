@@ -3481,7 +3481,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                           }, () => setBusy(false))
                         }}
                       title={t('copySecretHint')}
-                      title={t('copySecretHint')}
                   >{entry.kind === 'api-key' ? t('copyApiKey') : entry.kind === 'oauth' ? t('copyToken') : entry.kind === 'card' ? t('copyCardNumber') : entry.kind === 'secret' || entry.kind === 'custom' ? t('copyKey') : t('copyPassword')}</button>
                       {entry.url !== undefined && entry.url !== '' && (
                         <button type="button" className={css.copyAllBtn} disabled={busy || locked} onClick={() => window.open(entry.url!, '_blank', 'noopener')}>{t('openUrl')}</button>
