@@ -2711,66 +2711,88 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <p className={css.reportSub}>{t('importIntro')}</p>
         <div className={css.importList}>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importChrome')}</span>
+            <span className={css.importName}>{t('importNameChrome')}</span>
             <span className={css.importDesc}>{t('importChromeShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importChromeDesc')} onClick={() => void runSystemImport('chrome', false)} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importFirefox')}</span>
+            <span className={css.importName}>{t('importNameFirefox')}</span>
             <span className={css.importDesc}>{t('importFirefoxShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importFirefoxDesc')} onClick={() => void runFirefoxImport()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importKeychain')}</span>
+            <span className={css.importName}>{t('importNameKeychain')}</span>
             <span className={css.importDesc}>{t('importKeychainShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('import1password')}</span>
+            <span className={css.importName}>{t('importName1password')}</span>
             <span className={css.importDesc}>{t('import1passwordShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runFilePreview('import1passwordPrompt', import1password)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importBitwarden')}</span>
+            <span className={css.importName}>{t('importNameBitwarden')}</span>
             <span className={css.importDesc}>{t('importBitwardenShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importBitwardenEncrypted')}</span>
+            <span className={css.importName}>{t('importNameBitwardenEncrypted')}</span>
             <span className={css.importDesc}>{t('importBitwardenEncryptedShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importBitwardenEncryptedDesc')} onClick={() => void runImportBitwardenEncrypted()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('import1pif')}</span>
+            <span className={css.importName}>{t('importName1pif')}</span>
             <span className={css.importDesc}>{t('import1pifShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runFilePreview('import1pifPrompt', import1pif)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runImport1pif()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runImport1pif()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importKeePassXml')}</span>
+            <span className={css.importName}>{t('importNameKeePassXml')}</span>
             <span className={css.importDesc}>{t('importKeePassXmlShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importKdbx')}</span>
+            <span className={css.importName}>{t('importNameKdbx')}</span>
             <span className={css.importDesc}>{t('importKdbxShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importKdbxDesc')} onClick={() => void runImportKdbx()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importEnpass')}</span>
+            <span className={css.importName}>{t('importNameEnpass')}</span>
             <span className={css.importDesc}>{t('importEnpassShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runFilePreview('importEnpassPrompt', importEnpass)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
           <div className={css.importRow}>
-            <span className={css.importName}>{t('importManagerCsv')}</span>
+            <span className={css.importName}>{t('importNameManagerCsv')}</span>
             <span className={css.importDesc}>{t('importManagerCsvShort')}</span>
+            <span className={css.importActions}>
             <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
-            <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runCsvImportPreview()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+                <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runCsvImportPreview()} disabled={busy || readonly || locked}>{t('importRun')}</button>
+          </span>
           </div>
         </div>
       </div>
