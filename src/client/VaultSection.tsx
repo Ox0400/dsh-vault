@@ -3162,7 +3162,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 className={css.kindFilter}
                 value={policy.toolProfile}
                 disabled={busy}
-                title={t('toolProfileHint')}
+                title={t('toolProfileHintLong')}
                 onChange={event => {
                   const next = event.target.value as 'basic' | 'standard' | 'full' | 'custom'
                   setBusy(true)
@@ -3771,10 +3771,10 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {vaultStats !== null && typeof vaultStats.total === 'number' && (
             <span className={css.badge} title={t('statBadgeHint')}>{t('entryCount')}: {String(vaultStats.total)}</span>
           )}
-          {vaultStats !== null && typeof vaultStats.withTotp === 'number' && (
+          {vaultStats !== null && typeof vaultStats.withTotp === 'number' && vaultStats.withTotp > 0 && (
             <span className={css.badge} title={t('statBadgeHint')}>TOTP: {String(vaultStats.withTotp)}</span>
           )}
-          {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && (
+          {vaultStats !== null && typeof vaultStats.highSensitivity === 'number' && vaultStats.highSensitivity > 0 && (
             <span className={css.badge} title={t('statBadgeHint')}>{t('highSensitivity')}: {String(vaultStats.highSensitivity)}</span>
           )}
           {report !== null && report.strength !== null && (
