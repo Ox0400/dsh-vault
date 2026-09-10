@@ -1370,3 +1370,11 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Compact import/export button grid. */
+.transferGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}

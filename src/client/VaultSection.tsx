@@ -2708,29 +2708,15 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
       <div className={css.reportBox}>
         <p className={css.reportTitle}>{t('systemImport')}</p>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importChromeDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('chrome', false)} disabled={busy || readonly || locked}>{t('importChrome')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importFirefoxDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runFirefoxImport()} disabled={busy || readonly || locked}>{t('importFirefox')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importKeychainDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>{t('keychainPreview')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importKeychain')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('import1passwordDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>{t('import1password')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('import1passwordPrompt', import1password)} disabled={busy || readonly || locked}>{t('preview')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importManagerCsvDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runCsvImportPreview()} disabled={busy || readonly || locked}>{t('importManagerCsv')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>{t('preview')}</button>
-        </div>
+        <div className={css.transferGrid}>
+        <button type="button" className={css.actionBtn} title={t('importChromeDesc')} onClick={() => void runSystemImport('chrome', false)} disabled={busy || readonly || locked}>📥 {t('importChrome')}</button>
+        <button type="button" className={css.actionBtn} title={t('importFirefoxDesc')} onClick={() => void runFirefoxImport()} disabled={busy || readonly || locked}>📥 {t('importFirefox')}</button>
+        <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>👁 {t('keychainPreview')}</button>
+        <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>📥 {t('importKeychain')}</button>
+        <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>📥 {t('import1password')}</button>
+        <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runFilePreview('import1passwordPrompt', import1password)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+        <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runCsvImportPreview()} disabled={busy || readonly || locked}>📥 {t('importManagerCsv')}</button>
+        <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
         {importPreview !== null && (
           <div className={css.previewBox}>
             <p className={css.reportTitle}>{t('previewImportTitle')}</p>
@@ -2763,47 +2749,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             </div>
           </div>
         )}
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importEnpassDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>{t('importEnpass')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importEnpassPrompt', importEnpass)} disabled={busy || readonly || locked}>{t('preview')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importBitwardenDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>{t('importBitwarden')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>{t('preview')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importBitwardenEncryptedDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImportBitwardenEncrypted()} disabled={busy || readonly || locked}>{t('importBitwardenEncrypted')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('import1pifDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImport1pif()} disabled={busy || readonly || locked}>{t('import1pif')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('import1pifPrompt', import1pif)} disabled={busy || readonly || locked}>{t('preview')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importKeePassXmlDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>{t('importKeePassXml')}</button>
-          <button type="button" className={css.dupMerge} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>{t('preview')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('importKdbxDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runImportKdbx()} disabled={busy || readonly || locked}>{t('importKdbx')}</button>
+        <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>📥 {t('importEnpass')}</button>
+        <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runFilePreview('importEnpassPrompt', importEnpass)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+        <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>📥 {t('importBitwarden')}</button>
+          <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+        <button type="button" className={css.actionBtn} title={t('importBitwardenEncryptedDesc')} onClick={() => void runImportBitwardenEncrypted()} disabled={busy || readonly || locked}>🔐 {t('importBitwardenEncrypted')}</button>
+        <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runImport1pif()} disabled={busy || readonly || locked}>📥 {t('import1pif')}</button>
+        <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runFilePreview('import1pifPrompt', import1pif)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+        <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>📥 {t('importKeePassXml')}</button>
+        <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+        <button type="button" className={css.actionBtn} title={t('importKdbxDesc')} onClick={() => void runImportKdbx()} disabled={busy || readonly || locked}>📥 {t('importKdbx')}</button>
         </div>
       </div>
 
       <div className={css.reportBox}>
         <p className={css.reportTitle}>{t('exportTitle')}</p>
         <p className={css.reportSub}>{t('exportHint')}</p>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('export1puxDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runExport1pux()} disabled={busy || readonly || locked}>{t('export1pux')}</button>
-        </div>
-        <div className={css.dupGroup}>
-          <span className={css.dupNames}>{t('exportBitwardenDesc')}</span>
-          <button type="button" className={css.dupMerge} onClick={() => void runExportBitwarden()} disabled={busy || readonly || locked}>{t('exportBitwarden')}</button>
-        </div>
+        <button type="button" className={css.actionBtn} title={t('export1puxDesc')} onClick={() => void runExport1pux()} disabled={busy || readonly || locked}>📤 {t('export1pux')}</button>
+        <button type="button" className={css.actionBtn} title={t('exportBitwardenDesc')} onClick={() => void runExportBitwarden()} disabled={busy || readonly || locked}>📤 {t('exportBitwarden')}</button>
         <div className={css.dupGroup}>
           <span className={css.dupNames}>{t('exportCsvDesc')}</span>
           <div className={css.exportChips}>
@@ -2830,7 +2793,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         {backupInfo !== null && (
           <p className={css.reportSub}>{t('healthBackup')}: {backupInfo.daysSinceBackup}d ({backupInfo.backups})</p>
         )}
-        <button type="button" className={css.backupButton} onClick={() => void backupNow()} disabled={busy}>
+        <button type="button" className={css.backupButton} title={t('backupNowHint')} onClick={() => void backupNow()} disabled={busy}>
           {t('backupNow')}
         </button>
       </div>
@@ -2881,7 +2844,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               disabled={busy || readonly || locked}
             />
           </label>
-          <button type="button" className={css.backupButton} onClick={() => void runSessionOpen()} disabled={busy || readonly || locked}>
+          <button type="button" className={css.backupButton} title={t('sessionOpenHint')} onClick={() => void runSessionOpen()} disabled={busy || readonly || locked}>
             {t('sessionOpen')}
           </button>
           <p className={css.reportSub}>{t('sessionOpenHint')}</p>
