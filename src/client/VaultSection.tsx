@@ -421,6 +421,19 @@ function templateLabel(name: string): string {
   return labels[name] ?? name
 }
 
+/** How long ago a past timestamp was, e.g. "3 分钟前". Empty for unusable
+ * input; the absolute timestamp stays the visible text and this is its hover
+ * hint, so a precise date and a quick "how recent" read never compete. */
+function relativeAge(ts: number, t: TranslateNS<'settings.vault'>, now = Date.now()): string {
+  if (!Number.isFinite(ts) || ts <= 0) return ''
+  const minutes = Math.floor(Math.max(0, now - ts) / 60_000)
+  if (minutes < 1) return t('relJustNow')
+  if (minutes < 60) return t('relMinutes').replace('{n}', String(minutes))
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return t('relHours').replace('{n}', String(hours))
+  return t('relDays').replace('{n}', String(Math.floor(hours / 24)))
+}
+
 /** Render the Vault settings section. */
 export function VaultSection(props: VaultSectionProps): ReactNode {
   const { t, config, setAccessMode, setAutoCapture, setAutoLock, list, search, get, add, update, remove, purge, trash, rotation, health, duplicates, duplicateGroups, merge, history, stats, backupStatus, backup, recent, restore, undeleteAll, totp, status, switchVault, listVaults, touch, setFavorite, setToolProfile, attachments, detach, attach, downloadAttachment, verifyAll, breachCheck, generatePassword, strength, generateUsername, templates, saveTemplate, lock, totpUri, tags, renameTag, removeTag, generatorHistory, backups, deleteBackup, restoreBackup, importChrome, importFirefox, import1password, importManagerCsv, previewImportCsv, importEnpass, importBitwarden, import1pif, importKeePassXml, importKdbx, importBitwardenEncrypted, keychainImport, searchSystem, sessionOpen, sessionCollect, sessionClose, sessionListOpen, sessionListSaved, sessionSave, sessionExport, sessionGet, sessionPrune, passwordHistory, passwordRollback, vaultRename, vaultDelete, watchtower, export1pux, exportBitwarden, exportCsv, recoveryCode, verifyRecovery, recoveryStatus, unlock } = props
@@ -2861,7 +2874,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('recentBackups')} ({backupList.length})</p>
           {backupList.map(b => (
             <div key={b.path} className={css.gridRow}>
-              <span className={css.gridName} title={b.path}>
+              <span className={css.gridName} title={`${b.path}${relativeAge(b.at, t) !== '' ? ` · ${relativeAge(b.at, t)}` : ''}`}>
                 {b.vaultName !== '' ? `${b.vaultName} · ` : ''}{new Date(b.at).toLocaleString()}
               </span>
               <span className={css.gridDetail}>{b.size !== undefined && b.size > 0 ? formatSize(b.size) : ''}</span>
@@ -3288,10 +3301,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   const actionLabel = labelKey !== undefined ? t(labelKey) : action
                   const ts = Number((ev as Record<string, unknown>).at)
                   const when = Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleString() : ''
+                  const age = relativeAge(ts, t)
                   const evTitle = String(ev.title ?? ev.id ?? '')
                   return (
                     <p key={`${action}-${ts}-${i}`} className={`${css.reportLine} ${cls}`}>
-                      {icon} {actionLabel} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && ` · ${when}`}
+                      {icon} {actionLabel} · <button type="button" className={css.histLink} onClick={() => { setActiveTab('entries'); setQuery(evTitle); setKindFilter(''); setTagFilter(''); setFavOnly(false); setDueOnly(false); setIssueOnly(false); }} title={t('auditJumpHint')}>{evTitle}</button>{when !== '' && <span className={css.auditWhen} title={age !== '' ? `${when} · ${age}` : when}>{` · ${when}`}</span>}
                     </p>
                   )
                 })}
@@ -3310,7 +3324,12 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       </div>)}
 
       {activeTab === 'trash' && (<div className={css.tabPane}>
-      {trashEntries.length === 0 && <p className={css.empty}>{t('trashEmpty')}</p>}
+      {trashEntries.length === 0 && (
+        <p className={css.empty}>
+          {t('trashEmpty')}<br />
+          <span className={css.emptyHint}>{t('trashEmptyHint')}</span>
+        </p>
+      )}
       {trashEntries.length > 0 && (
         <ul className={css.list}>
           {trashEntries.map(entry => (

@@ -23,6 +23,14 @@
   --v-ring-track: var(--dsw-alias-border-l3, #bdbdbd);
   --v-mono: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   --v-shadow: var(--dsw-elevation-panel, 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02));
+  /* Text-safe state colours. The host's state-*-primary values are tuned for
+     fills, borders and icons: on white, success (2.28:1) and warn (2.15:1) are
+     far too light for body text. Mixing them towards the theme's own text
+     colour darkens them on light and lightens them on dark, so one declaration
+     stays legible on both themes while keeping the semantic hue. */
+  --v-success-text: color-mix(in srgb, var(--v-success) 55%, var(--v-text));
+  --v-warn-text: color-mix(in srgb, var(--v-warn) 55%, var(--v-text));
+  --v-danger-text: color-mix(in srgb, var(--v-danger) 70%, var(--v-text));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -291,12 +299,12 @@
 }
 
 .deleteButton {
-  color: var(--v-danger);
+  color: var(--v-danger-text);
 }
 
 .copied {
   font-size: 12px;
-  color: var(--v-success);
+  color: var(--v-success-text);
 }
 
 .empty,
@@ -310,7 +318,7 @@
   background: var(--v-warn-bg);
   border: 1px solid var(--v-warn);
   border-radius: 6px;
-  color: var(--v-warn);
+  color: var(--v-warn-text);
   font-size: 13px;
   margin: 0 0 10px;
   padding: 8px 12px;
@@ -329,17 +337,17 @@
 }
 
 .modeReadonly {
-  color: var(--v-danger);
+  color: var(--v-danger-text);
   border: 1px solid color-mix(in srgb, var(--v-danger) 50%, transparent);
 }
 
 .modeAsk {
-  color: var(--v-warn);
+  color: var(--v-warn-text);
   border: 1px solid color-mix(in srgb, var(--v-warn) 50%, transparent);
 }
 
 .modeAuto {
-  color: var(--v-success);
+  color: var(--v-success-text);
   border: 1px solid color-mix(in srgb, var(--v-success) 50%, transparent);
 }
 
@@ -379,7 +387,7 @@
 }
 
 .error {
-  color: var(--v-danger);
+  color: var(--v-danger-text);
 }
 
 .editor {
@@ -454,7 +462,7 @@
   opacity: 0.8;
 }
 
-.histAdd { color: var(--v-success); }
+.histAdd { color: var(--v-success-text); }
 
 .pwHistBox {
   margin: 8px 0;
@@ -482,8 +490,8 @@
   opacity: 0.7;
   white-space: nowrap;
 }
-.histDanger { color: var(--v-danger); }
-.histUpdate { color: var(--v-warn); }
+.histDanger { color: var(--v-danger-text); }
+.histUpdate { color: var(--v-warn-text); }
 .histNeutral { opacity: 0.7; }
 
 .histLink {
@@ -494,6 +502,13 @@
   text-decoration: underline;
   cursor: pointer;
   font-size: inherit;
+}
+
+/* Absolute timestamp of an audit event; its hover hint carries the relative
+   age ("3 分钟前"), so the line stays narrow. */
+.auditWhen {
+  white-space: nowrap;
+  cursor: help;
 }
 
 .reportSub {
@@ -593,14 +608,14 @@
   padding: 1px 6px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--v-danger) 15%, transparent);
-  color: var(--v-danger);
+  color: var(--v-danger-text);
   font-size: 10px;
   font-weight: 600;
   vertical-align: middle;
 }
 
 .pinStar {
-  color: var(--v-warn);
+  color: var(--v-warn-text);
   margin-right: 4px;
   background: none;
   border: none;
@@ -615,7 +630,7 @@
 }
 
 .pinOn {
-  color: var(--v-warn);
+  color: var(--v-warn-text);
 }
 
 .clearButton {
@@ -673,12 +688,12 @@
   padding: 4px 10px;
 }
 .badgeOk {
-  border-color: var(--v-success);
-  color: var(--v-success);
+  border-color: var(--v-success-text);
+  color: var(--v-success-text);
 }
 .badgeWarn {
-  border-color: var(--v-warn);
-  color: var(--v-warn);
+  border-color: var(--v-warn-text);
+  color: var(--v-warn-text);
 }
 .rowDue {
   border-left: 3px solid var(--v-warn);
@@ -695,8 +710,8 @@
   padding: 3px 8px;
 }
 .badgeDanger {
-  border-color: var(--v-danger);
-  color: var(--v-danger);
+  border-color: var(--v-danger-text);
+  color: var(--v-danger-text);
 }
 
 .kindIcon {
@@ -731,7 +746,7 @@
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--v-danger) 50%, transparent);
   background: transparent;
-  color: var(--v-danger);
+  color: var(--v-danger-text);
   cursor: pointer;
   font-size: 12px;
   align-self: flex-start;
@@ -944,7 +959,7 @@
 
 
 .lockedTag {
-  color: var(--v-warn);
+  color: var(--v-warn-text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1029,7 +1044,7 @@
   opacity: 1;
 }
 .favActive {
-  border-color: var(--v-warn);
+  border-color: var(--v-warn-text);
   background: color-mix(in srgb, var(--v-warn) 14%, transparent);
   opacity: 1;
   font-weight: 600;
@@ -1299,7 +1314,7 @@
   margin-bottom: 0;
 }
 .detailDeleteBtn {
-  color: var(--v-danger);
+  color: var(--v-danger-text);
   border-color: color-mix(in srgb, var(--v-danger) 40%, transparent);
 }
 
