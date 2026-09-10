@@ -1421,7 +1421,7 @@
 .vaultHeader {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
   margin-bottom: 4px;
 }
@@ -1452,4 +1452,16 @@
   align-items: center;
   display: inline-flex;
   gap: 6px;
+}
+
+/* Fixed single-line feedback slot inside the vault header. */
+.headerMessage {
+  color: var(--dsh-color-text-2, #888);
+  flex: 1 1 220px;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

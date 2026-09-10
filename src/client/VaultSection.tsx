@@ -2313,6 +2313,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             </select>
           </label>
         )}
+        {/* Fixed message slot: always present, single line, so feedback never
+            pushes the content below it down. */}
+        <span
+          className={css.headerMessage}
+          role="status"
+          aria-live="polite"
+          title={message ?? undefined}
+        >{message ?? ''}</span>
       </header>
       <p className={css.intro}>{t('intro')}</p>
 
@@ -2511,8 +2519,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         </div>
       )}
       </div>)}
-
-      {message !== null && <p role="alert" className={css.error}>{message}</p>}
 
       {pwHistory !== null && (
         <div className={css.pwHistBox} role="dialog" aria-label={t('pwHistory')}>
