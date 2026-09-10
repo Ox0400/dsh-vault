@@ -452,7 +452,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [openSessions, setOpenSessions] = useState<Array<{ sessionId: string; url: string; openedAt: number }>>([])
   const [savedSessions, setSavedSessions] = useState<Array<{ id: string; title: string; url?: string; cookieCount: number; expiredCount?: number; expiringSoon?: number; updatedAt?: number }>>([])
   const [sessionUrl, setSessionUrl] = useState('')
-  const [sessionTitle, setSessionTitle] = useState('')
+  /** Per-open-session titles (a single shared field let rows overwrite each
+   * other). Keyed by sessionId; falls back to a prompt when empty. */
+  const [sessionTitles, setSessionTitles] = useState<Record<string, string>>({})
   const [sessionDetail, setSessionDetail] = useState<{ id: string; title: string; url?: string; cookies: unknown[]; notes?: string } | null>(null)
   const [watchMap, setWatchMap] = useState<Record<string, { score: number; verdict: string; flags: string[] }>>({})
   const [sessionPaste, setSessionPaste] = useState('')
@@ -1297,7 +1299,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   /** Collect cookies from an open window and save them under a title. */
   async function runSessionCollect(sessionId: string, fallbackUrl: string): Promise<void> {
     if (readonly) { setMessage(t('sessionReadOnly')); return }
-    let title = sessionTitle.trim()
+    let title = (sessionTitles[sessionId] ?? '').trim()
     if (title.length === 0) {
       const asked = window.prompt(`${t('sessionSaveTitle')} ${t('sessionNamePlaceholder')}`)
       if (asked === null) return
@@ -1311,7 +1313,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
       if (collected.count === 0) { setMessage(t('sessionNoteCollect').replace('{n}', '0')); return }
       const saved = await sessionSave({ title, cookies: collected.cookies, url: fallbackUrl, overwrite: true })
       setMessage(t('sessionSaved').replace('{n}', String(saved.saved)))
-      setSessionTitle('')
+      setSessionTitles(previous => ({ ...previous, [sessionId]: '' }))
       refreshSessions()
     } catch (err) {
       setMessage(errText(err))
@@ -2858,25 +2860,27 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('recentBackups')} ({backupList.length})</p>
           {backupList.map(b => (
-            <div key={b.path} className={css.dupGroup}>
-              <span className={css.dupNames}>
+            <div key={b.path} className={css.gridRow}>
+              <span className={css.gridName} title={b.path}>
                 {b.vaultName !== '' ? `${b.vaultName} · ` : ''}{new Date(b.at).toLocaleString()}
-                {b.size !== undefined && b.size > 0 ? ` · ${formatSize(b.size)}` : ''}
               </span>
-              <button
-                type="button"
-                className={css.dupMerge}
-                onClick={() => void restoreBackupFrom(b)}
-                disabled={busy || readonly || locked}
-                title={t('backupRestoreHint')}
-              >{t('backupRestore')}</button>
-              <button
-                type="button"
-                className={css.dangerButton}
-                onClick={() => void deleteBackupFile(b)}
-                disabled={busy || readonly || locked}
-                title={t('backupDelete')}
-              >{t('backupDelete')}</button>
+              <span className={css.gridDetail}>{b.size !== undefined && b.size > 0 ? formatSize(b.size) : ''}</span>
+              <span className={css.gridActions}>
+                <button
+                  type="button"
+                  className={css.actionBtn}
+                  onClick={() => void restoreBackupFrom(b)}
+                  disabled={busy || readonly || locked}
+                  title={t('backupRestoreHint')}
+                >{t('backupRestore')}</button>
+                <button
+                  type="button"
+                  className={css.dangerButton}
+                  onClick={() => void deleteBackupFile(b)}
+                  disabled={busy || readonly || locked}
+                  title={t('backupDelete')}
+                >{t('backupDelete')}</button>
+              </span>
             </div>
           ))}
         </div>
@@ -2890,19 +2894,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.reportBox}>
           <p className={css.reportTitle}>{t('tabSessions')}</p>
           <p className={css.reportSub}>{t('sessionsIntro')}</p>
-          <label className={css.field}>
-            <span>{t('sessionUrlPrompt')}</span>
-            <input
-              type="text"
-              value={sessionUrl}
-              onChange={event => setSessionUrl(event.target.value)}
-              placeholder={t('sessionUrlPlaceholder')}
-              disabled={busy || readonly || locked}
-            />
-          </label>
-          <button type="button" className={css.backupButton} title={t('sessionOpenHint')} onClick={() => void runSessionOpen()} disabled={busy || readonly || locked}>
-            {t('sessionOpen')}
-          </button>
+          <div className={css.inlineField}>
+            <label className={css.inlineInput}>
+              <span className={css.srOnly}>{t('sessionUrlPrompt')}</span>
+              <input
+                type="text"
+                value={sessionUrl}
+                onChange={event => setSessionUrl(event.target.value)}
+                placeholder={t('sessionUrlPlaceholder')}
+                disabled={busy || readonly || locked}
+              />
+            </label>
+            <button type="button" className={css.actionBtn} title={t('sessionOpenHint')} onClick={() => void runSessionOpen()} disabled={busy || readonly || locked}>
+              🌐 {t('sessionOpen')}
+            </button>
+          </div>
           <p className={css.reportSub}>{t('sessionOpenHint')}</p>
         </div>
 
@@ -2910,31 +2916,32 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('sessionOpenList')} ({openSessions.length})</p>
           {openSessions.length === 0 && (<p className={css.empty}>{t('sessionNoOpen')}</p>)}
           {openSessions.map(s => (
-            <div key={s.sessionId} className={css.dupGroup}>
-              <span className={css.dupNames}>{s.url} — {t('sessionNamePlaceholder')}</span>
-              <label className={css.field}>
-                <input
-                  type="text"
-                  value={sessionTitle}
-                  onChange={event => setSessionTitle(event.target.value)}
-                  placeholder={t('sessionNamePlaceholder')}
-                  disabled={busy || readonly || locked}
-                />
-              </label>
-              <button
-                type="button"
-                className={css.dupMerge}
-                onClick={() => void runSessionCollect(s.sessionId, s.url)}
+            <div key={s.sessionId} className={css.gridRow}>
+              <span className={css.gridName} title={s.url}>{s.url}</span>
+              <input
+                className={css.gridInput}
+                type="text"
+                value={sessionTitles[s.sessionId] ?? ''}
+                onChange={event => setSessionTitles(previous => ({ ...previous, [s.sessionId]: event.target.value }))}
+                placeholder={t('sessionNamePlaceholder')}
                 disabled={busy || readonly || locked}
-                title={t('sessionCollect')}
-              >{t('sessionCollect')}</button>
-              <button
-                type="button"
-                className={css.dangerButton}
-                onClick={() => void runSessionClose(s.sessionId)}
-                disabled={busy}
-                title={t('sessionClose')}
-              >{t('sessionClose')}</button>
+              />
+              <span className={css.gridActions}>
+                <button
+                  type="button"
+                  className={css.actionBtn}
+                  onClick={() => void runSessionCollect(s.sessionId, s.url)}
+                  disabled={busy || readonly || locked}
+                  title={t('sessionCollectHint')}
+                >{t('sessionCollect')}</button>
+                <button
+                  type="button"
+                  className={css.dangerButton}
+                  onClick={() => void runSessionClose(s.sessionId)}
+                  disabled={busy}
+                  title={t('sessionClose')}
+                >{t('sessionClose')}</button>
+              </span>
             </div>
           ))}
         </div>
@@ -2943,39 +2950,41 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('sessionSavedList')} ({savedSessions.length})</p>
           {savedSessions.length === 0 && (<p className={css.empty}>{t('sessionEmpty')}</p>)}
           {savedSessions.map(s => (
-            <div key={s.id} className={css.dupGroup}>
-              <span className={css.dupNames}>{s.title} — {s.cookieCount} {t('sessionCookie')}{(s.expiredCount ?? 0) > 0 ? ` · ${s.expiredCount} ${t('sessionExpired')}` : ''}{(s.expiringSoon ?? 0) > 0 ? ` · ${s.expiringSoon} ${t('sessionExpiringSoon')}` : ''}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
+            <div key={s.id} className={css.gridRow}>
+              <span className={css.gridName} title={s.url ?? s.title}>{s.title}</span>
+              <span className={css.gridDetail}>{s.cookieCount} {t('sessionCookie')}{(s.expiredCount ?? 0) > 0 ? ` · ${s.expiredCount} ${t('sessionExpired')}` : ''}{(s.expiringSoon ?? 0) > 0 ? ` · ${s.expiringSoon} ${t('sessionExpiringSoon')}` : ''}{s.url !== undefined ? ` · ${s.url}` : ''}</span>
+              <span className={css.gridActions}>
               <button
                 type="button"
-                className={css.dupMerge}
+                className={css.actionBtn}
                 onClick={() => void runSessionExport(s.id, 'header')}
                 disabled={busy}
                 title={t('sessionExport')}
               >{copiedId === s.id ? t('sessionCopied') : t('sessionExport')}</button>
               <button
                 type="button"
-                className={css.dupMerge}
+                className={css.actionBtn}
                 onClick={() => void runSessionExport(s.id, 'netscape')}
                 disabled={busy}
                 title={t('sessionExportJar')}
               >{t('sessionExportJar')}</button>
               <button
                 type="button"
-                className={css.dupMerge}
+                className={css.actionBtn}
                 onClick={() => void runSessionExport(s.id, 'playwright')}
                 disabled={busy}
                 title={t('sessionExportPlaywright')}
               >{t('sessionExportPlaywright')}</button>
               <button
                 type="button"
-                className={css.dupMerge}
+                className={css.actionBtn}
                 onClick={() => void runSessionDetail(s.id)}
                 disabled={busy}
                 title={t('sessionView')}
               >{t('sessionView')}</button>
               <button
                 type="button"
-                className={css.dupMerge}
+                className={css.actionBtn}
                 onClick={() => void runSessionPrune(s.id)}
                 disabled={busy || readonly || locked || (s.expiredCount ?? 0) === 0}
                 title={t('sessionPrune')}
@@ -2987,6 +2996,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 disabled={busy || readonly || locked}
                 title={t('sessionDelete')}
               >{t('sessionDelete')}</button>
+              </span>
             </div>
           ))}
         </div>

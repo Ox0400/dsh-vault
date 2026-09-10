@@ -1465,3 +1465,66 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Generic 3-column row: name | detail | right-aligned actions. */
+.gridRow {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--dsh-color-border, #ddd) 40%, transparent);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 1.4fr) auto;
+  padding: 6px 2px;
+}
+.gridRow:last-child {
+  border-bottom-color: transparent;
+}
+.gridName {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gridInput {
+  background: transparent;
+  border: 1px solid var(--dsh-color-border, #555);
+  border-radius: 6px;
+  color: inherit;
+  font-size: 12.5px;
+  min-width: 0;
+  padding: 3px 8px;
+}
+.gridActions {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+/* input + button on one line */
+.inlineField {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.inlineInput {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.inlineInput input {
+  background: transparent;
+  border: 1px solid var(--dsh-color-border, #555);
+  border-radius: 6px;
+  color: inherit;
+  font-size: 13px;
+  padding: 5px 9px;
+  width: 100%;
+}
+
+.gridDetail {
+  color: var(--dsh-color-text-2, #888);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
