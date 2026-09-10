@@ -459,7 +459,6 @@
 
 .reportLine {
   margin: 0;
-  opacity: 0.8;
 }
 
 .histAdd { color: var(--v-success-text); }
@@ -492,7 +491,9 @@
 }
 .histDanger { color: var(--v-danger-text); }
 .histUpdate { color: var(--v-warn-text); }
-.histNeutral { opacity: 0.7; }
+/* Muted, not transparent: opacity on coloured text drags the contrast of the
+   whole row down with it (0.8 × the success mix only reached 3.87:1 on white). */
+.histNeutral { color: var(--v-text-2); }
 
 .histLink {
   background: none;
@@ -626,7 +627,7 @@
 }
 
 .pinOff {
-  color: color-mix(in srgb, var(--v-text-2) 45%, transparent);
+  color: var(--v-text-2);
 }
 
 .pinOn {
