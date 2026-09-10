@@ -2439,6 +2439,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 <button
                   type="button"
                   className={css.dupMerge}
+                  title={t('tagRenameHint')}
                   disabled={busy || readonly || locked}
                   onClick={() => {
                     const asked = window.prompt(`${t('tagRenamePrompt')} ${tag.name}`, tag.name)
@@ -2455,6 +2456,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 <button
                   type="button"
                   className={css.dangerButton}
+                  title={t('tagRemoveHint')}
                   disabled={busy || readonly || locked}
                   onClick={() => {
                     if (!window.confirm(t('tagRemoveConfirm').replace('{name}', tag.name))) return
@@ -2695,7 +2697,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             onChange={event => setSysQuery(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') void searchSystemStores() }}
           />
-          <button type="button" className={css.dupMerge} onClick={() => void searchSystemStores()} disabled={busy}>{t('sysSearchGo')}</button>
+          <button type="button" className={css.dupMerge} title={t('sysSearchHint')} onClick={() => void searchSystemStores()} disabled={busy}>{t('sysSearchGo')}</button>
         </div>
         {sysMatches.length > 0 && (
           <div>
@@ -2728,7 +2730,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importNameKeychain')}</span>
             <span className={css.importDesc}>{t('importKeychainShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', true)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('importKeychainDesc')} onClick={() => void runSystemImport('keychain', false)} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2736,7 +2738,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importName1password')}</span>
             <span className={css.importDesc}>{t('import1passwordShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runFilePreview('import1passwordPrompt', import1password)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runFilePreview('import1passwordPrompt', import1password)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('import1passwordDesc')} onClick={() => void runImport1password()} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2744,7 +2746,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importNameBitwarden')}</span>
             <span className={css.importDesc}>{t('importBitwardenShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runFilePreview('importBitwardenPrompt', importBitwarden)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('importBitwardenDesc')} onClick={() => void runImportBitwarden()} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2759,7 +2761,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importName1pif')}</span>
             <span className={css.importDesc}>{t('import1pifShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runFilePreview('import1pifPrompt', import1pif)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runFilePreview('import1pifPrompt', import1pif)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('import1pifDesc')} onClick={() => void runImport1pif()} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2767,7 +2769,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importNameKeePassXml')}</span>
             <span className={css.importDesc}>{t('importKeePassXmlShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runFilePreview('importKeePassXmlPrompt', importKeePassXml)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('importKeePassXmlDesc')} onClick={() => void runImportKeePassXml()} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2782,7 +2784,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importNameEnpass')}</span>
             <span className={css.importDesc}>{t('importEnpassShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runFilePreview('importEnpassPrompt', importEnpass)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runFilePreview('importEnpassPrompt', importEnpass)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('importEnpassDesc')} onClick={() => void runImportEnpass()} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2790,7 +2792,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
             <span className={css.importName}>{t('importNameManagerCsv')}</span>
             <span className={css.importDesc}>{t('importManagerCsvShort')}</span>
             <span className={css.importActions}>
-            <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>👁 {t('preview')}</button>
+            <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runFilePreview('importManagerCsvPrompt', importManagerCsv)} disabled={busy || readonly || locked}>👁 {t('previewShort')}</button>
                 <button type="button" className={css.actionBtn} title={t('importManagerCsvDesc')} onClick={() => void runCsvImportPreview()} disabled={busy || readonly || locked}>{t('importRun')}</button>
           </span>
           </div>
@@ -2816,7 +2818,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               </label>
             ))}
           </div>
-          <button type="button" className={css.dupMerge} onClick={() => void runExportCsv()} disabled={busy || readonly || locked || exportFields.length === 0}>{t('exportCsv')}</button>
+          <button type="button" className={css.dupMerge} title={t('exportCsvHint')} onClick={() => void runExportCsv()} disabled={busy || readonly || locked || exportFields.length === 0}>{t('exportCsv')}</button>
         </div>
       </div>
       </div>)}
@@ -3012,7 +3014,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               disabled={busy || readonly || locked}
             />
           </label>
-          <button type="button" className={css.backupButton} onClick={() => void runSessionImport()} disabled={busy || readonly || locked}>
+          <button type="button" className={css.backupButton} title={t('sessionImportHint')} onClick={() => void runSessionImport()} disabled={busy || readonly || locked}>
             {t('sessionImport')}
           </button>
         </div>
@@ -3118,6 +3120,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               <button
                 type="button"
                 className={css.dupMerge}
+                title={t('tagRenameHint')}
                 onClick={() => void renameTagAll(tag.name)}
                 disabled={busy || readonly || locked}
               >{t('tagRename')}</button>
@@ -3156,6 +3159,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   type="button"
                   className={`${css.auditChip}${auditFilter === value ? ` ${css.auditChipActive}` : ''}`}
                   aria-pressed={auditFilter === value}
+                  title={t('auditQuickHint')}
                   onClick={() => { setAuditFilter(value); setAuditLimit(30) }}
                 >{icon} {value === '' ? t('auditAll') : value === 'write' ? t('auditWriteQuick') : t(AUDIT_LABEL[value]!)}</button>
               ))}
@@ -3168,7 +3172,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 <option key={action} value={action}>{t(AUDIT_LABEL[action]!)}</option>
               ))}
             </select>
-            <button type="button" className={css.dupMerge} onClick={exportAuditLog} disabled={recentEvents.length === 0}>{t('auditExport')}</button>
+            <button type="button" className={css.dupMerge} title={t('auditExportHint')} onClick={exportAuditLog} disabled={recentEvents.length === 0}>{t('auditExport')}</button>
           </div>
           {recentEvents.length === 0 && <p className={css.empty}>{t('recentActivityEmpty')}</p>}
           {(() => {
@@ -3192,7 +3196,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                   )
                 })}
                 {filtered.length > auditLimit && (
-                  <button type="button" className={css.trashButton} onClick={() => setAuditLimit(limit => limit + 50)}>
+                  <button type="button" className={css.trashButton} title={t('auditLoadMoreHint')} onClick={() => setAuditLimit(limit => limit + 50)}>
                     {t('loadMoreAudit').replace('{n}', String(filtered.length - auditLimit))}
                   </button>
                 )}
@@ -3476,7 +3480,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                             setBusy(false)
                           }, () => setBusy(false))
                         }}
-                      >{entry.kind === 'api-key' ? t('copyApiKey') : entry.kind === 'oauth' ? t('copyToken') : entry.kind === 'card' ? t('copyCardNumber') : entry.kind === 'secret' || entry.kind === 'custom' ? t('copyKey') : t('copyPassword')}</button>
+                      title={t('copySecretHint')}
+                      title={t('copySecretHint')}
+                  >{entry.kind === 'api-key' ? t('copyApiKey') : entry.kind === 'oauth' ? t('copyToken') : entry.kind === 'card' ? t('copyCardNumber') : entry.kind === 'secret' || entry.kind === 'custom' ? t('copyKey') : t('copyPassword')}</button>
                       {entry.url !== undefined && entry.url !== '' && (
                         <button type="button" className={css.copyAllBtn} disabled={busy || locked} onClick={() => window.open(entry.url!, '_blank', 'noopener')}>{t('openUrl')}</button>
                       )}
@@ -3605,6 +3611,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       }, () => setBusy(false))
                     }}
                     disabled={busy || readonly || locked}
+                  title={t('copySecretHint')}
                   >{entry.kind === 'api-key' ? t('copyApiKey') : entry.kind === 'oauth' ? t('copyToken') : entry.kind === 'card' ? t('copyCardNumber') : entry.kind === 'secret' || entry.kind === 'custom' ? t('copyKey') : t('copyPassword')}</button>
                   {code !== undefined && (
                     <button type="button" className={css.actionPrimary} onClick={() => void copyValue(entry.id, code)} disabled={busy || locked}>{t('copyCode')}</button>
