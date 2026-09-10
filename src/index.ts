@@ -282,12 +282,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const registerTool = (def: Parameters<typeof ctx.tools.register>[0]): void => { allTools.push(def) }
   let toolDisposers: Array<() => void> = []
   /** Resolve the active profile (persisted policy wins over config). */
-  const activeProfile = (): ToolProfile => policy.toolProfile ?? config.tools ?? 'basic'
+  const toolProfileState = await sharedToolProfile(config)
+  const toolProfileDir = dirname(resolveVaultPath(config))
+  // Read through the shared table every time so a runtime switch (which
+  // replaces the entry) is picked up by the registration pass.
+  const activeProfile = (): ToolProfile => sharedToolProfiles.get(toolProfileDir)?.profile ?? toolProfileState.profile
+  const activeToolGroups = (): string[] => sharedToolProfiles.get(toolProfileDir)?.groups ?? toolProfileState.groups
   /** (Re)register exactly the tools allowed by the current profile. */
   function applyToolProfile(): void {
     for (const dispose of toolDisposers) { try { dispose() } catch { /* already gone */ } }
     toolDisposers = []
-    const groups = enabledGroups(activeProfile(), policy.toolGroups)
+    const groups = enabledGroups(activeProfile(), activeToolGroups())
     for (const def of allTools) {
       if (groups.has(toolGroup(def.name))) toolDisposers.push(ctx.tools.register(def))
     }
@@ -403,7 +408,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         'Use vault_search to find entries by title/username/host and vault_get (by id) to read full credentials when the task needs them.',
         'Do not repeat secrets in the conversation when a credential was obtained via vault_get.',
       ]
-      const profile = policy.toolProfile ?? config.tools ?? 'basic'
+      const profile = activeProfile()
       if (profile !== 'full') {
         lines.push(`Tool profile: ${profile.toUpperCase()} — only a subset of vault tools is registered. `
           + 'If a task needs import/export, browser sessions, backups or vault-file operations, ask the user to switch the profile to "full" in Settings → Credentials → Permissions.')
@@ -4436,10 +4441,8 @@ export class VaultGateway extends TypertRemoteService {
   private readonly masterPassword: string
   private readonly vaultPath: string | undefined
   private readonly vaultName: string | undefined
-  private readonly accessPolicy: AccessPolicy
+  private accessPolicy: AccessPolicy
   private readonly backupRetention: number
-  /** Tool profile from the plugin config (fallback when the policy has none). */
-  private readonly configTools: ToolProfile | undefined
   private activeName: string | undefined
   private readonly genHistory: Array<{ password: string; at: number }> = []
 
@@ -4451,7 +4454,6 @@ export class VaultGateway extends TypertRemoteService {
     this.activeName = config.name
     this.accessPolicy = config.accessPolicy ?? { mode: config.accessMode ?? 'ask', autoCapture: config.autoCapture ?? false }
     this.backupRetention = config.backupRetention ?? 10
-    this.configTools = config.tools
   }
 
   private async ensureStore(): Promise<VaultStore> {
@@ -4484,8 +4486,8 @@ export class VaultGateway extends TypertRemoteService {
       accessMode: this.accessPolicy.mode,
       autoCapture: this.accessPolicy.autoCapture,
       autoLockSeconds: this.accessPolicy.autoLockSeconds ?? 0,
-      toolProfile: this.accessPolicy.toolProfile ?? this.configTools ?? 'basic',
-      toolGroups: this.accessPolicy.toolGroups ?? [],
+      toolProfile: (await sharedToolProfile(this.policyConfig())).profile,
+      toolGroups: (await sharedToolProfile(this.policyConfig())).groups,
     }
   }
 
@@ -4496,14 +4498,13 @@ export class VaultGateway extends TypertRemoteService {
     if (profile !== 'basic' && profile !== 'standard' && profile !== 'full' && profile !== 'custom') {
       throw new Error(`vault: invalid tool profile "${String(profile)}" (expected basic, standard, full, or custom)`)
     }
-    this.accessPolicy.toolProfile = profile
-    if (profile === 'custom') {
-      const allowed = new Set<string>(OPTIONAL_TOOL_GROUPS)
-      this.accessPolicy.toolGroups = (Array.isArray(groups) ? groups : []).filter(g => allowed.has(g))
-    }
-    await this.persistPolicy()
+    const allowed = new Set<string>(OPTIONAL_TOOL_GROUPS)
+    const nextGroups = profile === 'custom'
+      ? (Array.isArray(groups) ? groups : []).filter(g => allowed.has(g))
+      : (await sharedToolProfile(this.policyConfig())).groups
+    await persistToolProfile(this.policyConfig(), { profile, groups: nextGroups })
     const applied = reapplyToolProfile?.() ?? 0
-    return { toolProfile: profile, tools: applied, toolGroups: this.accessPolicy.toolGroups ?? [] }
+    return { toolProfile: profile, tools: applied, toolGroups: nextGroups }
   }
 
   /** Switch the runtime access mode from the Settings UI and persist it. */
@@ -4548,11 +4549,17 @@ export class VaultGateway extends TypertRemoteService {
   }
 
   /** Persist the current policy to `<vault dir>/access.json`. */
-  private async persistPolicy(): Promise<void> {
-    const file = accessPolicyFile({
+  /** Config subset addressing the currently active vault (for policy files). */
+  private policyConfig(): Config {
+    return {
+      masterPassword: this.masterPassword,
       ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}),
-      ...(this.vaultName !== undefined ? { name: this.vaultName } : {}),
-    })
+      ...(this.activeName !== undefined ? { name: this.activeName } : {}),
+    } as unknown as Config
+  }
+
+  private async persistPolicy(): Promise<void> {
+    const file = accessPolicyFile(this.policyConfig())
     await mkdir(dirname(file), { recursive: true, mode: 0o700 })
     await writeFile(file, JSON.stringify(this.accessPolicy, null, 2), { mode: 0o600 })
   }
@@ -5399,6 +5406,9 @@ export class VaultGateway extends TypertRemoteService {
     }
     this.activeName = clean
     const store = await this.ensureStore()
+    // Access policy is per vault: rebind to the new vault's object/file so a
+    // later setAccessMode / setAutoCapture writes the right file.
+    this.accessPolicy = await sharedAccessPolicy(this.policyConfig())
     store.audit('switch', undefined, this.activeName)
     return { switched: true, name: this.activeName }
   }
@@ -5965,10 +5975,6 @@ interface AccessPolicy {
   autoCapture: boolean
   /** Auto-lock idle timeout in seconds (0 = never); persisted with the policy. */
   autoLockSeconds?: number
-  /** Tool profile (which model tools are registered); persisted with the policy. */
-  toolProfile?: ToolProfile
-  /** Groups switched on when toolProfile is 'custom'. */
-  toolGroups?: string[]
 }
 
 const sharedAccessPolicies = new Map<string, AccessPolicy>()
@@ -5988,9 +5994,61 @@ function resolveVaultPath(config: Config): string {
   return defaultVaultPath(currentVaultName ?? config.name)
 }
 
-/** The `<vault dir>/access.json` path holding the persisted access policy. */
+/** Path holding one vault's persisted access policy. The `default` vault keeps
+ * the historical `access.json`; every other vault gets its own
+ * `access-<name>.json`, so two vaults in the same directory never share (or
+ * overwrite) each other's mode / auto-capture / auto-lock settings. */
 function accessPolicyFile(config: Config): string {
-  return join(dirname(resolveVaultPath(config)), 'access.json')
+  const path = resolveVaultPath(config)
+  const dir = dirname(path)
+  const name = basename(path).replace(/\.json$/i, '')
+  return name === '' || name === 'default' ? join(dir, 'access.json') : join(dir, `access-${name}.json`)
+}
+
+/** Path holding the plugin-wide tool profile (`<vault dir>/tools.json`).
+ * The tool catalog is a process-wide setting: it is not per vault. */
+function toolsProfileFile(config: Config): string {
+  return join(dirname(resolveVaultPath(config)), 'tools.json')
+}
+
+/** Cached plugin-wide tool profile (one per vault directory). */
+const sharedToolProfiles = new Map<string, { profile: ToolProfile; groups: string[] }>()
+
+/** Read (or initialize) the plugin-wide tool profile, migrating a legacy value
+ * that used to live inside access.json. */
+async function sharedToolProfile(config: Config): Promise<{ profile: ToolProfile; groups: string[] }> {
+  const dir = dirname(resolveVaultPath(config))
+  const cached = sharedToolProfiles.get(dir)
+  if (cached !== undefined) return cached
+  let state: { profile: ToolProfile; groups: string[] } = { profile: config.tools ?? 'basic', groups: [] }
+  try {
+    const parsed = JSON.parse(await readFile(toolsProfileFile(config), 'utf8')) as { profile?: unknown; groups?: unknown }
+    const p = parsed.profile
+    if (p === 'basic' || p === 'standard' || p === 'full' || p === 'custom') {
+      state = { profile: p, groups: Array.isArray(parsed.groups) ? parsed.groups.filter((g): g is string => typeof g === 'string') : [] }
+    }
+  } catch {
+    // No tools.json yet: migrate a legacy toolProfile stored in access.json.
+    try {
+      const legacy = JSON.parse(await readFile(accessPolicyFile(config), 'utf8')) as { toolProfile?: unknown; toolGroups?: unknown }
+      if (legacy.toolProfile === 'basic' || legacy.toolProfile === 'standard' || legacy.toolProfile === 'full' || legacy.toolProfile === 'custom') {
+        state = {
+          profile: legacy.toolProfile,
+          groups: Array.isArray(legacy.toolGroups) ? legacy.toolGroups.filter((g): g is string => typeof g === 'string') : [],
+        }
+      }
+    } catch { /* first run */ }
+  }
+  sharedToolProfiles.set(dir, state)
+  return state
+}
+
+/** Persist the plugin-wide tool profile. */
+async function persistToolProfile(config: Config, state: { profile: ToolProfile; groups: string[] }): Promise<void> {
+  sharedToolProfiles.set(dirname(resolveVaultPath(config)), state)
+  const file = toolsProfileFile(config)
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+  await writeFile(file, JSON.stringify(state, null, 2), { mode: 0o600 })
 }
 
 /** Read a persisted access policy, defaulting to the configured values. */
@@ -6006,10 +6064,7 @@ async function loadAccessPolicy(config: Config): Promise<AccessPolicy> {
       ...(typeof parsed.autoLockSeconds === 'number' && Number.isFinite(parsed.autoLockSeconds) && parsed.autoLockSeconds >= 0
         ? { autoLockSeconds: parsed.autoLockSeconds }
         : {}),
-      ...(parsed.toolProfile === 'basic' || parsed.toolProfile === 'standard' || parsed.toolProfile === 'full' || parsed.toolProfile === 'custom'
-        ? { toolProfile: parsed.toolProfile }
-        : {}),
-      ...(Array.isArray(parsed.toolGroups) ? { toolGroups: parsed.toolGroups.filter((g): g is string => typeof g === 'string') } : {}),
+
     }
   } catch {
     return fallback

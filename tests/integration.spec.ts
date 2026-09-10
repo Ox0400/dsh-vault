@@ -3328,3 +3328,34 @@ test('tool profiles gate registration: basic by default, switchable at runtime',
     assert.equal(sessOff.isError, true, 'sessions group is off in this custom profile')
   }, { tools: 'basic' })
 })
+
+test('access policy is per vault; tool profile is plugin-wide', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    // alpha (mounted by name) starts in the configured mode
+    const before = await gateway.config()
+    assert.equal(before.accessMode, 'auto')
+    assert.equal(before.toolProfile, 'basic', 'default profile is basic')
+
+    // switch to a second vault and change ITS policy
+    await gateway.switchVault('beta')
+    await gateway.setAccessMode('readonly')
+    const beta = await gateway.config()
+    assert.equal(beta.accessMode, 'readonly')
+    assert.equal(beta.toolProfile, 'basic', 'tool profile is shared')
+
+    // tool profile is plugin-wide: switching it affects every vault
+    await gateway.setToolProfile('full')
+    assert.equal((await gateway.config()).toolProfile, 'full')
+
+    // back to alpha: its own policy is untouched by beta's change
+    await gateway.switchVault('alpha')
+    const alpha = await gateway.config()
+    assert.equal(alpha.accessMode, 'auto', 'alpha policy must not inherit beta readonly')
+    assert.equal(alpha.toolProfile, 'full', 'tool profile stays full across vaults')
+
+    // and beta kept its own value
+    await gateway.switchVault('beta')
+    assert.equal((await gateway.config()).accessMode, 'readonly')
+  }, { name: 'alpha', tools: 'basic' })
+})
