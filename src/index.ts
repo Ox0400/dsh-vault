@@ -5485,10 +5485,33 @@ export class VaultGateway extends TypertRemoteService {
     const source = join(dir, `${name}.json`)
     if (!(await existsFile(source))) throw new Error(`vaultDelete: vault "${name}" not found`)
     await unlink(source)
+    // Sidecars belong to the vault that is gone: its audit trail and its
+    // per-vault access policy would otherwise outlive it (and a re-created
+    // vault of the same name would silently inherit the stale policy).
+    const removed: string[] = [`${name}.json`]
+    for (const sidecar of [`${name}-audit.json`, `access-${name}.json`]) {
+      if (await existsFile(join(dir, sidecar))) {
+        await unlink(join(dir, sidecar))
+        removed.push(sidecar)
+      }
+    }
     sharedVaultStores.delete(`${source}\0${this.masterPassword}`)
     if (this.activeName === name) this.activeName = 'default'
+    // Backups are a safety net: they are kept (and stay listed in the backups
+    // panel) so an accidental delete can still be recovered from them.
+    let kept = 0
+    try {
+      for (const entry of await readdir(dir)) {
+        if (isBackupFile(entry) && backupVaultName(entry) === name) kept++
+      }
+    } catch { /* no dir listing available */ }
     const vaults = await listVaultRoster({ ...(this.vaultPath !== undefined ? { path: this.vaultPath } : {}) }, this.activeName)
-    return { deleted: true, name, active: this.activeName ?? 'default', vaults, note: `vault "${name}" deleted` }
+    return {
+      deleted: true, name, active: this.activeName ?? 'default', vaults,
+      note: kept > 0
+        ? `vault "${name}" deleted (${removed.join(', ')}); ${kept} backup file(s) kept — remove them from the backups list if unwanted`
+        : `vault "${name}" deleted (${removed.join(', ')})`,
+    }
   }
 
   /** Rename a tag across every entry (Bitwarden-style tag merge). */

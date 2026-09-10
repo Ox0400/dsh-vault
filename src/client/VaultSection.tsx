@@ -3533,7 +3533,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       tabIndex={0}
                     >
                       <svg className={css.totpRing} width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                        <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
+                        <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--v-ring-track)" strokeWidth="2" />
                         <circle
                           cx="8" cy="8" r="6.5" fill="none"
                           stroke={remaining !== undefined && remaining <= 5 ? 'var(--v-danger)' : 'var(--v-success)'}
@@ -3602,7 +3602,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                     {entry.hasOtp === true && code !== undefined && (
                       <span className={css.detailTotp} title={t('totpInlineHint')}>
                         <svg className={css.totpRing} width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
-                          <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
+                          <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--v-ring-track)" strokeWidth="2" />
                           <circle
                             cx="8" cy="8" r="6.5" fill="none"
                             stroke={remaining !== undefined && remaining <= 5 ? 'var(--v-danger)' : 'var(--v-success)'}
@@ -3785,7 +3785,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           {report !== null && (
             <span className={`${css.badge} ${report.verdict === 'good' ? css.badgeOk : report.verdict === 'fair' ? css.badgeWarn : css.badgeDanger}`}>
               <svg className={css.scoreRing} width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--dsh-color-border, #ddd)" strokeWidth="2" />
+                <circle cx="8" cy="8" r="6.5" fill="none" stroke="var(--v-ring-track)" strokeWidth="2" />
                 <circle
                   cx="8" cy="8" r="6.5" fill="none"
                   stroke={report.verdict === 'good' ? 'var(--v-success)' : report.verdict === 'fair' ? 'var(--v-warn)' : 'var(--v-danger)'}

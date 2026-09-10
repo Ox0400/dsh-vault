@@ -46,8 +46,61 @@ const VSS_GET = `(function () {
     return vals.indexOf('default') >= 0
   })
 })()`
-/** Ensure a dedicated vault exists and is active (creating it on first use). */
+
+/**
+ * Queue-based dialog handling. A plain `dialog.accept()` answers a prompt with
+ * an empty string, which silently aborts vault creation and used to leave the
+ * script running against the REAL vault — so prompt answers are queued instead.
+ */
+export function installDialogs(page) {
+  if (page.__dshDialogs === true) return page.__dshPromptAnswers
+  const answers = []
+  page.__dshPromptAnswers = answers
+  page.on('dialog', async (d) => {
+    try {
+      if (d.type() === 'prompt') await d.accept(answers.length > 0 ? answers.shift() : '')
+      else await d.accept()
+    } catch { /* already answered by the caller */ }
+  })
+  page.__dshDialogs = true
+  return answers
+}
+
+/** Answer the next window.prompt/confirm that the page raises. */
+export function answerPrompt(page, value) {
+  installDialogs(page).push(value)
+}
+
+/** Name of the vault the UI currently has selected ('' when unavailable). */
+export async function activeVault(page) {
+  return page.evaluate(() => {
+    const sel = ([...document.querySelectorAll('select')].find(function (x) {
+      const al = (x.getAttribute('aria-label') || '').toLowerCase()
+      if (al.indexOf('vault') >= 0 || al.indexOf('保险库') >= 0) return true
+      return [...x.querySelectorAll('option')].some(function (o) { return o.value === 'default' })
+    }))
+    return sel ? String(sel.value) : ''
+  })
+}
+
+/**
+ * Hard guard: every E2E must run against a throwaway vault. Throws instead of
+ * quietly testing (and writing) the user's real data.
+ */
+export async function assertActiveVault(page, name = TEST_VAULT) {
+  const active = await activeVault(page)
+  if (active !== name) {
+    throw new Error(`E2E aborted: active vault is "${active || '(unknown)'}", expected "${name}". Refusing to touch the real vault.`)
+  }
+  return active
+}
+
+/** Ensure a dedicated vault exists and is ACTIVE (creating it on first use). */
 export async function useVault(page, name = TEST_VAULT) {
+  if (name === 'default' && process.env.DSH_E2E_ALLOW_DEFAULT !== '1') {
+    throw new Error('E2E aborted: refusing to run against the "default" vault (set DSH_E2E_ALLOW_DEFAULT=1 only for read-only checks).')
+  }
+  installDialogs(page)
   await openSettings(page, '凭据库')
   const exists = await page.evaluate((n) => {
     const sel = ([...document.querySelectorAll('select')].find(function (x) {
@@ -60,14 +113,14 @@ export async function useVault(page, name = TEST_VAULT) {
     // create via vault management (＋ New vault → prompt name)
     await page.evaluate(() => { [...document.querySelectorAll('button,[role=tab],li,span')].find(x => /^权限$/.test((x.textContent || '').trim()))?.click() })
     await page.waitForTimeout(1200)
-    // The caller must register a page dialog handler that accepts prompts
-    // (useVault triggers a window.prompt for the vault name) and confirms.
+    answerPrompt(page, name)
     await page.evaluate(() => { [...document.querySelectorAll('button')].find(x => /新建保险库/.test((x.textContent || '').trim()))?.click() })
     await page.waitForTimeout(2500)
-  } else {
-    await switchVault(page, name)
   }
+  await switchVault(page, name)
   await openSettings(page, '凭据库')
+  await page.waitForTimeout(800)
+  await assertActiveVault(page, name)
   return name
 }
 
@@ -97,6 +150,7 @@ export async function switchVault(page, name) {
 export async function wipeVault(page, name = TEST_VAULT) {
   await switchVault(page, name)
   await page.waitForTimeout(1200)
+  await assertActiveVault(page, name)
   // toggle bulk select, tick all visible rows, delete
   await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /批量选择/.test((x.textContent || '').trim())); b?.click() })
   await page.waitForTimeout(700)

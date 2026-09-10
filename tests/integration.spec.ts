@@ -8,9 +8,10 @@
 
 import { test, expect } from 'vitest'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -3379,5 +3380,43 @@ test('vault listing never shows sidecars (access-*/tools/meta/audit/backups)', a
     }
     // switching to a sidecar is rejected with a clear message (not a format error)
     await assert.rejects(() => gateway.switchVault('tools'), /sidecar|not a vault/i)
+  }, { name: 'default' })
+})
+
+test('deleting a vault removes its sidecars and keeps its backups', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const dir = join(process.env.DSH_HOME as string, 'vault')
+    const doomed = 'doomed'
+    // Create the vault by switching to it, then give it data, a policy and a
+    // backup so every sidecar the vault owns actually exists on disk.
+    await gateway.switchVault(doomed)
+    await gateway.add({ title: 'in doomed', password: 'pw-doomed-1234' })
+    await gateway.setAccessMode('ask')
+    await gateway.backup()
+    const auditPath = join(dir, `${doomed}-audit.json`)
+    const policyPath = join(dir, `access-${doomed}.json`)
+    const vaultPath = join(dir, `${doomed}.json`)
+    for (const p of [vaultPath, auditPath, policyPath]) {
+      assert.ok(existsSync(p), `${basename(p)} exists before the delete`)
+    }
+    const backupsBefore = (await readdir(dir)).filter(f => f.startsWith(`${doomed}-backups-`))
+    assert.ok(backupsBefore.length > 0, 'a backup exists before the delete')
+
+    const res = await gateway.vaultDelete(doomed, true)
+    assert.equal(res.deleted, true)
+    assert.equal(res.active, 'default')
+    // The vault and the sidecars that belong to it are gone …
+    for (const p of [vaultPath, auditPath, policyPath]) {
+      assert.equal(existsSync(p), false, `${basename(p)} removed with the vault`)
+    }
+    // … its backups survive as a recovery net, and the note says so.
+    const backupsAfter = (await readdir(dir)).filter(f => f.startsWith(`${doomed}-backups-`))
+    assert.deepEqual(backupsAfter.sort(), backupsBefore.sort())
+    assert.match(res.note, /backup file\(s\) kept/)
+    // Re-creating a vault of the same name starts from a clean policy.
+    await gateway.switchVault(doomed)
+    assert.equal(existsSync(policyPath), false, 'no stale policy is inherited by the new vault')
+    assert.equal((await gateway.list()).entries.length, 0)
   }, { name: 'default' })
 })

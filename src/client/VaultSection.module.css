@@ -18,6 +18,11 @@
   --v-warn: var(--dsw-alias-state-warn-primary, #c98a1b);
   --v-warn-bg: var(--dsw-alias-state-warn-tertiary, rgba(201, 138, 27, 0.12));
   --v-hover: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.1));
+  /* Track of the small TOTP / strength progress rings: the --dsw-alias-border-*
+     tokens are tuned for surfaces and read correctly on both themes. */
+  --v-ring-track: var(--dsw-alias-border-l3, #bdbdbd);
+  --v-mono: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --v-shadow: var(--dsw-elevation-panel, 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -181,7 +186,7 @@
   background: var(--v-bg-1);
   border: 1px solid var(--v-border);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--v-shadow);
 }
 
 .moreMenu button {
@@ -239,7 +244,7 @@
 }
 
 .totp {
-  font-family: var(--dsw-font-mono, monospace);
+  font-family: var(--v-mono);
   font-size: 13px;
   color: var(--v-accent);
 }
@@ -467,7 +472,7 @@
 }
 
 .pwHistPwd {
-  font-family: var(--dsh-font-mono, monospace);
+  font-family: var(--v-mono);
   font-size: 13px;
   word-break: break-all;
 }
@@ -692,11 +697,6 @@
 .badgeDanger {
   border-color: var(--v-danger);
   color: var(--v-danger);
-}
-.footer {
-  font-size: 12px;
-  opacity: 0.6;
-  margin: 0;
 }
 
 .kindIcon {
@@ -984,32 +984,17 @@
   -webkit-box-decoration-break: clone;
 }
 
-/* CSV import preview panel (masked rows, confirm before commit). */
-.previewBox {
-  border: 1px solid var(--v-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-top: 10px;
-}
-.previewScroll {
-  max-height: 220px;
-  overflow-y: auto;
-  margin: 6px 0;
-}
-.previewTable {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
-.previewTable th,
-.previewTable td {
-  text-align: left;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--v-border);
-}
-.previewTable th {
-  opacity: 0.7;
-  font-weight: 600;
+/* Attachment list inside the entry detail box: own full-width row so the label
+   and its files stay separated from the fields above. */
+.attachBox {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--v-border);
 }
 
 /* Attachment add/upload control inside the detail box. */
@@ -1388,14 +1373,6 @@
 .actionBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* Compact import/export button grid. */
-.transferGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
 }
 
 /* Import source list: three aligned columns, no ragged wrapping. */
