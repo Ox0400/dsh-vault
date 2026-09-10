@@ -8,7 +8,7 @@
 
 import { test, expect } from 'vitest'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -3358,4 +3358,26 @@ test('access policy is per vault; tool profile is plugin-wide', async () => {
     await gateway.switchVault('beta')
     assert.equal((await gateway.config()).accessMode, 'readonly')
   }, { name: 'alpha', tools: 'basic' })
+})
+
+test('vault listing never shows sidecars (access-*/tools/meta/audit/backups)', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    const dir = join(process.env.DSH_HOME as string, 'vault')
+    await mkdir(dir, { recursive: true })
+    // sidecars that live beside vaults
+    for (const f of ['access-test.json', 'tools.json', 'meta.json', 'default-audit.json']) {
+      await writeFile(join(dir, f), '{}')
+    }
+    // make the vault file exist (listVaults walks the directory)
+    await gateway.add({ title: 'seed', password: 'pw-seed-1234' })
+    const list = await gateway.listVaults()
+    const names = list.map(v => v.name)
+    assert.ok(names.includes('default'), `default is listed (${names.join(',')})`)
+    for (const hidden of ['access-test', 'tools', 'meta', 'default-audit']) {
+      assert.ok(!names.includes(hidden), `${hidden} must not be listed as a vault (got ${names.join(',')})`)
+    }
+    // switching to a sidecar is rejected with a clear message (not a format error)
+    await assert.rejects(() => gateway.switchVault('tools'), /sidecar|not a vault/i)
+  }, { name: 'default' })
 })

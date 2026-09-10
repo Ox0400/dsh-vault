@@ -511,6 +511,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [auditFilter, setAuditFilter] = useState('')
   const [auditLimit, setAuditLimit] = useState(30)
+  /** Vault picked in the Permissions → vault management row. */
+  const [vaultTarget, setVaultTarget] = useState('')
 
   const [visibleCount, setVisibleCount] = useState(50)
   const [sortBy, setSortBy] = useState<'alpha' | 'recent' | 'created' | 'favorite' | 'smart'>('alpha')
@@ -741,7 +743,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   /** Rename the active (or picked) vault. */
   async function runVaultRename(): Promise<void> {
-    const current = vaults.find(v => v.active)?.name ?? 'default'
+    const current = vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? 'default')
     const target = window.prompt(`${t('vaultRenamePrompt')} (${current})`)
     if (target === null || target.trim() === '' || target.trim() === current) return
     setBusy(true)
@@ -2294,7 +2296,24 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
 
   return (
     <section className={css.section} aria-labelledby="vault-heading">
-      <h2 id="vault-heading">{t('heading')}</h2>
+      <header className={css.vaultHeader}>
+        <h2 id="vault-heading">{t('heading')}</h2>
+        {vaults.length > 0 && (
+          <label className={css.vaultSwitch} title={t('vaultSwitchHint')}>
+            <span className={css.srOnly}>{t('vaultSelect')}</span>
+            <select
+              value={vaults.find(v => v.active)?.name ?? ''}
+              onChange={event => void switchVaultTo(event.target.value)}
+              aria-label={t('vaultSelect')}
+              disabled={locked}
+            >
+              {vaults.map(v => (
+                <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}{v.entries !== undefined ? ` (${v.entries})` : ''}</option>
+              ))}
+            </select>
+          </label>
+        )}
+      </header>
       <p className={css.intro}>{t('intro')}</p>
 
       {locked && (
@@ -2320,19 +2339,6 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         <div className={css.toolbarMain}>
           {locked && (
             <span className={css.lockedTag}>{t('lockedShort')}</span>
-          )}
-          {vaults.length > 0 && (
-            <select
-              className={css.kindFilter}
-              value={vaults.find(v => v.active)?.name ?? ''}
-              onChange={event => void switchVaultTo(event.target.value)}
-              aria-label={t('vaultSelect')}
-              disabled={locked}
-            >
-              {vaults.map(v => (
-                <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}{v.entries !== undefined ? ` (${v.entries})` : ''}</option>
-              ))}
-            </select>
           )}
           <label className={css.searchBox} title={t('searchShortcut')}>
             <span className={css.srOnly}>{t('searchPlaceholder')}</span>
@@ -3028,11 +3034,31 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
           <p className={css.reportTitle}>{t('vaultManageTitle')}</p>
           <div className={css.dupGroup}>
             <span className={css.dupNames}>{t('vaultManageDesc')}: {vaults.find(v => v.active)?.name ?? ''}</span>
-            <button type="button" className={css.dupMerge} onClick={() => void runVaultCreate()} disabled={busy || locked} title={t('vaultNew')}>＋ {t('vaultNew')}</button>
-            <button type="button" className={css.dupMerge} onClick={() => void runVaultRename()} disabled={busy || locked} title={t('vaultRename')}>{t('vaultRename')}</button>
-            {vaults.filter(v => v.name !== 'default').map(v => (
-              <button key={v.name} type="button" className={css.dangerButton} onClick={() => void runVaultDelete(v.name)} disabled={busy || locked} title={t('vaultDelete')}>{t('vaultDelete')} {v.name}</button>
-            ))}
+          </div>
+          <div className={css.vaultManageRow}>
+            <label className={css.vaultTarget}>
+              <span className={css.srOnly}>{t('vaultTargetLabel')}</span>
+              <select
+                value={vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? '')}
+                onChange={event => setVaultTarget(event.target.value)}
+                disabled={locked}
+                aria-label={t('vaultTargetLabel')}
+                title={t('vaultTargetHint')}
+              >
+                {vaults.map(v => (
+                  <option key={v.name} value={v.name}>{v.name}{v.active ? ' *' : ''}</option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className={css.dupMerge} onClick={() => void runVaultRename()} disabled={busy || locked} title={t('vaultRenameHint')}>{t('vaultRename')}</button>
+            <button
+              type="button"
+              className={css.dangerButton}
+              onClick={() => void runVaultDelete(vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? ''))}
+              disabled={busy || locked || (vaultTarget !== '' ? vaultTarget : (vaults.find(v => v.active)?.name ?? '')) === 'default'}
+              title={t('vaultDeleteHint')}
+            >{t('vaultDelete')}</button>
+            <button type="button" className={css.dupMerge} onClick={() => void runVaultCreate()} disabled={busy || locked} title={t('vaultNewHint')}>＋ {t('vaultNew')}</button>
           </div>
         </div>
       )}

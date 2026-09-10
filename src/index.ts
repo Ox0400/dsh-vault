@@ -5400,8 +5400,7 @@ export class VaultGateway extends TypertRemoteService {
     // themselves: sidecars (audit log), access/meta metadata, exports and
     // backups. Switching to one would open a document without a format
     // version and fail confusingly — reject up front with a clear message.
-    if (clean.endsWith('-audit') || ['access', 'meta'].includes(clean)
-      || clean.startsWith('vault-export-') || isBackupFile(`${clean}.json`)) {
+    if (isNonVaultFile(clean) || isBackupFile(`${clean}.json`)) {
       throw new Error('vault: that is a metadata/sidecar file, not a vault (choose a real vault from the list)')
     }
     this.activeName = clean
@@ -5423,7 +5422,7 @@ export class VaultGateway extends TypertRemoteService {
       for (const entry of entries) {
         const m = /^(.*)\.json$/.exec(entry)
         if (!m) continue
-        if (['access', 'meta'].includes(m[1]!) || m[1]!.endsWith('-audit') || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
+        if (isNonVaultFile(m[1]!) || isBackupFile(entry)) continue
         names.push(m[1]!)
       }
     } catch { /* no dir yet */ }
@@ -5998,6 +5997,12 @@ function resolveVaultPath(config: Config): string {
  * the historical `access.json`; every other vault gets its own
  * `access-<name>.json`, so two vaults in the same directory never share (or
  * overwrite) each other's mode / auto-capture / auto-lock settings. */
+/** Files that live beside vaults but are NOT vaults: sidecars and metadata. */
+function isNonVaultFile(name: string): boolean {
+  return name === 'access' || name.startsWith('access-') || name === 'tools' || name === 'meta'
+    || name.endsWith('-audit') || name.startsWith('vault-export-')
+}
+
 function accessPolicyFile(config: Config): string {
   const path = resolveVaultPath(config)
   const dir = dirname(path)
