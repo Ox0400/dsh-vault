@@ -26,6 +26,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { envLinesFor, shellQuote, type EnvExportable } from './env-export.ts'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore, type CookieData } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
@@ -6598,11 +6599,6 @@ function estimateStrength(password: string): { score: number; verdict: string; f
 
 /** Quote a value for safe use in .env / shell export (single-quote, escaping
  * embedded single quotes the POSIX way). */
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
-}
-
-
 /** Generate a random username from adjective/noun syllables + digits. */
 function generateUsername(parts: number): string {
   const syllables = ['orca', 'plover', 'ferret', 'manta', 'koala', 'panda', 'otter', 'lynx',
@@ -6632,72 +6628,8 @@ function totpWith(input: string, nowMs: number, period: number, digits: number):
 /** Accept tags as an array or a comma/semicolon-separated string. */
 
 /** Compute env lines for env-flagged entries (optionally kind-filtered). */
-/** Secret fields, most-primary first. The first present one is what an entry's
- * `envKey` names; the rest follow as `<envKey>_<SUFFIX>` (or `<TITLE>_<SUFFIX>`
- * when no envKey is set). */
-const ENV_FIELD_ORDER = ['apiKey', 'secret', 'accessToken', 'refreshToken', 'privateKey', 'password', 'cardNumber', 'cardCvv'] as const
-
-/** Field name → env-key suffix, so `title: DASHSCOPE` + `apiKey` renders the
- * vendor-standard `DASHSCOPE_API_KEY` rather than `DASHSCOPE_APIKEY`. */
-const ENV_FIELD_SUFFIX: Record<string, string> = {
-  apiKey: 'API_KEY',
-  secret: 'SECRET',
-  accessToken: 'ACCESS_TOKEN',
-  refreshToken: 'REFRESH_TOKEN',
-  privateKey: 'PRIVATE_KEY',
-  password: 'PASSWORD',
-  cardNumber: 'CARD_NUMBER',
-  cardCvv: 'CARD_CVV',
-  otpSecret: 'OTP_SECRET',
-}
-
-/** Shell/POSIX-safe env key from arbitrary text. */
-function envKeyFrom(text: string): string {
-  return text.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-}
-
 async function envLines(store: VaultStore, kind?: string, ids?: string[], keyPrefix = ''): Promise<string[]> {
-  const lines: string[] = []
-  const seen = new Set<string>()
-  for (const entry of store.list()) {
-    if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
-    if (ids !== undefined && ids.length > 0 && !ids.includes(entry.id)) continue
-    if (!(entry.tags ?? []).includes('env')) continue
-
-    // An explicit `envKey` wins verbatim (no prefix, no title derivation);
-    // otherwise keys derive from the title so exports stay predictable.
-    const explicit = typeof entry.envKey === 'string' && entry.envKey.length > 0 ? entry.envKey : undefined
-    const base = explicit ?? keyPrefix + envKeyFrom(entry.title)
-    if (base.length === 0) continue
-
-    const record = entry as unknown as Record<string, unknown>
-    const push = (key: string, value: string): void => {
-      if (key.length === 0 || seen.has(key)) return // first entry wins
-      seen.add(key)
-      lines.push(`${key}=${shellQuote(value)}`)
-    }
-
-    const present = ENV_FIELD_ORDER.filter(field => {
-      const value = record[field]
-      return typeof value === 'string' && value.length > 0
-    })
-    present.forEach((field, index) => {
-      const value = record[field] as string
-      const suffix = ENV_FIELD_SUFFIX[field] ?? envKeyFrom(field)
-      // The primary secret takes the bare name when there is an explicit
-      // envKey, and the derived <TITLE>_<SUFFIX> form otherwise.
-      if (index === 0 && explicit !== undefined) push(explicit, value)
-      else push(`${base}_${suffix}`, value)
-    })
-
-    // Custom fields (region, clientId, scope, …) export under the same base so
-    // a template's extra values are reachable from scripts too.
-    for (const [field, value] of Object.entries(entry.fields ?? {})) {
-      if (typeof value !== 'string' || value.length === 0) continue
-      push(`${base}_${envKeyFrom(field)}`, value)
-    }
-  }
-  return lines
+  return envLinesFor(store.list() as unknown as EnvExportable[], { kind, ids, prefix: keyPrefix })
 }
 
 function normalizeTags(tags: unknown): string[] {

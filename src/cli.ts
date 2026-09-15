@@ -1,0 +1,392 @@
+#!/usr/bin/env node
+/**
+ * `dsh-vault` — script-facing access to a vault, without the model in the loop.
+ *
+ * The plugin hands the vault to the assistant; this CLI hands the same vault to
+ * shells and scripts, so a skill's Python/Node child process can read a secret
+ * without the plaintext ever entering the model's context:
+ *
+ *   export $(dsh-vault env)                  # env-tagged entries as KEY=VALUE
+ *   dsh-vault get my-entry --field apiKey    # one field, stdout only
+ *   dsh-vault export-env .env                # 0600 file for docker/systemd
+ *
+ * Secrets go to stdout and everything else (progress, errors) to stderr, so
+ * `dsh-vault get … | pbcopy` and `$(dsh-vault get …)` behave.
+ *
+ * The core is `runCli(argv, io)`, which tests drive directly without spawning.
+ */
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { existsSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createInterface } from 'node:readline'
+import { openVault, defaultVaultPath, type VaultEntry, type VaultStore } from './store.ts'
+import { envLinesFor, maskSecret, primarySecret, type EnvExportable } from './env-export.ts'
+
+export interface CliIo {
+  out: (text: string) => void
+  err: (text: string) => void
+  env: Record<string, string | undefined>
+  /** Read the master password interactively. Absent when there is no TTY. */
+  readPassword?: (prompt: string) => Promise<string>
+  /** Read one line from stdin (used by --password-stdin). */
+  readStdinLine?: () => Promise<string>
+}
+
+function packageVersion(): string {
+  try {
+    const require = createRequire(import.meta.url)
+    const pkg = require('../package.json') as { version?: string }
+    return pkg.version ?? '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
+const USAGE = `dsh-vault — encrypted credential vault, from the command line
+
+Usage:
+  dsh-vault <command> [options]
+
+Commands:
+  list                    List entries (titles, ids, kinds — never secrets)
+  get <id|title>          Print one field of an entry (default: its main secret)
+  show <id|title>         Print an entry's non-secret fields as JSON
+  env                     Print env-tagged entries as KEY=VALUE lines
+  export-env <path>       Write those lines to a file (mode 0600)
+  verify                  Check the master password (nothing on stdout)
+
+Options:
+  --vault <name>          Named vault (default: "default")
+  --path <file>           Explicit vault file (overrides --vault)
+  --password-stdin        Read the master password from the first stdin line
+  --json                  Machine-readable output
+  -h, --help              This help
+  -V, --version           Version
+
+list options:
+  --kind <k>              Only entries of this kind
+  --tag <t>               Only entries carrying this tag
+
+get options:
+  --field <name>          apiKey | secret | accessToken | refreshToken | privateKey
+                          | password | cardNumber | username | url | fields.<custom>
+  --mask                  Print a masked value (first 4 chars + ***)
+  --all                   Print the whole entry as JSON (every secret — opt-in)
+
+env options:
+  --prefix <P>            Prefix for derived key names (an explicit envKey is kept verbatim)
+  --kind <k>              Only entries of this kind
+  --keys-only             Print key names without values
+  --mask                  Print masked values
+  --file <path>           Write to a file instead of stdout
+
+The master password comes from --password-stdin, then $DSH_VAULT_MASTER_PASSWORD
+(or $DSH_VAULT_PASSWORD), then an interactive prompt. It is never read from the
+plugin's own config file.
+`
+
+interface Parsed {
+  command: string
+  positional: string[]
+  flags: Map<string, string | boolean>
+}
+
+const BOOLEAN_FLAGS = new Set(['json', 'mask', 'keys-only', 'all', 'password-stdin', 'help', 'version'])
+
+function parseArgs(argv: string[]): Parsed {
+  const flags = new Map<string, string | boolean>()
+  const positional: string[] = []
+  let command = ''
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg === '-h' || arg === '--help') { flags.set('help', true); continue }
+    if (arg === '-V' || arg === '--version') { flags.set('version', true); continue }
+    if (arg.startsWith('--')) {
+      const eq = arg.indexOf('=')
+      const name = eq >= 0 ? arg.slice(2, eq) : arg.slice(2)
+      if (eq >= 0) { flags.set(name, arg.slice(eq + 1)); continue }
+      const next = argv[i + 1]
+      if (BOOLEAN_FLAGS.has(name) || next === undefined || next.startsWith('-')) { flags.set(name, true); continue }
+      flags.set(name, next); i++
+      continue
+    }
+    if (command === '') command = arg
+    else positional.push(arg)
+  }
+  return { command, positional, flags }
+}
+
+function stringFlag(parsed: Parsed, name: string): string | undefined {
+  const value = parsed.flags.get(name)
+  return typeof value === 'string' ? value : undefined
+}
+
+/**
+ * Vault file selection, mirroring how the plugin resolves `$DSH_HOME/vault`.
+ *
+ * The injected environment wins over `process.env` so a caller (or a test) can
+ * point the CLI at another harness home without mutating the real one.
+ */
+export function resolveCliVaultPath(parsed: Parsed, env: Record<string, string | undefined>): string {
+  const explicit = stringFlag(parsed, 'path')
+  if (explicit !== undefined) return resolve(explicit)
+  const name = stringFlag(parsed, 'vault') ?? 'default'
+  const home = env.DSH_HOME
+  if (home !== undefined && home.length > 0) return resolve(home, 'vault', `${name}.json`)
+  return defaultVaultPath(name)
+}
+
+/** Interactive prompt with echo off, read from the terminal rather than stdin. */
+async function promptHidden(prompt: string): Promise<string> {
+  const { open } = await import('node:fs/promises')
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open('/dev/tty', 'r+')
+  } catch {
+    const rl = createInterface({ input: process.stdin, output: process.stderr })
+    const answer = await new Promise<string>(res => rl.question(prompt, res))
+    rl.close()
+    return answer
+  }
+  const reader = handle.createReadStream()
+  const writer = handle.createWriteStream()
+  writer.write(prompt)
+  reader.setEncoding('utf8')
+  return await new Promise<string>((res, rej) => {
+    let value = ''
+    const finish = (result: string): void => {
+      reader.destroy()
+      void handle?.close()
+      res(result)
+    }
+    reader.on('data', (chunk: string | Buffer) => {
+      for (const ch of String(chunk)) {
+        if (ch === '\n' || ch === '\r') { writer.write('\n'); finish(value); return }
+        if (ch === '\u0003') { reader.destroy(); void handle?.close(); rej(new Error('aborted')); return }
+        if (ch === '\u007f' || ch === '\b') { value = value.slice(0, -1); continue }
+        value += ch
+      }
+    })
+    reader.on('error', rej)
+  })
+}
+
+async function readStdinLine(): Promise<string> {
+  const rl = createInterface({ input: process.stdin })
+  const line = await new Promise<string>(res => rl.once('line', res))
+  rl.close()
+  return line
+}
+
+/** Master password: --password-stdin, then the environment, then a prompt. */
+async function resolvePassword(parsed: Parsed, io: CliIo): Promise<string> {
+  if (parsed.flags.get('password-stdin') === true) {
+    const read = io.readStdinLine ?? readStdinLine
+    const line = (await read()).replace(/\r?\n$/, '')
+    if (line.length === 0) throw new Error('no password on stdin')
+    return line
+  }
+  for (const key of ['DSH_VAULT_MASTER_PASSWORD', 'DSH_VAULT_PASSWORD']) {
+    const value = io.env[key]
+    if (value !== undefined && value.length > 0) return value
+  }
+  const prompt = io.readPassword ?? (process.stdin.isTTY ? promptHidden : undefined)
+  if (prompt === undefined) {
+    throw new Error('no master password: pass --password-stdin or set DSH_VAULT_MASTER_PASSWORD')
+  }
+  const typed = await prompt('Vault master password: ')
+  if (typed.length === 0) throw new Error('empty master password')
+  return typed
+}
+
+function findEntry(store: VaultStore, needle: string): VaultEntry {
+  const entries = store.list()
+  const byId = entries.find(e => e.id === needle)
+  if (byId !== undefined) return byId
+  const exact = entries.filter(e => e.title === needle)
+  if (exact.length === 1) return exact[0]!
+  const partial = exact.length > 0 ? exact : entries.filter(e => e.title.toLowerCase().includes(needle.toLowerCase()))
+  if (partial.length === 0) throw new Error(`no entry matches "${needle}"`)
+  if (partial.length > 1) {
+    throw new Error(`"${needle}" is ambiguous (${partial.map(e => e.title).join(', ')}) — use the id`)
+  }
+  return partial[0]!
+}
+
+/** Look one field up, supporting `fields.<name>` for custom fields. */
+function fieldValue(entry: VaultEntry, name: string): unknown {
+  if (!name.startsWith('fields.')) return (entry as unknown as Record<string, unknown>)[name]
+  return (entry.fields ?? {})[name.slice('fields.'.length)]
+}
+
+/** Non-secret projection of an entry, for `list --json` / `show`. */
+function publicFields(entry: VaultEntry): Record<string, unknown> {
+  const { id, title, kind, username, email, phone, host, port, url, tags, icon, color, sensitivity,
+    favorite, createdAt, updatedAt, envKey, rotationDays, expiresAt, cardExpiry, cardHolder } = entry
+  const optional: Record<string, unknown> = {
+    kind, username, email, phone, host, port, url, tags, icon, color, sensitivity,
+    favorite, envKey, rotationDays, expiresAt, cardExpiry, cardHolder, createdAt, updatedAt,
+  }
+  const out: Record<string, unknown> = { id, title }
+  for (const [key, value] of Object.entries(optional)) {
+    if (value !== undefined) out[key] = value
+  }
+  out.hasSecret = primarySecret(entry as unknown as EnvExportable) !== undefined
+  return out
+}
+
+const COMMANDS = new Set(['list', 'get', 'show', 'env', 'export-env', 'verify'])
+
+/** Run one CLI invocation; returns the process exit code. */
+export async function runCli(argv: string[], io: CliIo): Promise<number> {
+  const parsed = parseArgs(argv)
+  if (parsed.flags.get('version') === true) { io.out(`${packageVersion()}\n`); return 0 }
+  if (parsed.flags.get('help') === true || parsed.command === 'help') { io.out(USAGE); return 0 }
+  if (parsed.command === '') { io.err(USAGE); return 2 }
+  if (!COMMANDS.has(parsed.command)) {
+    io.err(`dsh-vault: unknown command "${parsed.command}"\n\n${USAGE}`)
+    return 2
+  }
+
+  const json = parsed.flags.get('json') === true
+  const mask = parsed.flags.get('mask') === true
+  const keysOnly = parsed.flags.get('keys-only') === true
+  const path = resolveCliVaultPath(parsed, io.env)
+  if (!existsSync(path)) {
+    io.err(`dsh-vault: vault not found at ${path}\n`)
+    io.err('hint: --vault <name> selects a named vault; set DSH_HOME if the vault lives elsewhere.\n')
+    return 1
+  }
+
+  let store: VaultStore
+  try {
+    store = await openVault({ path, masterPassword: await resolvePassword(parsed, io) })
+  } catch (err) {
+    io.err(`dsh-vault: ${err instanceof Error ? err.message : String(err)}\n`)
+    return 1
+  }
+
+  try {
+    if (parsed.command === 'verify') {
+      // Nothing on stdout, so `dsh-vault verify && …` is usable in scripts.
+      io.err(`dsh-vault: master password ok (${store.list().length} entries)\n`)
+      return 0
+    }
+
+    if (parsed.command === 'list') {
+      const kind = stringFlag(parsed, 'kind')
+      const tag = stringFlag(parsed, 'tag')
+      const entries = store.list().filter(entry =>
+        (kind === undefined || (entry.kind ?? 'login') === kind)
+        && (tag === undefined || (entry.tags ?? []).includes(tag)))
+      if (json) {
+        io.out(`${JSON.stringify(entries.map(publicFields), null, 2)}\n`)
+        return 0
+      }
+      for (const entry of entries) {
+        const identity = [entry.username, entry.host, entry.url]
+          .filter((v): v is string => typeof v === 'string' && v.length > 0).join(' · ')
+        io.out(`${entry.id}  ${(entry.kind ?? 'login').padEnd(8)}  ${entry.title}${identity.length > 0 ? `  (${identity})` : ''}\n`)
+      }
+      return 0
+    }
+
+    if (parsed.command === 'show') {
+      const needle = parsed.positional[0]
+      if (needle === undefined) { io.err('dsh-vault: show needs an entry id or title\n'); return 2 }
+      io.out(`${JSON.stringify(publicFields(findEntry(store, needle)), null, 2)}\n`)
+      return 0
+    }
+
+    if (parsed.command === 'get') {
+      const needle = parsed.positional[0]
+      if (needle === undefined) { io.err('dsh-vault: get needs an entry id or title\n'); return 2 }
+      const entry = findEntry(store, needle)
+      if (parsed.flags.get('all') === true) {
+        io.out(`${JSON.stringify(entry, null, 2)}\n`)
+        return 0
+      }
+      let name = stringFlag(parsed, 'field')
+      let value: unknown
+      if (name === undefined) {
+        const primary = primarySecret(entry as unknown as EnvExportable)
+        if (primary === undefined) { io.err(`dsh-vault: "${entry.title}" holds no secret\n`); return 1 }
+        name = primary.field
+        value = primary.value
+      } else {
+        value = fieldValue(entry, name)
+      }
+      if (typeof value !== 'string' || value.length === 0) {
+        io.err(`dsh-vault: "${entry.title}" has no field "${name}"\n`)
+        return 1
+      }
+      const textual = name === 'username' || name === 'url' || name === 'notes' || name.startsWith('fields.')
+      const shown = mask && !textual ? maskSecret(value) : value
+      io.out(json ? `${JSON.stringify({ id: entry.id, title: entry.title, field: name, value: shown })}\n` : `${shown}\n`)
+      return 0
+    }
+
+    // env / export-env
+    const prefix = stringFlag(parsed, 'prefix') ?? ''
+    const kind = stringFlag(parsed, 'kind')
+    const lines = envLinesFor(store.list() as unknown as EnvExportable[], { prefix, ...(kind !== undefined ? { kind } : {}) })
+    const rendered = lines.map(line => {
+      if (keysOnly) return line.split('=')[0] ?? line
+      if (!mask) return line
+      const eq = line.indexOf('=')
+      return `${line.slice(0, eq)}=${maskSecret(line.slice(eq + 1).replace(/^'|'$/g, ''))}`
+    })
+    const target = parsed.command === 'export-env' ? parsed.positional[0] : stringFlag(parsed, 'file')
+    if (parsed.command === 'export-env' && target === undefined) {
+      io.err('dsh-vault: export-env needs a file path\n')
+      return 2
+    }
+    if (target !== undefined) {
+      const body = rendered.join('\n') + (rendered.length > 0 ? '\n' : '')
+      const file = resolve(target)
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+      await writeFile(file, body, { mode: 0o600 })
+      await chmod(file, 0o600)
+      io.err(keysOnly
+        ? `dsh-vault: wrote ${rendered.length} key names to ${file} (no values — --keys-only)\n`
+        : `dsh-vault: wrote ${rendered.length} lines to ${file} (mode 0600)\n`)
+      return 0
+    }
+    io.out(rendered.join('\n') + (rendered.length > 0 ? '\n' : ''))
+    if (rendered.length === 0) io.err('dsh-vault: no env-tagged entries (add the tag "env" to an entry)\n')
+    return 0
+  } catch (err) {
+    io.err(`dsh-vault: ${err instanceof Error ? err.message : String(err)}\n`)
+    return 1
+  } finally {
+    await store.lock().catch(() => {})
+  }
+}
+
+/**
+ * Whether this module is the process entry point (the bin shim).
+ *
+ * `import.meta.url` is the REAL path, while argv[1] may be a symlink (a profile
+ * installs `node_modules/dsh-vault` as one) and may contain characters that need
+ * URL encoding (a space in the checkout path). Compare realpaths instead of
+ * string-building a file URL, which silently failed in both cases.
+ */
+function isEntryPoint(): boolean {
+  const entry = process.argv[1]
+  if (entry === undefined) return false
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return import.meta.url === pathToFileURL(entry).href
+  }
+}
+
+if (isEntryPoint()) {
+  void runCli(process.argv.slice(2), {
+    out: text => process.stdout.write(text),
+    err: text => process.stderr.write(text),
+    env: process.env,
+  }).then(code => { process.exitCode = code })
+}

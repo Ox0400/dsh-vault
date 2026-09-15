@@ -179,6 +179,31 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 
 `dsh plugin --profile web remove dsh-vault` 卸载(同时移除依赖与 layer)。
 
+## 命令行
+
+插件把保险库交给助手,而自带的 `dsh-vault` 命令把**同一个保险库**交给 shell 与脚本 —— 于是技能里的子进程可以自己取密钥,**明文永远不进模型上下文**:
+
+```sh
+export $(dsh-vault env)                    # 带 env 标签的条目 → KEY=VALUE
+dsh-vault get my-entry --field apiKey      # 只取一个字段,仅 stdout
+dsh-vault get my-entry | pbcopy            # 该条目的主密钥
+dsh-vault export-env .env                  # 生成 0600 权限的 .env
+dsh-vault list                             # 标题/id/类型,绝不含密钥
+dsh-vault show my-entry                    # 非敏感字段的 JSON
+```
+
+主密码来源依次为:`--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码。密钥只走 stdout,其余(进度、错误)走 stderr,所以管道与 `$(...)` 都能正常用。
+
+**怎么调用。** `dsh` 本身没有"插件子命令"注册表:启动器只解析自己的参数(`--profile`、`--patch`、`--dump-config`),而 `dsh plugin …` 是把参数**原样转发给 profile 目录里的 pnpm**;`dsh-cmdline` 是给**应用型 bundle** 拥有某个 profile 的参数族的,不是让插件获得 `dsh <插件>` 命令。所以按你的场景选:
+
+```sh
+npx dsh-vault env                        # 直接用已发布包,无需安装
+pnpm --dir ~/.dsh/profiles/web exec dsh-vault env   # 用 profile 里那份
+node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env   # 一定可用
+```
+
+中间那种需要 profile 里由 `pnpm install` 生成的 bin 垫片;最后一种即使 `node_modules/dsh-vault` 只是指向工作区的软链也能用(直接执行文件)。要拿到垫片:把插件作为 profile 的真实依赖安装(`pnpm dsh plugin add dsh-vault`)并在该目录跑一次 `pnpm install`。
+
 ## 环境变量导出
 
 打上 `env` 标签的条目可以用 `vault_env` / `vault_export_env` 导出为 `KEY=VALUE` 行，名字按各家工具链预期的字段名生成：

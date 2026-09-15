@@ -345,6 +345,19 @@ export class VaultStore {
       this.lastActivity = Date.now()
       return
     }
+    // Verify the password FIRST, before touching any entry: a wrong password
+    // would otherwise surface as a raw AEAD failure ("unable to authenticate
+    // data") from whichever entry happens to be decrypted first, for every
+    // caller (the CLI, the plugin, the tools).
+    try {
+      const verify = decrypt(file.verify!, this.key)
+      if (!safeEqual(verify, Buffer.from(VERIFY_PLAINTEXT, 'utf8'))) {
+        throw new Error('vault master password is incorrect')
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('incorrect')) throw err
+      throw new Error('vault master password is incorrect')
+    }
     for (const blob of file.entries) {
       const plaintext = decrypt(blob, this.key)
       const entry = JSON.parse(plaintext.toString('utf8')) as VaultEntry
@@ -353,11 +366,6 @@ export class VaultStore {
       // path deal with an invalid date.
       normalizeTimestamps(entry as unknown as Record<string, unknown>)
       this.entries.set(entry.id, entry)
-    }
-    // Verify the password even when the vault has no entries yet.
-    const verify = decrypt(file.verify!, this.key)
-    if (!safeEqual(verify, Buffer.from(VERIFY_PLAINTEXT, 'utf8'))) {
-      throw new Error('vault master password is incorrect')
     }
     // Restore the persisted audit trail (encrypted sidecar, same key). A
     // missing or unreadable log simply starts fresh.

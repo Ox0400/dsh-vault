@@ -181,6 +181,44 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 
 `dsh plugin --profile web remove dsh-vault` uninstalls (removes both the dependency and the layer).
 
+## Command line
+
+The plugin hands the vault to the assistant; the bundled `dsh-vault` command
+hands the same vault to shells and scripts, so a skill's child process can read
+a secret **without the plaintext ever entering the model's context**:
+
+```sh
+export $(dsh-vault env)                    # env-tagged entries → KEY=VALUE
+dsh-vault get my-entry --field apiKey      # one field, stdout only
+dsh-vault get my-entry | pbcopy            # the entry's primary secret
+dsh-vault export-env .env                  # 0600 file for docker/systemd
+dsh-vault list                             # titles/ids/kinds — never secrets
+dsh-vault show my-entry                    # non-secret fields as JSON
+```
+
+The master password comes from `--password-stdin`, then
+`$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`), then an interactive
+prompt; it is never read from the plugin's config file. Secrets go to stdout and
+everything else to stderr, so pipelines behave.
+
+**How to invoke it.** `dsh` itself has no plugin-subcommand registry: the
+launcher parses only its own flags (`--profile`, `--patch`, `--dump-config`) and
+`dsh plugin …` forwards raw arguments to `pnpm` inside the profile directory.
+`dsh-cmdline` exists so an *app* bundle can own a flag family of a profile, not
+so a plugin gains a `dsh <plugin>` command. So pick whichever fits:
+
+```sh
+npx dsh-vault env                        # published package, no install
+pnpm --dir ~/.dsh/profiles/web exec dsh-vault env   # profile-installed copy
+node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env   # always works
+```
+
+The middle form needs the bin shim that `pnpm install` creates inside the
+profile; the last form works even for a `node_modules/dsh-vault` symlink to a
+checkout, because it invokes the file directly. To get the shim, declare the
+plugin as a real dependency of the profile (`pnpm dsh plugin add dsh-vault`) and
+run `pnpm install` there once.
+
 ## Environment export
 
 Entries tagged `env` can be materialised as `KEY=VALUE` lines (`vault_env`,
