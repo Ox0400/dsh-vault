@@ -38,10 +38,22 @@ export interface EnvExportable {
   id: string
   title: string
   kind?: string
+  /** Explicit names, positional (see {@link envPairsForEntry}). */
+  envKeys?: string[]
+  /** Legacy one-element shorthand; folded into `envKeys` by the store. */
   envKey?: string
   tags?: string[]
   fields?: Record<string, unknown>
   [field: string]: unknown
+}
+
+/** Explicit names, tolerating the legacy single-name field. */
+function explicitNames(entry: EnvExportable): string[] {
+  const list = Array.isArray(entry.envKeys)
+    ? entry.envKeys.filter((name): name is string => typeof name === 'string' && name.length > 0)
+    : []
+  if (list.length > 0) return list
+  return typeof entry.envKey === 'string' && entry.envKey.length > 0 ? [entry.envKey] : []
 }
 
 export interface EnvExportOptions {
@@ -76,8 +88,8 @@ export interface EnvPair {
  * always retrievable by `get`, and vice versa.
  */
 export function envPairsForEntry(entry: EnvExportable, prefix = ''): EnvPair[] {
-  const explicit = typeof entry.envKey === 'string' && entry.envKey.length > 0 ? entry.envKey : undefined
-  const base = explicit ?? prefix + envKeyFrom(entry.title)
+  const names = explicitNames(entry)
+  const base = names[0] ?? prefix + envKeyFrom(entry.title)
   if (base.length === 0) return []
   const pairs: EnvPair[] = []
   const record = entry as unknown as Record<string, unknown>
@@ -88,9 +100,10 @@ export function envPairsForEntry(entry: EnvExportable, prefix = ''): EnvPair[] {
   present.forEach((field, index) => {
     const value = record[field] as string
     const suffix = ENV_FIELD_SUFFIX[field] ?? envKeyFrom(field)
-    // The primary secret takes the bare name when there is an explicit envKey,
-    // and the derived <TITLE>_<SUFFIX> form otherwise.
-    const key = index === 0 && explicit !== undefined ? explicit : `${base}_${suffix}`
+    // Explicit names are positional: names[0] is the primary secret, names[1]
+    // the next one. Fields beyond the list — and every field when no names are
+    // configured — keep the derived <BASE>_<SUFFIX> form.
+    const key = names[index] ?? `${base}_${suffix}`
     pairs.push({ key, field, value })
   })
   // Custom fields (region, clientId, scope, …) export under the same base so a

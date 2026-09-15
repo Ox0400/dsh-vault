@@ -55,6 +55,16 @@ check('get --field picks another field', getField.out === 'rt-456\n', JSON.strin
 const getCustom = await run(['get', 'Tavily', '--field', 'fields.scope'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('get --field reaches custom fields', getCustom.out === 'read write\n', JSON.stringify(getCustom.out))
 
+const aliasField = await run(['get', 'DASHSCOPE_API_KEY', '--fields', 'apikey'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('--fields is an alias and field names are case-insensitive', aliasField.out === 'sk-dash-secret\n', JSON.stringify(aliasField.out))
+
+const unknownFlag = await run(['get', 'DASHSCOPE', '--nope', 'x'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('an unknown option is refused, not ignored', unknownFlag.code === 2 && /unknown option/.test(unknownFlag.err), JSON.stringify(unknownFlag.err.split('\n')[0]))
+
+const showJson = await run(['show', 'Tavily'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+const shownKeys = JSON.parse(showJson.out)
+check('show separates configured from exported names', JSON.stringify(shownKeys.envKeys) === '["TAVILY_TOKEN"]' && shownKeys.exportedKeys.length === 3, JSON.stringify({ envKeys: shownKeys.envKeys, exportedKeys: shownKeys.exportedKeys }))
+
 const masked = await run(['get', 'DASHSCOPE', '--mask'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('get --mask hides the value', masked.out === 'sk-d***\n', JSON.stringify(masked.out))
 
@@ -102,7 +112,7 @@ check('--help exits 0 and lists the commands', help.code === 0 && /export-env/.t
 
 const show = await run(['show', 'Tavily'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const shown = JSON.parse(show.out)
-check('show exposes metadata but no secrets', shown.envKey === 'TAVILY_TOKEN' && shown.hasSecret === true && !JSON.stringify(shown).includes('at-123'), JSON.stringify(shown))
+check('show exposes metadata but no secrets', JSON.stringify(shown.envKeys) === '["TAVILY_TOKEN"]' && shown.hasSecret === true && !JSON.stringify(shown).includes('at-123'), JSON.stringify(shown))
 
 await rm(home, { recursive: true, force: true })
 console.log(`\n${R.filter(r => r.ok).length}/${R.length} checks passed`)

@@ -198,10 +198,14 @@ dsh-vault show my-entry                    # 非敏感字段的 JSON
 
 ```sh
 dsh-vault get DASHSCOPE_API_KEY             # 派生名
-dsh-vault get TAVILY_TOKEN                  # 条目上设的 envKey
-dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # envKey + 字段后缀
+dsh-vault get TAVILY_TOKEN                  # 条目上配置的名字
+dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # 配置名 + 字段后缀
+dsh-vault get ACME_GITHUB_TOKEN --fields apikey   # --field/--fields,字段名不区分大小写
+dsh-vault show ACME_GITHUB_TOKEN             # 非敏感元数据的 JSON
 dsh-vault get DASHSCOPE_API_KEY | my-tool   # 直接喂给工具
 ```
+
+未知参数会直接报错(`--fields` 是 `--field` 的别名;`--nope` 退出码 2,不会被静默忽略)。
 
 `list` 会直接打印可复制的名字,不用猜;`[env]` 标记出真正会被 `dsh-vault env` 导出的条目:
 
@@ -211,7 +215,13 @@ a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  
 9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
 ```
 
-`(+2)` 是这条目还会导出的其他键数量(如 `TAVILY_TOKEN_REFRESH_TOKEN`、`TAVILY_TOKEN_SCOPE`);`list --json` 会在 `envKeys` 里全部列出,并附带 `envTagged`。
+`(+2)` 是这条目还会导出的其他键数量(如 `TAVILY_TOKEN_REFRESH_TOKEN`、`TAVILY_TOKEN_SCOPE`);`list --json` / `show` 会全部列出,并把两件事分开:
+
+| 字段 | 含义 |
+|---|---|
+| `envKeys` | **你配置的**名字(没配就是空数组) |
+| `exportedKeys` | 这条目**实际会导出**的名字,也就是 `get` 接受的名字 |
+| `envTagged` | 是否会被 `dsh-vault env` 包含(取决于 `env` 标签) |
 
 解析顺序:**id → 标题 → `envKey` → 该条目会导出的任意键名**。`get` 与 `env` 共用同一份实现,所以 `env` 打印出来的每个名字都能用 `get` 取回。
 
@@ -255,7 +265,15 @@ ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
 | 同一条目的 `refreshToken` / `fields.scope` | `TAVILY_TOKEN_REFRESH_TOKEN` / `TAVILY_TOKEN_SCOPE` |
 
 - 字段后缀遵循惯例：`apiKey → API_KEY`、`accessToken → ACCESS_TOKEN`、`refreshToken → REFRESH_TOKEN`、`privateKey → PRIVATE_KEY`、`password → PASSWORD`、`cardNumber → CARD_NUMBER`。
-- 派生名字对不上脚本时，给条目设置**环境变量名**（可选字段 `envKey`，也可用 `vault_add`/`vault_update` 写入）：它会**原样**作为该条目主密钥的名字（不加前缀、不从标题推导），次级密钥与自定义字段则以 `<envKey>_<字段>` 挂在后面。必须是合法 POSIX 名（`[A-Za-z_][A-Za-z0-9_]*`），否则保存时直接拒绝。
+- 派生名字对不上脚本时，给条目设置**环境变量名**（可选字段 `envKeys`，也可用 `vault_add`/`vault_update` 写入，编辑器里用逗号分隔）：**按顺序一一对应**、且**原样使用**（不加前缀、不从标题推导）：
+
+  | `envKeys` | 导出结果 |
+  |---|---|
+  | `["DASHSCOPE_API_KEY"]` | `DASHSCOPE_API_KEY=apiKey` |
+  | `["GOOGLE_ACCESS_TOKEN", "GOOGLE_REFRESH_TOKEN"]` | 分别对应 `accessToken`、`refreshToken` |
+  | 条目有 3 个密钥、只配 `["MY_KEY"]` | `MY_KEY`、`MY_KEY_REFRESH_TOKEN`、`MY_KEY_SCOPE` |
+
+  每个名字必须是合法 POSIX 名（`[A-Za-z_][A-Za-z0-9_]*`）、最多 8 个、不可重复。`envKey`（单个字符串）仍作为"只配一个名字"的简写兼容，写入时会被合并进 `envKeys`。
 - 自定义字段同样会导出，形如 `<BASE>_<字段>`。
 
 > 升级提示：1.10.64 起键名从 `DASHSCOPE_APIKEY` 改为符合厂商惯例的 `DASHSCOPE_API_KEY`。若脚本依赖旧写法，给条目设置 `envKey` 固定名字即可。

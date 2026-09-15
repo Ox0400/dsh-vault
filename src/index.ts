@@ -464,7 +464,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       accessToken: { type: 'string', description: 'OAuth access token.' },
       refreshToken: { type: 'string', description: 'OAuth refresh token.' },
       expiresAt: { type: 'integer', description: 'Token/credential expiry epoch millis.' },
-      envKey: { type: 'string', description: 'Exact environment-variable name for vault_env / vault_export_env, e.g. DASHSCOPE_API_KEY (letters, digits and _ only; must not start with a digit). Overrides the derived <TITLE>_<FIELD> name for the entry\'s primary secret.' },
+      envKey: { type: 'string', description: 'Single exact environment-variable name for vault_env / vault_export_env (shorthand for envKeys with one entry).' },
+      envKeys: { type: 'array', items: { type: 'string' }, description: 'Exact environment-variable names, positional: the first names the primary secret, the second the next one, and so on (e.g. ["DASHSCOPE_API_KEY"] or ["GOOGLE_ACCESS_TOKEN","GOOGLE_REFRESH_TOKEN"]). Each must match [A-Za-z_][A-Za-z0-9_]*; without it names derive from the title.' },
       otpSecret: { type: 'string', description: 'TOTP secret: bare Base32 or an otpauth:// URI.' },
       cardNumber: { type: 'string', description: 'Bank/credit card number (kind card).' },
       cardExpiry: { type: 'string', description: 'Card expiry as MM/YY or MM/YYYY (kind card).' },
@@ -517,6 +518,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.refreshToken !== undefined ? { refreshToken: args.refreshToken } : {}),
         ...(args.expiresAt !== undefined ? { expiresAt: args.expiresAt } : {}),
         ...(args.envKey !== undefined ? { envKey: args.envKey } : {}),
+        ...(args.envKeys !== undefined ? { envKeys: args.envKeys } : {}),
         ...(args.otpSecret !== undefined ? { otpSecret: args.otpSecret } : {}),
         ...(args.cardNumber !== undefined ? { cardNumber: args.cardNumber } : {}),
         ...(args.cardExpiry !== undefined ? { cardExpiry: args.cardExpiry } : {}),
@@ -706,7 +708,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       accessToken: { type: 'string', description: 'New OAuth access token.' },
       refreshToken: { type: 'string', description: 'New OAuth refresh token.' },
       expiresAt: { type: 'integer', description: 'New expiry epoch millis.' },
-      envKey: { type: 'string', description: 'Exact environment-variable name for vault_env / vault_export_env (e.g. DASHSCOPE_API_KEY); empty string clears it.' },
+      envKey: { type: 'string', description: 'Single exact environment-variable name for vault_env / vault_export_env; empty string clears it.' },
+      envKeys: { type: 'array', items: { type: 'string' }, description: 'Exact environment-variable names, positional (see vault_add); an empty array clears them.' },
       sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
       rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
       icon: { type: 'string', description: 'Optional emoji/icon shown in the UI (e.g. "🚀").' },
@@ -745,7 +748,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const patch: VaultEntryPatch = {}
       for (const key of [
         'title', 'kind', 'sensitivity', 'favorite', 'rotationDays', 'username', 'email', 'phone', 'password', 'host', 'port', 'privateKey',
-        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'envKey', 'otpSecret', 'url', 'notes', 'tags', 'fields',
+        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'envKey', 'envKeys', 'otpSecret', 'url', 'notes', 'tags', 'fields',
       ] as const) {
         const value = args[key]
         if (value !== undefined) {
@@ -3030,7 +3033,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     description: 'Render entries flagged for environment export (tags contain "env") as KEY=VALUE lines '
       + 'suitable for .env or export statements. Keys derive from the title plus the field name with '
       + 'vendor-standard suffixes (title "DASHSCOPE" + apiKey → DASHSCOPE_API_KEY), and an entry-level '
-      + 'envKey overrides that name verbatim for its primary secret. Custom fields are exported as '
+      + 'envKeys override those names positionally (the first names the primary secret). Custom fields are exported as '
       + '<BASE>_<FIELD> too. Returns the lines so the caller can write them to a file (user-authorized).',
     parameters: {
       kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'] },

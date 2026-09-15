@@ -206,10 +206,15 @@ usually knows:
 
 ```sh
 dsh-vault get DASHSCOPE_API_KEY             # derived key
-dsh-vault get TAVILY_TOKEN                  # the entry's envKey
-dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # envKey + field suffix
+dsh-vault get TAVILY_TOKEN                  # the entry's configured name
+dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # configured name + field suffix
+dsh-vault get ACME_GITHUB_TOKEN --fields apikey   # --field/--fields, case-insensitive
+dsh-vault show ACME_GITHUB_TOKEN             # non-secret metadata as JSON
 dsh-vault get DASHSCOPE_API_KEY | my-tool   # pipe it straight in
 ```
+
+An unknown option is an error (`--fields apikey` is accepted as an alias of
+`--field apiKey`; `--nope` exits 2 rather than being ignored).
 
 `list` prints the name to copy, so a script author never has to guess it — and
 `[env]` marks the entries `dsh-vault env` actually emits:
@@ -221,8 +226,14 @@ a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  
 ```
 
 `(+2)` counts the further keys that entry exports (`TAVILY_TOKEN_REFRESH_TOKEN`,
-`TAVILY_TOKEN_SCOPE`); `list --json` spells them all out in `envKeys`, with
-`envTagged` alongside.
+`TAVILY_TOKEN_SCOPE`); `list --json` / `show` spell them all out, and keep the
+two ideas apart:
+
+| field | meaning |
+|---|---|
+| `envKeys` | the names **you configured** (empty when you configured none) |
+| `exportedKeys` | the names the entry **actually exports**, i.e. what `get` accepts |
+| `envTagged` | whether `dsh-vault env` includes this entry (the `env` tag) |
 
 Resolution order: **id → title → `envKey` → any exported key name**. `get` and
 `env` share one implementation, so every name `env` prints is retrievable by
@@ -287,12 +298,20 @@ expects:
 - The field suffix is vendor-standard: `apiKey → API_KEY`, `accessToken →
   ACCESS_TOKEN`, `refreshToken → REFRESH_TOKEN`, `privateKey → PRIVATE_KEY`,
   `password → PASSWORD`, `cardNumber → CARD_NUMBER`.
-- Set an entry's **env-var name** (optional field `envKey`, also via
-  `vault_add`/`vault_update`) when the derived name is not what your scripts
-  expect: it is used **verbatim** — no prefix, no title — for the entry's
-  primary secret, and secondary secrets/custom fields hang off it as
-  `<envKey>_<FIELD>`. It must be a valid POSIX name
-  (`[A-Za-z_][A-Za-z0-9_]*`); anything else is refused when saving.
+- Set an entry's **env-var names** (optional field `envKeys`, also via
+  `vault_add`/`vault_update`, or comma-separated in the editor) when the derived
+  names are not what your scripts expect. They are **positional** and used
+  **verbatim** (no prefix, no title):
+
+  | `envKeys` | exported |
+  |---|---|
+  | `["DASHSCOPE_API_KEY"]` | `DASHSCOPE_API_KEY=apiKey` |
+  | `["GOOGLE_ACCESS_TOKEN", "GOOGLE_REFRESH_TOKEN"]` | `...=accessToken`, `...=refreshToken` |
+  | `["MY_KEY"]` on an entry with 3 secrets | `MY_KEY`, `MY_KEY_REFRESH_TOKEN`, `MY_KEY_SCOPE` |
+
+  Each name must be a POSIX identifier (`[A-Za-z_][A-Za-z0-9_]*`), at most 8,
+  and no duplicates. `envKey` (singular string) is still accepted as a
+  one-element shorthand and is folded into `envKeys` on write.
 - Custom fields are exported too, as `<BASE>_<FIELD>`.
 
 > Upgrading: keys changed from `DASHSCOPE_APIKEY` to `DASHSCOPE_API_KEY` in

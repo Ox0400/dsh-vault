@@ -75,6 +75,7 @@ list options:
 get options:
   --field <name>          apiKey | secret | accessToken | refreshToken | privateKey
                           | password | cardNumber | username | url | fields.<custom>
+                          (case-insensitive; --fields is accepted as an alias)
   --mask                  Print a masked value (first 4 chars + ***)
   --all                   Print the whole entry as JSON (every secret — opt-in)
 
@@ -256,17 +257,28 @@ export function resolveEntry(store: VaultStore, needle: string): { entry: VaultE
 
 /** Look one field up, supporting `fields.<name>` for custom fields. */
 function fieldValue(entry: VaultEntry, name: string): unknown {
-  if (!name.startsWith('fields.')) return (entry as unknown as Record<string, unknown>)[name]
+  const record = entry as unknown as Record<string, unknown>
+  const direct = record[name]
+  if (direct !== undefined) return direct
+  // Field names are camelCase in the store but nobody types them that way.
+  const lower = name.toLowerCase()
+  const match = Object.keys(record).find(key => key.toLowerCase() === lower)
+  if (match !== undefined) return record[match]
+  if (!name.startsWith('fields.')) {
+    const custom = entry.fields ?? {}
+    const customMatch = Object.keys(custom).find(key => `fields.${key}`.toLowerCase() === lower)
+    return customMatch !== undefined ? custom[customMatch] : undefined
+  }
   return (entry.fields ?? {})[name.slice('fields.'.length)]
 }
 
 /** Non-secret projection of an entry, for `list --json` / `show`. */
 function publicFields(entry: VaultEntry): Record<string, unknown> {
   const { id, title, kind, username, email, phone, host, port, url, tags, icon, color, sensitivity,
-    favorite, createdAt, updatedAt, envKey, rotationDays, expiresAt, cardExpiry, cardHolder } = entry
+    favorite, createdAt, updatedAt, rotationDays, expiresAt, cardExpiry, cardHolder } = entry
   const optional: Record<string, unknown> = {
     kind, username, email, phone, host, port, url, tags, icon, color, sensitivity,
-    favorite, envKey, rotationDays, expiresAt, cardExpiry, cardHolder, createdAt, updatedAt,
+    favorite, rotationDays, expiresAt, cardExpiry, cardHolder, createdAt, updatedAt,
   }
   const out: Record<string, unknown> = { id, title }
   for (const [key, value] of Object.entries(optional)) {
@@ -275,7 +287,11 @@ function publicFields(entry: VaultEntry): Record<string, unknown> {
   out.hasSecret = primarySecret(entry as unknown as EnvExportable) !== undefined
   // Every env name this entry would export, and whether it is actually
   // included in `dsh-vault env` (the tag decides that).
-  out.envKeys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
+  // `envKeys` is what the user configured; `exportedKeys` is what the entry
+  // will actually emit (and what `get` accepts). Keeping them apart is the
+  // whole point — they used to be one confusingly-similar pair of names.
+  out.envKeys = Array.isArray(entry.envKeys) ? entry.envKeys : (entry.envKey !== undefined ? [entry.envKey] : [])
+  out.exportedKeys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
   out.envTagged = (entry.tags ?? []).includes('env')
   return out
 }
@@ -290,6 +306,25 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   if (parsed.command === '') { io.err(USAGE); return 2 }
   if (!COMMANDS.has(parsed.command)) {
     io.err(`dsh-vault: unknown command "${parsed.command}"\n\n${USAGE}`)
+    return 2
+  }
+
+  // An unknown flag used to be ignored silently — `--fields apikey` looked like
+  // it worked while doing nothing. Reject it with the accepted set instead.
+  const perCommand: Record<string, string[]> = {
+    list: ['kind', 'tag'],
+    get: ['field', 'fields', 'mask', 'all'],
+    show: [],
+    env: ['prefix', 'kind', 'keys-only', 'mask', 'file'],
+    'export-env': ['prefix', 'kind', 'keys-only'],
+    verify: [],
+  }
+  const common = ['json', 'vault', 'path', 'password-stdin', 'help', 'version']
+  const allowed = new Set([...common, ...(perCommand[parsed.command] ?? [])])
+  const unknown = [...parsed.flags.keys()].filter(name => !allowed.has(name))
+  if (unknown.length > 0) {
+    io.err(`dsh-vault: unknown option${unknown.length > 1 ? 's' : ''} ${unknown.map(f => `--${f}`).join(', ')} for "${parsed.command}"\n`)
+    io.err(`accepted: ${[...allowed].map(f => `--${f}`).join(' ')}\n`)
     return 2
   }
 
@@ -361,7 +396,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         return 0
       }
       // An env-key lookup already names the field it points at.
-      let name = stringFlag(parsed, 'field') ?? resolved.field
+      let name = stringFlag(parsed, 'field') ?? stringFlag(parsed, 'fields') ?? resolved.field
       let value: unknown
       if (name === undefined) {
         const primary = primarySecret(entry as unknown as EnvExportable)

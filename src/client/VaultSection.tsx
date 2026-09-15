@@ -53,7 +53,10 @@ export interface VaultFullWire {
   refreshToken?: string
   expiresAt?: number
   rotationDays?: number
-  /** Exact env-var name for vault_env; empty/absent derives it from the title. */
+  /** Exact env-var names for vault_env, positional; absent derives them from
+   * the title. The editor shows them comma-separated. */
+  envKeys?: string[]
+  /** Legacy single-name shorthand (read-only compatibility). */
   envKey?: string
   sensitivity?: string
   favorite?: boolean
@@ -204,7 +207,8 @@ type FormFields = {
   icon?: string | undefined
   color?: string | undefined
   expiresAt?: number | undefined
-  envKey?: string | undefined
+  /** Comma-separated env names; split into `envKeys` when saving. */
+  envKeys?: string | undefined
   rotationDays?: number | undefined
   sensitivity?: string | undefined
   favorite?: boolean | undefined
@@ -231,7 +235,7 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'url', label: 'fieldUrl' },
   { key: 'notes', label: 'fieldNotes' },
   { key: 'expiresAt', label: 'fieldExpiresAt' },
-  { key: 'envKey', label: 'fieldEnvKey' },
+  { key: 'envKeys', label: 'fieldEnvKey' },
   { key: 'rotationDays', label: 'fieldRotationDays' },
   { key: 'sensitivity', label: 'fieldSensitivity' },
   { key: 'favorite', label: 'fieldFavorite' },
@@ -300,7 +304,7 @@ const CSV_EXPORT_FIELDS: Array<{ key: string; label: VaultLocaleKey }> = [  { ke
   { key: 'notes', label: 'fieldNotes' },
   { key: 'tags', label: 'fieldTags' },
   { key: 'expiresAt', label: 'fieldExpiresAt' },
-  { key: 'envKey', label: 'fieldEnvKey' },
+  { key: 'envKeys', label: 'fieldEnvKey' },
   { key: 'rotationDays', label: 'fieldRotationDays' },
   { key: 'favorite', label: 'fieldFavorite' },
 ]
@@ -1728,7 +1732,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         icon: entry.icon ?? '',
         color: entry.color ?? '',
         expiresAt: entry.expiresAt,
-        envKey: entry.envKey,
+        envKeys: (entry.envKeys ?? (entry.envKey !== undefined ? [entry.envKey] : [])).join(', '),
         rotationDays: entry.rotationDays,
         sensitivity: entry.sensitivity,
         favorite: entry.favorite ?? false,
@@ -1798,7 +1802,9 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         ...(form.icon !== undefined ? { icon: form.icon } : {}),
         ...(form.color !== undefined ? { color: form.color } : {}),
         ...(form.expiresAt !== undefined ? { expiresAt: form.expiresAt } : {}),
-        ...(form.envKey !== undefined ? { envKey: form.envKey } : {}),
+        ...(form.envKeys !== undefined
+          ? { envKeys: form.envKeys.split(',').map(x => x.trim()).filter(x => x.length > 0) }
+          : {}),
         ...(form.rotationDays !== undefined ? { rotationDays: form.rotationDays } : {}),
         ...(form.sensitivity !== undefined ? { sensitivity: form.sensitivity } : {}),
         ...(form.favorite !== undefined ? { favorite: form.favorite } : {}),
@@ -3923,7 +3929,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 // Hints of the applied template describe the field's content
                 // ("expiry epoch millis"); they belong in a tooltip, never in
                 // the value.
-                title={tplHints[field.key] ?? (field.key === 'envKey' ? t('fieldEnvKeyHint') : undefined)}
+                title={tplHints[field.key] ?? (field.key === 'envKeys' ? t('fieldEnvKeyHint') : undefined)}
               >
                 <span>
                   {t(field.label)}
@@ -3994,14 +4000,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       setForm(previous => ({ ...previous, expiresAt: Number.isNaN(epoch) ? undefined : epoch }))
                     }}
                   />
-                ) : field.key === 'envKey' ? (
+                ) : field.key === 'envKeys' ? (
                   <input
                     type="text"
                     spellCheck={false}
                     autoComplete="off"
                     placeholder="DASHSCOPE_API_KEY"
-                    value={form.envKey ?? ''}
-                    onChange={event => setForm(previous => ({ ...previous, envKey: event.target.value.replace(/[^A-Za-z0-9_]/g, '') }))}
+                    value={form.envKeys ?? ''}
+                    onChange={event => setForm(previous => ({ ...previous, envKeys: event.target.value.replace(/[^A-Za-z0-9_, ]/g, '') }))}
                   />
                 ) : field.key === 'rotationDays' ? (
                   <input

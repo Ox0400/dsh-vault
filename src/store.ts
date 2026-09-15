@@ -136,11 +136,22 @@ export interface VaultEntry {
   refreshToken?: string
   /** Token/credential expiry epoch millis. */
   expiresAt?: number
-  /** Exact environment-variable name for `vault_env` / `vault_export_env`,
-   * e.g. `DASHSCOPE_API_KEY`. When set it replaces the derived
-   * `<TITLE>_<FIELD>` name for the entry's primary secret (secondary secrets
-   * and custom fields are exported as `<envKey>_<FIELD>`). Must be a valid
-   * POSIX name: `[A-Za-z_][A-Za-z0-9_]*`. */
+  /**
+   * Exact environment-variable names for `vault_env` / `vault_export_env`,
+   * e.g. `["DASHSCOPE_API_KEY"]`.
+   *
+   * Positional: `envKeys[0]` names the entry's primary secret (the first present
+   * field in apiKey → secret → accessToken → refreshToken → privateKey →
+   * password → cardNumber → cardCvv), `envKeys[1]` the next one, and so on.
+   * Secrets beyond the listed names keep the derived `<envKeys[0]>_<SUFFIX>`
+   * form, as do custom fields. With no `envKeys`, every name derives from the
+   * title (`<TITLE>_<SUFFIX>`). Each name must be a POSIX identifier
+   * (`[A-Za-z_][A-Za-z0-9_]*`); duplicates are rejected.
+   *
+   * `envKey` (singular, string) is accepted as a one-element shorthand.
+   */
+  envKeys?: string[]
+  /** @deprecated single-name shorthand for {@link envKeys}; migrated on load. */
   envKey?: string
   /** TOTP secret: bare Base32 or an otpauth:// URI. */
   otpSecret?: string
@@ -457,6 +468,9 @@ export class VaultStore {
     if ((patch as Record<string, unknown>).rotationDays === 0) {
       delete (entry as unknown as Record<string, unknown>).rotationDays
     }
+    // Canonicalise: fold a legacy `envKey` into `envKeys` (and drop a zero
+    // timestamp) so every reader sees one shape.
+    normalizeTimestamps(entry as unknown as Record<string, unknown>)
     this.entries.set(entry.id, entry)
     this.recordHistory('add', entry.id, entry.title)
     await this.persist()
@@ -629,7 +643,13 @@ export class VaultStore {
       updated.passwordHistory = history
     }
     // `updated` is the same object stored in the map, so the deletes above
-    // already took effect in place.
+    // already took effect in place. Clearing through the legacy single-name
+    // field (`envKey: ''`) must also drop the canonical list; an empty
+    // `envKeys` array is dropped by the normaliser below.
+    if ('envKey' in patch && (patch as Record<string, unknown>).envKey === '') {
+      delete (updated as unknown as Record<string, unknown>).envKeys
+    }
+    normalizeTimestamps(updated as unknown as Record<string, unknown>)
     this.recordHistory('update', id, updated.title)
     await this.persist()
     return updated
@@ -1273,10 +1293,23 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
         }
         break
       case 'envKey':
-        // A shell can only export valid POSIX names; catching it here beats
-        // writing a .env file with a key the shell would reject.
+        // Legacy single-name shorthand, accepted from older callers/UI.
         if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
           throw new Error('vault: envKey must match [A-Za-z_][A-Za-z0-9_]* (e.g. DASHSCOPE_API_KEY)')
+        }
+        break
+      case 'envKeys':
+        // An empty array clears the names (falls back to the derived form).
+        if (!Array.isArray(value) || value.length > MAX_ENV_KEYS) {
+          throw new Error(`vault: envKeys must be an array of at most ${MAX_ENV_KEYS} names`)
+        }
+        for (const name of value) {
+          if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+            throw new Error(`vault: envKeys entries must match [A-Za-z_][A-Za-z0-9_]* (got ${JSON.stringify(name)})`)
+          }
+        }
+        if (new Set(value).size !== value.length) {
+          throw new Error('vault: envKeys must not repeat a name')
         }
         break
       case 'port':
@@ -1348,12 +1381,34 @@ function pickDefined(patch: Record<string, unknown>, options: { allowTitle?: boo
   return result
 }
 
+/** How many explicit env names one entry may carry. Secrets are few (a token
+ * pair, a key + secret), so this is a guard against a runaway model call. */
+const MAX_ENV_KEYS = 8
+
+/** Fold the legacy single `envKey` into `envKeys`, so every read path (env
+ * export, CLI, UI) only ever looks at one field. */
+function normalizeEnvKeys(record: Record<string, unknown>): void {
+  const legacy = record.envKey
+  const list = record.envKeys
+  if (Array.isArray(list)) {
+    const clean = list.filter((name): name is string => typeof name === 'string' && name.length > 0)
+    if (clean.length > 0) record.envKeys = clean
+    else delete record.envKeys
+  }
+  if (typeof legacy === 'string' && legacy.length > 0) {
+    const current = Array.isArray(record.envKeys) ? record.envKeys as string[] : []
+    if (!current.includes(legacy)) record.envKeys = [legacy, ...current]
+  }
+  delete record.envKey
+}
+
 /** Keep the numeric epoch fields numeric and sane. A catalog template hint
  * ("expiry epoch millis") or a hand-edited import can otherwise persist a
  * non-numeric `expiresAt`, which every read path then has to defend against
  * (and which used to crash the editor with `RangeError: Invalid time value`).
  * Numeric strings are coerced; anything unusable is dropped. */
 function normalizeTimestamps(record: Record<string, unknown>): void {
+  normalizeEnvKeys(record)
   for (const key of ['expiresAt', 'rotationDays']) {
     const value = record[key]
     if (value === undefined || value === null) continue

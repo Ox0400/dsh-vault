@@ -2025,6 +2025,19 @@ test('env keys use vendor-standard field suffixes and an explicit envKey overrid
     assert.ok(keys.includes('TAVILY_TOKEN_SCOPE'), `custom field: ${JSON.stringify(keys)}`)
     assert.ok(!keys.some(k => k.startsWith('APP_TAVILY')), 'the prefix does not rewrite an explicit envKey')
 
+    // several names are positional: first the primary secret, then the next
+    await call(ctx, 'vault_add', {
+      title: 'Google', kind: 'oauth', envKeys: ['GOOGLE_ACCESS', 'GOOGLE_REFRESH'],
+      accessToken: 'at-9', refreshToken: 'rt-9', tags: ['env'],
+    })
+    const multi = await call(ctx, 'vault_env', {}) as { lines: string[] }
+    assert.ok(multi.lines.some(l => l.startsWith("GOOGLE_ACCESS='at-9'")), JSON.stringify(multi.lines))
+    assert.ok(multi.lines.some(l => l.startsWith("GOOGLE_REFRESH='rt-9'")), JSON.stringify(multi.lines))
+    // the legacy single-name field still works and lands in envKeys
+    const legacy = await call(ctx, 'vault_add', { title: 'Legacy', kind: 'api-key', envKey: 'LEGACY_NAME', apiKey: 'leg', tags: ['env'] })
+    const legacyFull = await call(ctx, 'vault_get', { id: legacy.id as string }) as { entry: Record<string, unknown> }
+    assert.deepEqual(legacyFull.entry.envKeys, ['LEGACY_NAME'])
+    assert.equal(legacyFull.entry.envKey, undefined)
     // a malformed name is refused instead of silently exported
     const list = await call(ctx, 'vault_search', { query: 'DASHSCOPE' }) as { results: Array<{ id: string }> }
     const id = list.results[0]!.id

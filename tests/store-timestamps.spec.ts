@@ -59,3 +59,35 @@ test('a poisoned timestamp already on disk is healed when the vault opens', asyn
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('envKeys are validated and the legacy single name is folded in', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'envkeys-'))
+  try {
+    const path = join(dir, 'v.json')
+    const store = await openVault({ path, masterPassword: 'pw' })
+    await expect(store.add({ title: 'bad', envKeys: ['not-a-name'] } as never))
+      .rejects.toThrow(/envKeys entries must match/)
+    await expect(store.add({ title: 'dup', envKeys: ['A', 'A'] } as never))
+      .rejects.toThrow(/must not repeat/)
+    // an empty array clears; only an oversized list is refused
+    expect((await store.add({ title: 'cleared', envKeys: [], apiKey: 'k' })).envKeys).toBeUndefined()
+    await expect(store.add({ title: 'many', envKeys: Array.from({ length: 9 }, (_, i) => `K${i}`) } as never))
+      .rejects.toThrow(/at most 8 names/)
+
+    const legacy = await store.add({ title: 'legacy', envKey: 'LEGACY_NAME', apiKey: 'k' })
+    expect(legacy.envKeys).toEqual(['LEGACY_NAME'])
+    expect((legacy as Record<string, unknown>).envKey).toBeUndefined()
+
+    // reading old data folds the field in too
+    const mutable = store as unknown as { entries: Map<string, Record<string, unknown>> }
+    mutable.entries.get(legacy.id)!.envKey = 'OLD_SPELLING'
+    delete mutable.entries.get(legacy.id)!.envKeys
+    await store.persist()
+    const reopened = await openVault({ path, masterPassword: 'pw' })
+    const healed = reopened.list().find(e => e.title === 'legacy')!
+    expect(healed.envKeys).toEqual(['OLD_SPELLING'])
+    expect((healed as Record<string, unknown>).envKey).toBeUndefined()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

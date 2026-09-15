@@ -6,6 +6,7 @@
  */
 import { test, expect } from 'vitest'
 import { localDateTimeValue, templateHints, templateKind } from '../src/client/editor-form.ts'
+import { envPairsForEntry } from '../src/env-export.ts'
 
 test('localDateTimeValue never throws on unusable input', () => {
   // the exact strings that used to take the page down
@@ -53,4 +54,23 @@ test('templateHints keeps descriptions and drops non-hint entries', () => {
     weird: 42 as unknown as string,
   })
   expect(hints).toEqual({ accessToken: 'access token', expiresAt: 'expiry epoch millis' })
+})
+
+test('env names are positional and tolerate the legacy single-name field', () => {
+  // no configuration → every name derives from the title
+  expect(envPairsForEntry({ id: '1', title: 'DASHSCOPE', apiKey: 'k' }).map(p => p.key)).toEqual(['DASHSCOPE_API_KEY'])
+  // one name → names the primary secret
+  expect(envPairsForEntry({ id: '1', title: 'x', envKeys: ['MY_KEY'], apiKey: 'k' }).map(p => p.key)).toEqual(['MY_KEY'])
+  // several → positional, with derived names for anything beyond the list
+  const pairs = envPairsForEntry({
+    id: '1', title: 'x', envKeys: ['GOOGLE_ACCESS', 'GOOGLE_REFRESH'],
+    accessToken: 'at', refreshToken: 'rt', fields: { scope: 'openid' },
+  })
+  expect(pairs.map(p => p.key)).toEqual(['GOOGLE_ACCESS', 'GOOGLE_REFRESH', 'GOOGLE_ACCESS_SCOPE'])
+  expect(pairs.map(p => p.field)).toEqual(['accessToken', 'refreshToken', 'fields.scope'])
+  // the legacy field still works and is read as a one-element list
+  expect(envPairsForEntry({ id: '1', title: 'x', envKey: 'LEGACY', apiKey: 'k' }).map(p => p.key)).toEqual(['LEGACY'])
+  // an explicit name beats the prefix; derived names take it
+  expect(envPairsForEntry({ id: '1', title: 'x', envKeys: ['MINE'], apiKey: 'k' }, 'APP_').map(p => p.key)).toEqual(['MINE'])
+  expect(envPairsForEntry({ id: '1', title: 'x', apiKey: 'k' }, 'APP_').map(p => p.key)).toEqual(['APP_X_API_KEY'])
 })
