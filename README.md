@@ -246,25 +246,52 @@ Resolution order: **id → title → `envKey` → any exported key name**. `get`
 subcommand that forwards to pnpm. `dsh-cmdline` exists so an *app* bundle (web,
 tui) can own a flag family of its own profile — not so a plugin gains a
 `dsh <plugin>` command. `dsh web exec …` therefore hands `exec …` to the web app
-(`error: too many arguments`). Use one of:
+(`error: too many arguments`).
+
+#### npm install
 
 ```sh
-# 1. through the harness CLI — the path most people want
-pnpm dsh plugin --profile web exec dsh-vault env      # --profile is required
+# a) into a profile (recommended: the plugin and the CLI travel together)
+pnpm dsh plugin --profile web add dsh-vault
+pnpm dsh plugin --profile web exec dsh-vault list        # --profile is required
 
-# 2. through the profile directory (equivalent, no dsh launcher)
-pnpm --dir ~/.dsh/profiles/web exec dsh-vault env
+# b) globally, for any shell — the CLI needs no harness packages
+npm i -g dsh-vault
+dsh-vault list
 
-# 3. the published package, no install at all
-npx dsh-vault env
-
-# 4. the file itself — always works, even for a symlinked checkout
-node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env
+# c) without installing at all
+npx dsh-vault list
 ```
 
-Forms 1–2 need the `node_modules/.bin/dsh-vault` shim that `pnpm install`
-creates for a **declared** dependency. If the plugin was linked into the profile
-by hand (`ln -s`) it has no shim, and `pnpm --dir … exec` reports
+(a) installs the bundle and creates the `node_modules/.bin/dsh-vault` shim that
+`exec` uses. (b) and (c) work because the read commands (`list`, `get`, `env`,
+`show`, `verify`, `export-env`) depend on Node alone; only *writing* to a vault
+needs the harness runtime, and the plugin always has it.
+
+#### source checkout
+
+```sh
+git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
+npm install && npm run build            # lib/ incl. the executable lib/cli.js
+
+node lib/cli.js list                    # run it in place
+npm link                                # …or put `dsh-vault` on PATH
+./lib/cli.js list                       # the file is executable too
+```
+
+To develop the *plugin* against a profile, link the checkout into it and add a
+patch layer that inserts the plugin (that is how this repository is normally
+developed); the CLI does not need that — it reads the same vault file directly.
+
+#### Either way
+
+Two other equivalent forms are worth knowing: `pnpm --dir ~/.dsh/profiles/web
+exec dsh-vault env` (no launcher involved) and `node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env`
+(always works, even for a symlinked checkout).
+
+`pnpm dsh plugin --profile web exec …` needs the `node_modules/.bin/dsh-vault`
+shim that `pnpm install` creates for a **declared** dependency. If the plugin was
+linked into the profile by hand (`ln -s`) it has no shim, and `exec` reports
 `Command "dsh-vault" not found`; either create the shim
 
 ```sh

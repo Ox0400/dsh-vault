@@ -227,29 +227,49 @@ a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  
 
 ### 怎么调用
 
-`dsh` 没有「插件子命令」注册表:启动器只解析自己的参数(`--profile`、`--patch`、`--dump-config`),`dsh plugin …` 是**唯一**转发给 pnpm 的子命令;`dsh-cmdline` 是让 **web/tui 这类应用型 bundle** 拥有自己 profile 的参数族,并不给插件 `dsh <插件>` 这样的命令。所以 `dsh web exec …` 会把 `exec …` 交给 web app 解析(报 `error: too many arguments`)。可用的写法:
+`dsh` 没有「插件子命令」注册表:启动器只解析自己的参数(`--profile`、`--patch`、`--dump-config`),`dsh plugin …` 是**唯一**转发给 pnpm 的子命令;`dsh-cmdline` 是让 **web/tui 这类应用型 bundle** 拥有自己 profile 的参数族,并不给插件 `dsh <插件>` 这样的命令。所以 `dsh web exec …` 会把 `exec …` 交给 web app 解析(报 `error: too many arguments`)。
+
+#### npm 安装
 
 ```sh
-# 1. 走 harness 的 CLI —— 通常最想要的写法
-pnpm dsh plugin --profile web exec dsh-vault env      # --profile 是必填
+# a) 装进 profile(推荐:插件与 CLI 一起就位)
+pnpm dsh plugin --profile web add dsh-vault
+pnpm dsh plugin --profile web exec dsh-vault list     # --profile 必填
 
-# 2. 直接在 profile 目录里(等价,不经过 dsh 启动器)
-pnpm --dir ~/.dsh/profiles/web exec dsh-vault env
+# b) 全局安装,任何 shell 都能用 —— CLI 不需要任何 harness 包
+npm i -g dsh-vault
+dsh-vault list
 
-# 3. 已发布包,无需安装
-npx dsh-vault env
-
-# 4. 直接跑文件 —— 一定可用,软链到工作区也行
-node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env
+# c) 不安装直接用
+npx dsh-vault list
 ```
 
-第 1、2 种需要 `node_modules/.bin/dsh-vault` 垫片,它只对**在清单里声明的依赖**由 `pnpm install` 生成。如果插件是你手工 `ln -s` 进 profile 的,就没有垫片,`pnpm --dir … exec` 会报 `Command "dsh-vault" not found`;此时可以手动建:
+(a) 会安装 bundle,并生成 `exec` 需要的 `node_modules/.bin/dsh-vault` 垫片。(b)(c) 能直接用,是因为读命令(`list`、`get`、`env`、`show`、`verify`、`export-env`)只依赖 Node;**只有写保险库**才需要 harness 运行时,而插件环境一定有。
+
+#### 源码安装
+
+```sh
+git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
+npm install && npm run build            # 生成 lib/,含可执行的 lib/cli.js
+
+node lib/cli.js list                    # 直接跑
+npm link                                # ……或把 dsh-vault 放到 PATH
+./lib/cli.js list                       # 文件本身也可执行
+```
+
+要**开发插件**并对接某个 profile,需要把 checkout 软链进 profile 并加一层 patch 插入插件(本仓库平时就是这么开发的);**CLI 不需要这些** —— 它直接读同一个保险库文件。
+
+#### 其余等价写法
+
+`pnpm --dir ~/.dsh/profiles/web exec dsh-vault env`(不经过 dsh 启动器)与 `node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env`(一定可用,软链到工作区也行)。
+
+`pnpm dsh plugin --profile web exec …` 需要 `node_modules/.bin/dsh-vault` 垫片,它只对**在清单里声明的依赖**由 `pnpm install` 生成。如果插件是你手工 `ln -s` 进 profile 的,就没有垫片,`exec` 会报 `Command "dsh-vault" not found`;此时可以手动建:
 
 ```sh
 ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
 ```
 
-或者直接用第 4 种。注意:垫片可能被之后在 profile 目录执行的 `pnpm install` 清掉;另外 `pnpm dsh plugin --profile web add dsh-vault` 会依据包的 `dsh.bundle` 声明去重整 `dsh.profile.bundles` —— 如果你自己的 patch 层**已经**插入了这个插件,那会**挂两份**,要先删掉 patch 层那一行。
+或者直接用文件路径。注意:垫片可能被之后在 profile 目录执行的 `pnpm install` 清掉;另外 `pnpm dsh plugin --profile web add dsh-vault` 会依据包的 `dsh.bundle` 声明去重整 `dsh.profile.bundles` —— 如果你自己的 patch 层**已经**插入了这个插件,那会**挂两份**,要先删掉 patch 层那一行。
 
 主密码依次取 `--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码,所以 CLI 既不依赖、也不会泄露 profile patch 里那份。
 
