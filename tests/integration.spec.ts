@@ -379,6 +379,10 @@ test('system prompt section is registered with mode and capture guidance', async
     assert.ok(vaultSection, 'dsh-vault prompt section registered')
     // Default mode is 'ask' (prompt-before-write).
     assert.match(vaultSection!.text, /Access mode: AUTO/)
+    // The model is told scripts can fetch secrets themselves, so it does not
+    // have to pull plaintext into the conversation to serve a skill.
+    assert.match(vaultSection!.text, /dsh-vault get DASHSCOPE_API_KEY/)
+    assert.match(vaultSection!.text, /--mask/)
   })
 })
 

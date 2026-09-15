@@ -408,6 +408,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         'Credentials are encrypted at rest (AES-256-GCM) under a master password the user configured; never ask for that password.',
         'Use vault_search to find entries by title/username/host and vault_get (by id) to read full credentials when the task needs them.',
         'Do not repeat secrets in the conversation when a credential was obtained via vault_get.',
+        'Scripts can read a secret themselves, keeping it out of this conversation: the bundled CLI takes an entry id,',
+        'title, or exported env name — `dsh-vault get DASHSCOPE_API_KEY` (add `--field <name>` for a specific field,',
+        '`--mask` to check it exists without printing it, `dsh-vault env` for the env-tagged set). Prefer telling the user',
+        'to run that, or letting a skill\'s child process call it, instead of pulling the plaintext into context.',
       ]
       const profile = activeProfile()
       if (profile !== 'full') {
