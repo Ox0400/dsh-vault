@@ -58,7 +58,7 @@ async function invoke(argv: string[], overrides: Partial<CliIo> = {}, home?: str
   return { code, out, err }
 }
 
-test('list prints entries without any secret', async () => {
+test('list prints entries without any secret, with the env name to copy', async () => {
   await withVault(async (_io, _dir, vaultPath) => {
     const r = await invoke(['list', '--path', vaultPath])
     expect(r.code).toBe(0)
@@ -67,6 +67,13 @@ test('list prints entries without any secret', async () => {
     // the login entry is listed with its identity, still without secrets
     expect(r.out).toContain('bob')
     expect(r.out).not.toContain('pw-not-exported')
+    // the name `get`/`env` accepts is shown, with a count of the further keys
+    expect(r.out).toMatch(/DASHSCOPE.*→ DASHSCOPE_API_KEY\s+\[env\]/)
+    expect(r.out).toContain('TAVILY_TOKEN (+2)')
+    // an entry that is not env-tagged still shows its name, but no [env] mark
+    const plainRow = r.out.split('\n').find(line => line.includes('Plain'))!
+    expect(plainRow).toContain('→ PLAIN_PASSWORD')
+    expect(plainRow).not.toContain('[env]')
   })
 })
 
@@ -78,6 +85,11 @@ test('list --json is machine readable and flags secrets', async () => {
     expect(parsed.every(e => e.hasSecret === true)).toBe(true)
     expect(JSON.stringify(parsed)).not.toContain('sk-dash-secret')
     expect(parsed[1]!.envKey).toBe('TAVILY_TOKEN')
+    // every key the entry exports, plus whether `env` includes it
+    expect(parsed[0]!.envKeys).toEqual(['DASHSCOPE_API_KEY'])
+    expect(parsed[0]!.envTagged).toBe(true)
+    expect(parsed[1]!.envKeys).toEqual(['TAVILY_TOKEN', 'TAVILY_TOKEN_REFRESH_TOKEN', 'TAVILY_TOKEN_SCOPE'])
+    expect(parsed[2]!.envTagged).toBe(false)
   })
 })
 

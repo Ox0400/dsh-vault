@@ -40,6 +40,8 @@ function run(args, { input, env = {} } = {}) {
 const listPlain = await run(['list'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('list works without leaking secrets', listPlain.code === 0 && listPlain.out.includes('DASHSCOPE') && !listPlain.out.includes('sk-dash-secret'), `exit ${listPlain.code}`)
 
+check('list shows the env name to copy', listPlain.out.includes('DASHSCOPE_API_KEY') && /\[env\]/.test(listPlain.out) && listPlain.out.includes('TAVILY_TOKEN (+2)'), listPlain.out.split('\n')[0])
+
 const listJson = await run(['list', '--json'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const parsed = JSON.parse(listJson.out)
 check('list --json is machine readable', Array.isArray(parsed) && parsed.length === 3 && parsed[0].hasSecret === true, JSON.stringify(parsed.map(e => e.title)))

@@ -188,7 +188,7 @@ export $(dsh-vault env)                    # 带 env 标签的条目 → KEY=VAL
 dsh-vault get my-entry --field apiKey      # 只取一个字段,仅 stdout
 dsh-vault get my-entry | pbcopy            # 该条目的主密钥
 dsh-vault export-env .env                  # 生成 0600 权限的 .env
-dsh-vault list                             # 标题/id/类型,绝不含密钥
+dsh-vault list                             # id、类型、标题、环境变量名,绝不含密钥
 dsh-vault show my-entry                    # 非敏感字段的 JSON
 ```
 
@@ -202,6 +202,16 @@ dsh-vault get TAVILY_TOKEN                  # 条目上设的 envKey
 dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # envKey + 字段后缀
 dsh-vault get DASHSCOPE_API_KEY | my-tool   # 直接喂给工具
 ```
+
+`list` 会直接打印可复制的名字,不用猜;`[env]` 标记出真正会被 `dsh-vault env` 导出的条目:
+
+```
+a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  [env]
+5db92b44-…  oauth     Tavily                           → TAVILY_TOKEN (+2)  [env]
+9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
+```
+
+`(+2)` 是这条目还会导出的其他键数量(如 `TAVILY_TOKEN_REFRESH_TOKEN`、`TAVILY_TOKEN_SCOPE`);`list --json` 会在 `envKeys` 里全部列出,并附带 `envTagged`。
 
 解析顺序:**id → 标题 → `envKey` → 该条目会导出的任意键名**。`get` 与 `env` 共用同一份实现,所以 `env` 打印出来的每个名字都能用 `get` 取回。
 

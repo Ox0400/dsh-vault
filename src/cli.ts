@@ -50,7 +50,7 @@ Usage:
   dsh-vault <command> [options]
 
 Commands:
-  list                    List entries (titles, ids, kinds — never secrets)
+  list                    List entries with their env name (never secrets)
   get <id|title|ENVKEY>   Print one field of an entry (default: its main secret)
   show <id|title|ENVKEY>  Print an entry's non-secret fields as JSON
   env                     Print env-tagged entries as KEY=VALUE lines
@@ -68,6 +68,9 @@ Options:
 list options:
   --kind <k>              Only entries of this kind
   --tag <t>               Only entries carrying this tag
+                          (each row also shows the env name that "get" accepts,
+                          the count of further keys in parentheses, and [env]
+                          when the entry is included in "dsh-vault env")
 
 get options:
   --field <name>          apiKey | secret | accessToken | refreshToken | privateKey
@@ -270,6 +273,10 @@ function publicFields(entry: VaultEntry): Record<string, unknown> {
     if (value !== undefined) out[key] = value
   }
   out.hasSecret = primarySecret(entry as unknown as EnvExportable) !== undefined
+  // Every env name this entry would export, and whether it is actually
+  // included in `dsh-vault env` (the tag decides that).
+  out.envKeys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
+  out.envTagged = (entry.tags ?? []).includes('env')
   return out
 }
 
@@ -324,7 +331,15 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       for (const entry of entries) {
         const identity = [entry.username, entry.host, entry.url]
           .filter((v): v is string => typeof v === 'string' && v.length > 0).join(' · ')
-        io.out(`${entry.id}  ${(entry.kind ?? 'login').padEnd(8)}  ${entry.title}${identity.length > 0 ? `  (${identity})` : ''}\n`)
+        // Show the env name `get`/`env` would use, so a script author can copy
+        // it straight out of the listing (plus how many more keys follow).
+        const keys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
+        const envSuffix = keys.length > 0
+          ? `  → ${keys[0]}${keys.length > 1 ? ` (+${keys.length - 1})` : ''}`
+          : ''
+        const tagged = (entry.tags ?? []).includes('env') ? '  [env]' : ''
+        io.out(`${entry.id}  ${(entry.kind ?? 'login').padEnd(8)}  ${entry.title}`
+          + `${identity.length > 0 ? `  (${identity})` : ''}${envSuffix}${tagged}\n`)
       }
       return 0
     }

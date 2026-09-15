@@ -192,7 +192,7 @@ export $(dsh-vault env)                    # env-tagged entries → KEY=VALUE
 dsh-vault get my-entry --field apiKey      # one field, stdout only
 dsh-vault get my-entry | pbcopy            # the entry's primary secret
 dsh-vault export-env .env                  # 0600 file for docker/systemd
-dsh-vault list                             # titles/ids/kinds — never secrets
+dsh-vault list                             # id, kind, title, env name — never secrets
 dsh-vault show my-entry                    # non-secret fields as JSON
 ```
 
@@ -210,6 +210,19 @@ dsh-vault get TAVILY_TOKEN                  # the entry's envKey
 dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # envKey + field suffix
 dsh-vault get DASHSCOPE_API_KEY | my-tool   # pipe it straight in
 ```
+
+`list` prints the name to copy, so a script author never has to guess it — and
+`[env]` marks the entries `dsh-vault env` actually emits:
+
+```
+a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  [env]
+5db92b44-…  oauth     Tavily                           → TAVILY_TOKEN (+2)  [env]
+9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
+```
+
+`(+2)` counts the further keys that entry exports (`TAVILY_TOKEN_REFRESH_TOKEN`,
+`TAVILY_TOKEN_SCOPE`); `list --json` spells them all out in `envKeys`, with
+`envTagged` alongside.
 
 Resolution order: **id → title → `envKey` → any exported key name**. `get` and
 `env` share one implementation, so every name `env` prints is retrievable by
