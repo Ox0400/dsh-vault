@@ -543,7 +543,7 @@ test('vault_env renders env-flagged entries and vault_templates lists fields', a
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'stripe', apiKey: 'sk_live_123', tags: ['env'] })
     const env = await call(ctx, 'vault_env', {}) as { lines: string[] }
-    assert.ok(env.lines.some(l => l.startsWith('STRIPE_APIKEY=') && l.includes('sk_live_123')), `got ${JSON.stringify(env.lines)}`)
+    assert.ok(env.lines.some(l => l.startsWith('STRIPE_API_KEY=') && l.includes('sk_live_123')), `got ${JSON.stringify(env.lines)}`)
 
     const tpl = await call(ctx, 'vault_templates', { kind: 'ssh' }) as { fields: Record<string, string> }
     assert.ok('host' in tpl.fields && 'privateKey' in tpl.fields)
@@ -592,6 +592,29 @@ test('vault_import_csv bulk-imports entries and skips duplicates', async () => {
     assert.ok(search.results.length >= 1)
     const full = await call(ctx, 'vault_get', { id: search.results[0]!.id as string }) as { entry: Record<string, unknown> }
     assert.equal((full.entry.fields as Record<string, unknown>).region, 'us-east')
+  })
+})
+
+test('the import tools may declare every field a dry run returns', async () => {
+  // A dry run adds `dryRun`/`note` to the result; with additionalProperties:
+  // false the harness rejects the WHOLE call ("returned invalid output"), which
+  // is what made `dryRun: true` unusable for vault_import_csv/browser/wallet.
+  await withContext(async ctx => {
+    const dir = await mkdtemp(join(tmpdir(), 'vault-dry-'))
+    const csvPath = join(dir, 'creds.csv')
+    await writeFile(csvPath, ['title,username,password', 'Preview,ada,"pw-1234"'].join('\n'))
+    const preview = await call(ctx, 'vault_import_csv', { path: csvPath, dryRun: true }) as { added: number; dryRun?: boolean; note?: string }
+    assert.equal(preview.dryRun, true)
+    assert.match(String(preview.note), /would import 1 row/)
+    // Nothing was written.
+    assert.equal((await call(ctx, 'vault_search', { query: 'Preview' })).results.length, 0)
+
+    // The browser importer shares the same shape.
+    const browserCsv = join(dir, 'chrome.csv')
+    await writeFile(browserCsv, ['name,url,username,password', 'Site,https://example.com,ada,pw-1234'].join('\n'))
+    const browserPreview = await call(ctx, 'vault_import_browser', { path: browserCsv, dryRun: true }) as { dryRun?: boolean; note?: string }
+    assert.equal(browserPreview.dryRun, true)
+    assert.equal((await call(ctx, 'vault_search', { query: 'Site' })).results.length, 0)
   })
 })
 
@@ -956,7 +979,7 @@ test('vault_env shell-quotes values', async () => {
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'tricky', apiKey: "a'b c", tags: ['env'] })
     const r = await call(ctx, 'vault_env', {}) as { lines: string[] }
-    const line = r.lines.find(l => l.startsWith('TRICKY_APIKEY='))
+    const line = r.lines.find(l => l.startsWith('TRICKY_API_KEY='))
     assert.ok(line !== undefined, JSON.stringify(r.lines))
     assert.ok(line!.includes("'"), 'value is quoted')
   })
@@ -1124,7 +1147,7 @@ test('vault_export_env writes a .env file', async () => {
     assert.ok(r.lines >= 1)
     const { readFile } = await import('node:fs/promises')
     const content = await readFile(envPath, 'utf8')
-    assert.ok(content.includes('STRIPE_APIKEY='))
+    assert.ok(content.includes('STRIPE_API_KEY='))
   })
 })
 
@@ -1142,7 +1165,7 @@ test('vault_env mask option hides secret values', async () => {
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'secretapi', apiKey: 'sk_live_supersecret', tags: ['env'] })
     const r = await call(ctx, 'vault_env', { mask: true }) as { lines: string[] }
-    const line = r.lines.find(l => l.startsWith('SECRETAPI_APIKEY='))
+    const line = r.lines.find(l => l.startsWith('SECRETAPI_API_KEY='))
     assert.ok(line !== undefined)
     assert.ok(!line!.includes('sk_live_supersecret'))
     assert.ok(line!.includes('***'))
@@ -1967,7 +1990,7 @@ test('vault_env and vault_export_env support key prefix', async () => {
   await withContext(async ctx => {
     await call(ctx, 'vault_add', { title: 'GitHub', kind: 'api-key', apiKey: 'gh-token', tags: ['env'] })
     const r = await call(ctx, 'vault_env', { prefix: 'APP_' }) as { lines: string[] }
-    assert.ok(r.lines.some(l => l.startsWith('APP_GITHUB_APIKEY=')), 'prefixed key present')
+    assert.ok(r.lines.some(l => l.startsWith('APP_GITHUB_API_KEY=')), 'prefixed key present')
     const { mkdtemp, rm } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
@@ -1979,9 +2002,42 @@ test('vault_env and vault_export_env support key prefix', async () => {
   })
 })
 
-test('vault_get_many returns missing ids and dedupes', async () => {
+test('env keys use vendor-standard field suffixes and an explicit envKey override', async () => {
   await withContext(async ctx => {
-    const a = await call(ctx, 'vault_add', { title: 'GM1', password: 'pw-1' }) as { id: string }
+    // title + apiKey derives the name every toolchain expects
+    await call(ctx, 'vault_add', { title: 'DASHSCOPE', kind: 'api-key', apiKey: 'sk-dash', tags: ['env'] })
+    // an explicit envKey wins verbatim, and secondary secrets/free fields hang
+    // off it; the prefix deliberately does not rewrite an explicit name
+    await call(ctx, 'vault_add', {
+      title: 'Tavily', kind: 'oauth', envKey: 'TAVILY_TOKEN', accessToken: 'at-1', refreshToken: 'rt-1',
+      fields: { scope: 'read write' }, tags: ['env'],
+    })
+    const r = await call(ctx, 'vault_env', { prefix: 'APP_' }) as { lines: string[] }
+    const keys = r.lines.map(l => l.split('=')[0])
+    // the prefix applies to derived names ...
+    assert.ok(keys.includes('APP_DASHSCOPE_API_KEY'), `derived name: ${JSON.stringify(keys)}`)
+    assert.ok(keys.includes('TAVILY_TOKEN'), `explicit name: ${JSON.stringify(keys)}`)
+    assert.ok(keys.includes('TAVILY_TOKEN_REFRESH_TOKEN'), `secondary secret: ${JSON.stringify(keys)}`)
+    assert.ok(keys.includes('TAVILY_TOKEN_SCOPE'), `custom field: ${JSON.stringify(keys)}`)
+    assert.ok(!keys.some(k => k.startsWith('APP_TAVILY')), 'the prefix does not rewrite an explicit envKey')
+
+    // a malformed name is refused instead of silently exported
+    const list = await call(ctx, 'vault_search', { query: 'DASHSCOPE' }) as { results: Array<{ id: string }> }
+    const id = list.results[0]!.id
+    await assert.rejects(() => call(ctx, 'vault_update', { id, envKey: 'BAD-NAME' }), /envKey must match/)
+    // ... and a good one can be set, then cleared back to the derived form
+    await call(ctx, 'vault_update', { id, envKey: 'DASH_SCOPE_KEY' })
+    const after = await call(ctx, 'vault_env', {}) as { lines: string[] }
+    assert.ok(after.lines.some(l => l.startsWith('DASH_SCOPE_KEY=')), JSON.stringify(after.lines))
+    await call(ctx, 'vault_update', { id, envKey: '' })
+    const cleared = await call(ctx, 'vault_env', {}) as { lines: string[] }
+    assert.ok(cleared.lines.some(l => l.startsWith('DASHSCOPE_API_KEY=')), 'clearing falls back to the derived name')
+    assert.ok(!cleared.lines.some(l => l.startsWith('DASH_SCOPE_KEY=')), 'the explicit name is gone')
+  })
+})
+
+test('vault_get_many returns missing ids and dedupes', async () => {
+  await withContext(async ctx => {    const a = await call(ctx, 'vault_add', { title: 'GM1', password: 'pw-1' }) as { id: string }
     const r = await call(ctx, 'vault_get_many', { ids: [a.id, a.id, 'does-not-exist'] }) as { entries: Array<{ title: string }>; missing: string[] }
     assert.equal(r.entries.length, 1, 'duplicate id deduped')
     assert.deepEqual(r.missing, ['does-not-exist'])
@@ -3380,6 +3436,22 @@ test('vault listing never shows sidecars (access-*/tools/meta/audit/backups)', a
     }
     // switching to a sidecar is rejected with a clear message (not a format error)
     await assert.rejects(() => gateway.switchVault('tools'), /sidecar|not a vault/i)
+  }, { name: 'default' })
+})
+
+test('a non-numeric expiresAt is refused instead of corrupting an entry', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    // The OAuth catalog template describes the field as "expiry epoch millis";
+    // an older editor copied that hint into the value and crashed on render.
+    await expect(gateway.add({
+      title: 'poisoned', kind: 'oauth', accessToken: 'tok',
+      expiresAt: 'expiry epoch millis',
+    } as never)).rejects.toThrow(/finite number/)
+    const ok = await gateway.add({ title: 'expires', kind: 'oauth', expiresAt: 4102444800000 } as never)
+    expect((await gateway.get(ok.id)).entry?.expiresAt).toBe(4102444800000)
+    await expect(gateway.update(ok.id, { expiresAt: 'not a date' } as never)).rejects.toThrow(/finite number/)
+    expect((await gateway.get(ok.id)).entry?.expiresAt).toBe(4102444800000)
   }, { name: 'default' })
 })
 

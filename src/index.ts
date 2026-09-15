@@ -459,6 +459,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       accessToken: { type: 'string', description: 'OAuth access token.' },
       refreshToken: { type: 'string', description: 'OAuth refresh token.' },
       expiresAt: { type: 'integer', description: 'Token/credential expiry epoch millis.' },
+      envKey: { type: 'string', description: 'Exact environment-variable name for vault_env / vault_export_env, e.g. DASHSCOPE_API_KEY (letters, digits and _ only; must not start with a digit). Overrides the derived <TITLE>_<FIELD> name for the entry\'s primary secret.' },
       otpSecret: { type: 'string', description: 'TOTP secret: bare Base32 or an otpauth:// URI.' },
       cardNumber: { type: 'string', description: 'Bank/credit card number (kind card).' },
       cardExpiry: { type: 'string', description: 'Card expiry as MM/YY or MM/YYYY (kind card).' },
@@ -510,6 +511,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...(args.accessToken !== undefined ? { accessToken: args.accessToken } : {}),
         ...(args.refreshToken !== undefined ? { refreshToken: args.refreshToken } : {}),
         ...(args.expiresAt !== undefined ? { expiresAt: args.expiresAt } : {}),
+        ...(args.envKey !== undefined ? { envKey: args.envKey } : {}),
         ...(args.otpSecret !== undefined ? { otpSecret: args.otpSecret } : {}),
         ...(args.cardNumber !== undefined ? { cardNumber: args.cardNumber } : {}),
         ...(args.cardExpiry !== undefined ? { cardExpiry: args.cardExpiry } : {}),
@@ -699,6 +701,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       accessToken: { type: 'string', description: 'New OAuth access token.' },
       refreshToken: { type: 'string', description: 'New OAuth refresh token.' },
       expiresAt: { type: 'integer', description: 'New expiry epoch millis.' },
+      envKey: { type: 'string', description: 'Exact environment-variable name for vault_env / vault_export_env (e.g. DASHSCOPE_API_KEY); empty string clears it.' },
       sensitivity: { type: 'string', enum: ['normal', 'high'], description: 'Sensitivity tier; "high" entries require confirmation when read in ask mode.' },
       rotationDays: { type: 'integer', description: 'Rotation interval in days; vault_rotation reports when it elapses.' },
       icon: { type: 'string', description: 'Optional emoji/icon shown in the UI (e.g. "🚀").' },
@@ -737,7 +740,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const patch: VaultEntryPatch = {}
       for (const key of [
         'title', 'kind', 'sensitivity', 'favorite', 'rotationDays', 'username', 'email', 'phone', 'password', 'host', 'port', 'privateKey',
-        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'otpSecret', 'url', 'notes', 'tags', 'fields',
+        'apiKey', 'secret', 'accessToken', 'refreshToken', 'expiresAt', 'envKey', 'otpSecret', 'url', 'notes', 'tags', 'fields',
       ] as const) {
         const value = args[key]
         if (value !== undefined) {
@@ -2291,7 +2294,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       overwrite: { type: 'boolean', description: 'Update existing entries with the same name instead of skipping (default false).' },
       dryRun: { type: 'boolean', description: 'Preview how many rows would be imported without writing (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, dryRun: { type: 'boolean', description: 'Present when the call was a preview (no writes).' }, note: { type: 'string', description: 'Human-readable summary, e.g. how many rows a dry run would import.' } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_browser')
       const s = await guardStore()
@@ -2593,7 +2596,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       dir: { type: 'string', required: true, description: 'Absolute pass directory.' },
       dryRun: { type: 'boolean', description: 'Preview how many entries would be imported without writing (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, dryRun: { type: 'boolean', description: 'Present when the call was a preview (no writes).' }, note: { type: 'string', description: 'Human-readable summary, e.g. how many rows a dry run would import.' } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_wallet')
       const s = await guardStore()
@@ -3020,8 +3023,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   registerTool(defineTool({
     name: 'vault_env',
     description: 'Render entries flagged for environment export (tags contain "env") as KEY=VALUE lines '
-      + 'suitable for .env or export statements. Keys derive from the title + field name; values are the '
-      + 'secrets. Returns the lines so the caller can write them to a file (user-authorized).',
+      + 'suitable for .env or export statements. Keys derive from the title plus the field name with '
+      + 'vendor-standard suffixes (title "DASHSCOPE" + apiKey → DASHSCOPE_API_KEY), and an entry-level '
+      + 'envKey overrides that name verbatim for its primary secret. Custom fields are exported as '
+      + '<BASE>_<FIELD> too. Returns the lines so the caller can write them to a file (user-authorized).',
     parameters: {
       kind: { type: 'string', description: 'Only export entries of this kind.', enum: ['login', 'ssh', 'api-key', 'secret', 'oauth', 'cookie', 'card', 'custom'] },
       ids: { type: 'array', items: { type: 'string' }, description: 'Only export these entry ids (optional).' },
@@ -3045,7 +3050,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   registerTool(defineTool({
     name: 'vault_export_env',
     description: 'Write env-flagged entries (tags contain "env") to a .env file at the given path '
-      + 'as KEY=VALUE lines (values shell-quoted). Returns the path and how many lines were written.',
+      + 'as KEY=VALUE lines (values shell-quoted). Names follow vault_env (vendor-standard field '
+      + 'suffixes, per-entry envKey override). Returns the path and how many lines were written.',
     parameters: {
       path: { type: 'string', required: true, description: 'Absolute path of the .env file to write.' },
       prefix: { type: 'string', description: 'Optional key prefix, e.g. "APP_" → APP_GITHUB_TOKEN.' },
@@ -3924,7 +3930,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       overwrite: { type: 'boolean', description: 'Update existing entries with the same title (default false).' },
           dryRun: { type: 'boolean', description: 'Preview what would be imported without writing (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, dryRun: { type: 'boolean', description: 'Present when the call was a preview (no writes).' }, note: { type: 'string', description: 'Human-readable summary, e.g. how many rows a dry run would import.' } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_bitwarden')
       const s = await guardStore()
@@ -4155,7 +4161,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       overwrite: { type: 'boolean', description: 'Replace entries with the same title (default false).' },
       dryRun: { type: 'boolean', description: 'Preview how many rows would be imported without writing (default false).' },
     },
-    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { added: { type: 'integer', required: true }, skipped: { type: 'integer', required: true }, updated: { type: 'integer', required: true }, dryRun: { type: 'boolean', description: 'Present when the call was a preview (no writes).' }, note: { type: 'string', description: 'Human-readable summary, e.g. how many rows a dry run would import.' } } }, render: (_a, v) => [{ type: 'text', text: `imported ${v.added}, updated ${v.updated}, skipped ${v.skipped}` }] },
     async execute(args) {
       assertWritable('vault_import_csv')
       const s = await guardStore()
@@ -6626,22 +6632,69 @@ function totpWith(input: string, nowMs: number, period: number, digits: number):
 /** Accept tags as an array or a comma/semicolon-separated string. */
 
 /** Compute env lines for env-flagged entries (optionally kind-filtered). */
+/** Secret fields, most-primary first. The first present one is what an entry's
+ * `envKey` names; the rest follow as `<envKey>_<SUFFIX>` (or `<TITLE>_<SUFFIX>`
+ * when no envKey is set). */
+const ENV_FIELD_ORDER = ['apiKey', 'secret', 'accessToken', 'refreshToken', 'privateKey', 'password', 'cardNumber', 'cardCvv'] as const
+
+/** Field name → env-key suffix, so `title: DASHSCOPE` + `apiKey` renders the
+ * vendor-standard `DASHSCOPE_API_KEY` rather than `DASHSCOPE_APIKEY`. */
+const ENV_FIELD_SUFFIX: Record<string, string> = {
+  apiKey: 'API_KEY',
+  secret: 'SECRET',
+  accessToken: 'ACCESS_TOKEN',
+  refreshToken: 'REFRESH_TOKEN',
+  privateKey: 'PRIVATE_KEY',
+  password: 'PASSWORD',
+  cardNumber: 'CARD_NUMBER',
+  cardCvv: 'CARD_CVV',
+  otpSecret: 'OTP_SECRET',
+}
+
+/** Shell/POSIX-safe env key from arbitrary text. */
+function envKeyFrom(text: string): string {
+  return text.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+}
+
 async function envLines(store: VaultStore, kind?: string, ids?: string[], keyPrefix = ''): Promise<string[]> {
   const lines: string[] = []
   const seen = new Set<string>()
-  const keyOf = (title: string, field: string): string => keyPrefix + title.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + field.toUpperCase()
   for (const entry of store.list()) {
     if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
     if (ids !== undefined && ids.length > 0 && !ids.includes(entry.id)) continue
     if (!(entry.tags ?? []).includes('env')) continue
-    for (const [field, value] of Object.entries(entry)) {
-      if (typeof value !== 'string' || value.length === 0) continue
-      if (['id', 'title', 'kind', 'sensitivity', 'favorite', 'host', 'url', 'notes', 'createdAt', 'updatedAt', 'deletedAt'].includes(field)) continue
-      if (['username', 'email', 'phone', 'port', 'tags'].includes(field)) continue
-      const key = keyOf(entry.title, field)
-      if (seen.has(key)) continue // first entry wins; avoid duplicate exports
+
+    // An explicit `envKey` wins verbatim (no prefix, no title derivation);
+    // otherwise keys derive from the title so exports stay predictable.
+    const explicit = typeof entry.envKey === 'string' && entry.envKey.length > 0 ? entry.envKey : undefined
+    const base = explicit ?? keyPrefix + envKeyFrom(entry.title)
+    if (base.length === 0) continue
+
+    const record = entry as unknown as Record<string, unknown>
+    const push = (key: string, value: string): void => {
+      if (key.length === 0 || seen.has(key)) return // first entry wins
       seen.add(key)
       lines.push(`${key}=${shellQuote(value)}`)
+    }
+
+    const present = ENV_FIELD_ORDER.filter(field => {
+      const value = record[field]
+      return typeof value === 'string' && value.length > 0
+    })
+    present.forEach((field, index) => {
+      const value = record[field] as string
+      const suffix = ENV_FIELD_SUFFIX[field] ?? envKeyFrom(field)
+      // The primary secret takes the bare name when there is an explicit
+      // envKey, and the derived <TITLE>_<SUFFIX> form otherwise.
+      if (index === 0 && explicit !== undefined) push(explicit, value)
+      else push(`${base}_${suffix}`, value)
+    })
+
+    // Custom fields (region, clientId, scope, …) export under the same base so
+    // a template's extra values are reachable from scripts too.
+    for (const [field, value] of Object.entries(entry.fields ?? {})) {
+      if (typeof value !== 'string' || value.length === 0) continue
+      push(`${base}_${envKeyFrom(field)}`, value)
     }
   }
   return lines

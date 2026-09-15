@@ -85,7 +85,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_vault_rename` / `vault_vault_delete` | Rename a named vault (file moves, active session follows) or permanently delete one (default vault protected) |
 | `vault_match_url` | Find login entries matching a URL (Bitwarden/1Password-style: exact host, subdomain, parent domain, path-prefix; www./port normalization) with a 0–100 score — never returns the password |
 | `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
-| `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines |
+| `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines — see [Environment export](#environment-export) |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON interop (full field mapping, overwrite support) |
 | `vault_import_bitwarden_encrypted` | Decrypt a Bitwarden password-protected JSON export (PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC) and import it; pass the export passphrase |
 | `vault_import_manager_csv` | Password-manager CSV auto-detected by header: Bitwarden (`login_uri`/`login_username`/…), 1Password 8, Dashlane, NordPass, Keeper, LastPass (`fav`/`grouping`/`extra`); dryRun preview |
@@ -180,6 +180,34 @@ npm pack && dsh plugin --profile web add ./dsh-vault-0.1.1.tgz
 The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` is required.
 
 `dsh plugin --profile web remove dsh-vault` uninstalls (removes both the dependency and the layer).
+
+## Environment export
+
+Entries tagged `env` can be materialised as `KEY=VALUE` lines (`vault_env`,
+`vault_export_env`), and their names follow the field names every toolchain
+expects:
+
+| Entry | Exported key |
+|---|---|
+| title `DASHSCOPE`, `apiKey` | `DASHSCOPE_API_KEY` |
+| title `DASHSCOPE`, `prefix: APP_` | `APP_DASHSCOPE_API_KEY` |
+| `envKey: "TAVILY_TOKEN"`, `accessToken` | `TAVILY_TOKEN` |
+| …the same entry's `refreshToken` / `fields.scope` | `TAVILY_TOKEN_REFRESH_TOKEN` / `TAVILY_TOKEN_SCOPE` |
+
+- The field suffix is vendor-standard: `apiKey → API_KEY`, `accessToken →
+  ACCESS_TOKEN`, `refreshToken → REFRESH_TOKEN`, `privateKey → PRIVATE_KEY`,
+  `password → PASSWORD`, `cardNumber → CARD_NUMBER`.
+- Set an entry's **env-var name** (optional field `envKey`, also via
+  `vault_add`/`vault_update`) when the derived name is not what your scripts
+  expect: it is used **verbatim** — no prefix, no title — for the entry's
+  primary secret, and secondary secrets/custom fields hang off it as
+  `<envKey>_<FIELD>`. It must be a valid POSIX name
+  (`[A-Za-z_][A-Za-z0-9_]*`); anything else is refused when saving.
+- Custom fields are exported too, as `<BASE>_<FIELD>`.
+
+> Upgrading: keys changed from `DASHSCOPE_APIKEY` to `DASHSCOPE_API_KEY` in
+> 1.10.64 to match vendor conventions. Set `envKey` on an entry to pin an exact
+> name if a script depends on the old spelling.
 
 ## Tool profiles
 

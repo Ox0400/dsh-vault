@@ -136,6 +136,12 @@ export interface VaultEntry {
   refreshToken?: string
   /** Token/credential expiry epoch millis. */
   expiresAt?: number
+  /** Exact environment-variable name for `vault_env` / `vault_export_env`,
+   * e.g. `DASHSCOPE_API_KEY`. When set it replaces the derived
+   * `<TITLE>_<FIELD>` name for the entry's primary secret (secondary secrets
+   * and custom fields are exported as `<envKey>_<FIELD>`). Must be a valid
+   * POSIX name: `[A-Za-z_][A-Za-z0-9_]*`. */
+  envKey?: string
   /** TOTP secret: bare Base32 or an otpauth:// URI. */
   otpSecret?: string
   /** Bank/credit card number (kind `card`). */
@@ -342,6 +348,10 @@ export class VaultStore {
     for (const blob of file.entries) {
       const plaintext = decrypt(blob, this.key)
       const entry = JSON.parse(plaintext.toString('utf8')) as VaultEntry
+      // Heal timestamps written by an older, laxer build: a catalog template
+      // hint ("expiry epoch millis") stored as `expiresAt` makes every read
+      // path deal with an invalid date.
+      normalizeTimestamps(entry as unknown as Record<string, unknown>)
       this.entries.set(entry.id, entry)
     }
     // Verify the password even when the vault has no entries yet.
@@ -428,6 +438,7 @@ export class VaultStore {
    * field means "not provided", not "store an empty value"). */
   async add(patch: VaultEntryPatch & { title: string }): Promise<VaultEntry> {
     const now = Date.now()
+    validatePatchTypes(patch as unknown as Record<string, unknown>)
     const entry: VaultEntry = {
       id: randomUUID(),
       title: patch.title,
@@ -1253,6 +1264,13 @@ function validatePatchTypes(patch: Record<string, unknown>): void {
           throw new Error(`vault: ${key} must be a finite number`)
         }
         break
+      case 'envKey':
+        // A shell can only export valid POSIX names; catching it here beats
+        // writing a .env file with a key the shell would reject.
+        if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+          throw new Error('vault: envKey must match [A-Za-z_][A-Za-z0-9_]* (e.g. DASHSCOPE_API_KEY)')
+        }
+        break
       case 'port':
         if (typeof value !== 'string' && typeof value !== 'number') {
           throw new Error('vault: port must be a string or number')
@@ -1320,4 +1338,19 @@ function pickDefined(patch: Record<string, unknown>, options: { allowTitle?: boo
     result[key] = value
   }
   return result
+}
+
+/** Keep the numeric epoch fields numeric and sane. A catalog template hint
+ * ("expiry epoch millis") or a hand-edited import can otherwise persist a
+ * non-numeric `expiresAt`, which every read path then has to defend against
+ * (and which used to crash the editor with `RangeError: Invalid time value`).
+ * Numeric strings are coerced; anything unusable is dropped. */
+function normalizeTimestamps(record: Record<string, unknown>): void {
+  for (const key of ['expiresAt', 'rotationDays']) {
+    const value = record[key]
+    if (value === undefined || value === null) continue
+    const n = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(n) || n <= 0) delete record[key]
+    else record[key] = n
+  }
 }

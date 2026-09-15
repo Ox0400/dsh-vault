@@ -9,6 +9,7 @@ import type { PropsLocale, PropsRuntime, InjectFace, TranslateNS } from '@deepse
 import type { VaultLocaleKey } from './locales.ts'
 import { siteGlyph } from './site-icons.ts'
 import { judgePasswordRisk } from './password-risk.ts'
+import { localDateTimeValue, templateHints, templateKind } from './editor-form.ts'
 import css from './VaultSection.module.css'
 
 /** Wire shapes shared with the host gateway (mirror of src/index.ts types). */
@@ -52,6 +53,8 @@ export interface VaultFullWire {
   refreshToken?: string
   expiresAt?: number
   rotationDays?: number
+  /** Exact env-var name for vault_env; empty/absent derives it from the title. */
+  envKey?: string
   sensitivity?: string
   favorite?: boolean
   otpSecret?: string
@@ -201,6 +204,7 @@ type FormFields = {
   icon?: string | undefined
   color?: string | undefined
   expiresAt?: number | undefined
+  envKey?: string | undefined
   rotationDays?: number | undefined
   sensitivity?: string | undefined
   favorite?: boolean | undefined
@@ -227,6 +231,7 @@ const FORM_FIELDS: Array<{ key: keyof FormFields; label: VaultLocaleKey }> = [
   { key: 'url', label: 'fieldUrl' },
   { key: 'notes', label: 'fieldNotes' },
   { key: 'expiresAt', label: 'fieldExpiresAt' },
+  { key: 'envKey', label: 'fieldEnvKey' },
   { key: 'rotationDays', label: 'fieldRotationDays' },
   { key: 'sensitivity', label: 'fieldSensitivity' },
   { key: 'favorite', label: 'fieldFavorite' },
@@ -295,6 +300,7 @@ const CSV_EXPORT_FIELDS: Array<{ key: string; label: VaultLocaleKey }> = [  { ke
   { key: 'notes', label: 'fieldNotes' },
   { key: 'tags', label: 'fieldTags' },
   { key: 'expiresAt', label: 'fieldExpiresAt' },
+  { key: 'envKey', label: 'fieldEnvKey' },
   { key: 'rotationDays', label: 'fieldRotationDays' },
   { key: 'favorite', label: 'fieldFavorite' },
 ]
@@ -514,6 +520,8 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
   const [showGenOpts, setShowGenOpts] = useState(false)
   const [pwStrength, setPwStrength] = useState<{ score: number; verdict: string; bits: number } | null>(null)
   const [tplList, setTplList] = useState<Array<{ name: string; kind: string; fields: Record<string, string> }>>([])
+  /** Hints of the template applied to the open editor, shown as field hints. */
+  const [tplHints, setTplHints] = useState<Record<string, string>>({})
   const [kindFilter, setKindFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -667,29 +675,18 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [openMenuId, expandedId, importPreview, tagManagerOpen])
 
-  /** Apply a template's field values to the current form. The form is reset
-   * to its empty state first (so fields the template does not set are cleared
-   * rather than leaking the previous template's values), then the template's
-   * fields are applied. Secret-ish fields are never filled from a template.
-   * Non-catalog kinds (wifi/server/database/identity/bank templates) map to
-   * the closest catalog kind so the kind selector and store stay consistent. */
-  const CATALOG_KIND: Record<string, string> = {
-    wifi: 'login', server: 'ssh', database: 'ssh', identity: 'login', bank: 'card',
-  }
+  /** Apply a catalog template. The template only carries the KIND plus hint
+   * texts ("expiry epoch millis", "PEM private key"): the hints become
+   * placeholders, and the form is reset to empty. They used to be copied in as
+   * values, which filled new entries with descriptions — and an unparseable
+   * `expiresAt` hint crashed the whole settings slot with
+   * `RangeError: Invalid time value` until the page was reloaded. */
   function applyTemplate(name: string): void {
     const tpl = tplList.find(t => t.name === name)
     if (!tpl) return
     const next: Partial<FormFields> = {}
-    if (tpl.kind !== 'builtin:custom') {
-      const raw = tpl.kind.replace('builtin:', '')
-      next.kind = CATALOG_KIND[raw] ?? raw
-    }
-    for (const [key, value] of Object.entries(tpl.fields)) {
-      if (key === 'password' || key === 'otpSecret' || key === 'apiKey' || key === 'secret') continue
-      ;(next as Record<string, unknown>)[key] = value
-    }
-    // Start from a clean form so switching templates never leaves stale values
-    // from the previous template behind (the user's reported UX bug).
+    if (tpl.kind !== 'builtin:custom') next.kind = templateKind(tpl.kind.replace('builtin:', ''))
+    setTplHints(templateHints(tpl.fields))
     setForm({ ...emptyForm(), ...next })
   }
 
@@ -1686,6 +1683,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
     setForm(emptyForm())
     setTagsDraft('')
     setFieldRows([])
+    setTplHints({})
     setMessage(null)
     setEditor({ status: 'creating' })
   }
@@ -1730,12 +1728,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         icon: entry.icon ?? '',
         color: entry.color ?? '',
         expiresAt: entry.expiresAt,
+        envKey: entry.envKey,
         rotationDays: entry.rotationDays,
         sensitivity: entry.sensitivity,
         favorite: entry.favorite ?? false,
       })
       setTagsDraft((entry.tags ?? []).join(', '))
       setFieldRows(entry.fields !== undefined ? Object.entries(entry.fields).map(([k, v]) => ({ key: k, value: String(v) })) : [])
+      setTplHints({})
       setEditor({ status: 'editing', entry })
     } catch (err) {
       setMessage(errText(err))
@@ -1798,6 +1798,7 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
         ...(form.icon !== undefined ? { icon: form.icon } : {}),
         ...(form.color !== undefined ? { color: form.color } : {}),
         ...(form.expiresAt !== undefined ? { expiresAt: form.expiresAt } : {}),
+        ...(form.envKey !== undefined ? { envKey: form.envKey } : {}),
         ...(form.rotationDays !== undefined ? { rotationDays: form.rotationDays } : {}),
         ...(form.sensitivity !== undefined ? { sensitivity: form.sensitivity } : {}),
         ...(form.favorite !== undefined ? { favorite: form.favorite } : {}),
@@ -3916,7 +3917,14 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
               }
               return kind !== 'card' || f.key === 'title' || f.key === 'kind' || f.key === 'notes' || f.key === 'icon' || f.key === 'color'
             }).map(field => (
-              <label key={field.key} className={css.field}>
+              <label
+                key={field.key}
+                className={css.field}
+                // Hints of the applied template describe the field's content
+                // ("expiry epoch millis"); they belong in a tooltip, never in
+                // the value.
+                title={tplHints[field.key] ?? (field.key === 'envKey' ? t('fieldEnvKeyHint') : undefined)}
+              >
                 <span>
                   {t(field.label)}
                   {field.key === 'url' && (() => {
@@ -3979,12 +3987,21 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                 ) : field.key === 'expiresAt' ? (
                   <input
                     type="datetime-local"
-                    value={form.expiresAt !== undefined ? new Date(form.expiresAt).toISOString().slice(0, 16) : ''}
+                    value={localDateTimeValue(form.expiresAt)}
                     onChange={event => {
                       const raw = event.target.value
                       const epoch = raw.length > 0 ? Date.parse(raw) : NaN
                       setForm(previous => ({ ...previous, expiresAt: Number.isNaN(epoch) ? undefined : epoch }))
                     }}
+                  />
+                ) : field.key === 'envKey' ? (
+                  <input
+                    type="text"
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="DASHSCOPE_API_KEY"
+                    value={form.envKey ?? ''}
+                    onChange={event => setForm(previous => ({ ...previous, envKey: event.target.value.replace(/[^A-Za-z0-9_]/g, '') }))}
                   />
                 ) : field.key === 'rotationDays' ? (
                   <input

@@ -83,7 +83,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_vault_rename` / `vault_vault_delete` | 重命名命名库（文件移动,当前会话跟随）或永久删除（default 库受保护） |
 | `vault_match_url` | 按 URL 查找匹配的登录条目（Bitwarden/1Password 风格:精确主机、子域、父域、路径前缀;www./端口归一化）,带 0–100 评分——绝不返回密码 |
 | `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
-| `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 |
+| `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 —— 见[环境变量导出](#环境变量导出) |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON 互通（完整字段映射,支持覆盖） |
 | `vault_import_bitwarden_encrypted` | 解密 Bitwarden 口令保护 JSON 导出（PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC）并导入,需提供导出口令 |
 | `vault_import_manager_csv` | 密码管理器 CSV 自动识别表头：Bitwarden（login_uri/login_username/…）、1Password 8、Dashlane、NordPass、Keeper、LastPass（fav/grouping/extra）；支持 dryRun 预览 |
@@ -178,6 +178,23 @@ npm pack && dsh plugin --profile web add ./dsh-vault-0.1.1.tgz
 tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 
 `dsh plugin --profile web remove dsh-vault` 卸载(同时移除依赖与 layer)。
+
+## 环境变量导出
+
+打上 `env` 标签的条目可以用 `vault_env` / `vault_export_env` 导出为 `KEY=VALUE` 行，名字按各家工具链预期的字段名生成：
+
+| 条目 | 导出的键 |
+|---|---|
+| 标题 `DASHSCOPE` + `apiKey` | `DASHSCOPE_API_KEY` |
+| 标题 `DASHSCOPE` + `prefix: APP_` | `APP_DASHSCOPE_API_KEY` |
+| `envKey: "TAVILY_TOKEN"` + `accessToken` | `TAVILY_TOKEN` |
+| 同一条目的 `refreshToken` / `fields.scope` | `TAVILY_TOKEN_REFRESH_TOKEN` / `TAVILY_TOKEN_SCOPE` |
+
+- 字段后缀遵循惯例：`apiKey → API_KEY`、`accessToken → ACCESS_TOKEN`、`refreshToken → REFRESH_TOKEN`、`privateKey → PRIVATE_KEY`、`password → PASSWORD`、`cardNumber → CARD_NUMBER`。
+- 派生名字对不上脚本时，给条目设置**环境变量名**（可选字段 `envKey`，也可用 `vault_add`/`vault_update` 写入）：它会**原样**作为该条目主密钥的名字（不加前缀、不从标题推导），次级密钥与自定义字段则以 `<envKey>_<字段>` 挂在后面。必须是合法 POSIX 名（`[A-Za-z_][A-Za-z0-9_]*`），否则保存时直接拒绝。
+- 自定义字段同样会导出，形如 `<BASE>_<字段>`。
+
+> 升级提示：1.10.64 起键名从 `DASHSCOPE_APIKEY` 改为符合厂商惯例的 `DASHSCOPE_API_KEY`。若脚本依赖旧写法，给条目设置 `envKey` 固定名字即可。
 
 ## 工具分级(工具集)
 

@@ -8,6 +8,8 @@ not part of `vitest` — run them by hand after a client change:
 node tests/e2e/theme-check.mjs      # dual-theme tokens, ring track, attach row
 node tests/e2e/polish-check.mjs     # trash empty state, audit relative-age hint
 node tests/e2e/contrast-audit.mjs   # WCAG sweep over every tab in both themes
+node tests/e2e/oauth-crash.mjs      # template/kind -> OAuth must not crash the slot
+node tests/e2e/envkey-ui.mjs        # env-var name field round-trip
 ```
 
 ## Safety rules (enforced by the helper)
