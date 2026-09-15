@@ -1060,6 +1060,8 @@ test('vault_import_csv restores numeric fields', async () => {
 
 test('vault_mask redacts tokens and keys', async () => {
   await withContext(async ctx => {
+    // Both values are synthetic: they only need to match the token patterns
+    // that vault_mask redacts, never a real credential.
     const r = await call(ctx, 'vault_mask', { text: 'token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij and npm_123456789012345678901234567890' }) as { masked: string; redacted: number }
     assert.equal(r.redacted, 2)
     assert.ok(!r.masked.includes('ghp_'))

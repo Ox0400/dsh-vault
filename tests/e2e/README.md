@@ -46,3 +46,18 @@ Two traps it is written to avoid:
    colours instead of skipping them.
 2. **`opacity` is part of the colour.** Dimming a row to 0.8 turns a 5.8:1
    colour into 3.87:1. Prefer a muted token over `opacity` on text.
+
+## Secrets
+
+Nothing in this repository may contain a credential — the tree, the built
+`lib/`, the commit messages and everything posted to GitHub are all public.
+
+```bash
+pnpm scan:secrets     # working tree + tracked files + git log
+pnpm scan:public      # also every release, issue comment and discussion comment
+```
+
+The local half also runs inside `pnpm test` (`tests/secret-scan.spec.ts`), so a
+secret cannot be committed unnoticed. Two synthetic fixtures used by the
+`vault_mask` test are allow-listed by exact value; a PEM marker with a
+placeholder body (`abc`) is ignored while real key material is flagged.

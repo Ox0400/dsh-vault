@@ -82,6 +82,8 @@
     "prepare": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "scan:secrets": "node scripts/secret-scan.mjs",
+    "scan:public": "node scripts/secret-scan.mjs --public",
     "e2e:theme": "node tests/e2e/theme-check.mjs",
     "e2e:polish": "node tests/e2e/polish-check.mjs",
     "e2e:contrast": "node tests/e2e/contrast-audit.mjs"

@@ -364,6 +364,10 @@ node tests/e2e/contrast-audit.mjs   # 8 个标签页 × 双主题的 WCAG 对比
 
 安全规则与「让对比度审计说谎的两个坑」见 `tests/e2e/README.md`。
 
+## 不让凭据进入公开内容
+
+本仓库的一切都是公开的 —— npm 包、GitHub release、issue 与 discussion 帖子。发布前用 `pnpm scan:secrets` 扫描工作区、被跟踪文件与提交信息中所有「像凭据」的字符串;`pnpm scan:public` 会额外扫描已经发布出去的每个 release 与评论。本地扫描也包含在 `pnpm test` 里,所以被提交进来的凭据会让测试失败,而不是被发出去。
+
 ## 主题适配
 
 UI 不写死颜色，而是读取宿主的设计变量：本地语义层映射到真实的 `--dsw-alias-*` 命名空间，并带字面量兜底，脱离 DeepSeek Harness 也能正常渲染。

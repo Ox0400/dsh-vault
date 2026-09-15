@@ -425,6 +425,15 @@ See `tests/e2e/README.md` for the safety rules and for the two traps that make a
 contrast audit lie (serialised `color(srgb …)` values, and `opacity` counting as
 part of the colour).
 
+## Keeping credentials out of public content
+
+Everything in this repository is public — the npm tarball, the GitHub releases,
+the issue and discussion posts. Before publishing, `pnpm scan:secrets` checks
+the working tree, the tracked files and the commit messages for anything that
+looks like a credential, and `pnpm scan:public` additionally checks every
+release and comment already posted. The local half also runs in `pnpm test`, so
+a committed secret fails CI rather than shipping.
+
 ## Theming
 
 The UI reads the host's design tokens instead of hard-coded colours. A local
