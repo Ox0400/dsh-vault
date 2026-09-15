@@ -19,8 +19,7 @@
 import { chmod, mkdir, readFile, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { dshHomePath } from './home-paths.ts'
 import {
   decrypt,
   deriveKey,
@@ -527,6 +526,7 @@ export class VaultStore {
         events: encrypt(Buffer.from(JSON.stringify(retained), 'utf8'), key),
       }
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+      const { writeFileAtomic } = await atomicWrite()
       await writeFileAtomic(this.auditPath, JSON.stringify(file), {
         mode: 0o600,
         dirMode: 0o700,
@@ -1072,6 +1072,7 @@ export class VaultStore {
       ...encrypt(Buffer.from(JSON.stringify(entry), 'utf8'), newKey),
     }))
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+    const { withFileLock, writeFileAtomic } = await atomicWrite()
     await withFileLock(this.path, async () => {
       const file: VaultFile = {
         version: VAULT_FORMAT_VERSION,
@@ -1126,6 +1127,7 @@ export class VaultStore {
       // which fails when the parent directory is absent, so ensure the directory
       // exists before taking the lock.
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+      const { withFileLock, writeFileAtomic } = await atomicWrite()
       await withFileLock(this.path, async () => {
         const file: VaultFile = {
           version: VAULT_FORMAT_VERSION,
@@ -1379,6 +1381,29 @@ function pickDefined(patch: Record<string, unknown>, options: { allowTitle?: boo
     result[key] = value
   }
   return result
+}
+
+/**
+ * The harness's atomic-write helpers, loaded on demand.
+ *
+ * They are only needed when *writing*; the CLI's read commands (`list`, `get`,
+ * `env`, …) must work from a plain npm install where no harness package is
+ * installed, so the import happens inside the write paths instead of at module
+ * load. The plugin always has them, so its behaviour is unchanged.
+ */
+type AtomicWrite = {
+  withFileLock: <T>(path: string, fn: () => Promise<T>) => Promise<T>
+  writeFileAtomic: (path: string, data: string, options?: { mode?: number; dirMode?: number }) => Promise<void>
+}
+let atomicWriteModule: AtomicWrite | undefined
+async function atomicWrite(): Promise<AtomicWrite> {
+  if (atomicWriteModule !== undefined) return atomicWriteModule
+  try {
+    atomicWriteModule = await import('@deepseek-ai/dsh-atomic-write') as unknown as AtomicWrite
+    return atomicWriteModule
+  } catch {
+    throw new Error('dsh-vault: writing needs the DSH runtime (@deepseek-ai/dsh-atomic-write is not installed); reads work standalone')
+  }
 }
 
 /** How many explicit env names one entry may carry. Secrets are few (a token
