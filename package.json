@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.64-rc.8",
+  "version": "1.10.64-rc.9",
   "bin": {
     "dsh-vault": "./lib/cli.js"
   },
@@ -79,6 +79,7 @@
     "build": "npm run build:host && npm run build:client",
     "build:host": "tsc -p tsconfig.host.json && node -e \"require('node:fs').chmodSync('lib/cli.js', 0o755)\"",
     "build:client": "tsdown",
+    "vault": "node lib/cli.js",
     "prepare": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -6,7 +6,8 @@
  * shells and scripts, so a skill's Python/Node child process can read a secret
  * without the plaintext ever entering the model's context:
  *
- *   export $(dsh-vault env)                  # env-tagged entries as KEY=VALUE
+ *   eval "$(dsh-vault env)"                  # env-tagged entries as KEY=VALUE
+ *   set -a; . <(dsh-vault env); set +a       # same, without eval
  *   dsh-vault get my-entry --field apiKey    # one field, stdout only
  *   dsh-vault export-env .env                # 0600 file for docker/systemd
  *
@@ -85,6 +86,12 @@ env options:
   --keys-only             Print key names without values
   --mask                  Print masked values
   --file <path>           Write to a file instead of stdout
+
+Exported lines are shell-quoted (KEY='value'), so read them with
+  eval "$(dsh-vault env)"          # into this shell
+  dsh-vault export-env .env && set -a && . ./.env && set +a    # or via a file
+"export $(dsh-vault env)" looks similar but is wrong: word splitting breaks
+values containing spaces and the quotes are kept literally.
 
 An entry may be named by its id, its title, its envKey, or any key it exports
 (DASHSCOPE_API_KEY, TAVILY_TOKEN_REFRESH_TOKEN, …) — so a script that knows the
