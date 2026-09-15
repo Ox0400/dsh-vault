@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.63-rc.4",
+  "version": "1.10.63",
   "description": "Encrypted credential vault for DeepSeek Harness: store and retrieve usernames, emails, phone numbers, passwords, TOTP secrets, SSH/API-key/OAuth developer credentials through model tools and a Settings UI page.",
   "type": "module",
   "license": "MIT",
@@ -78,6 +78,9 @@
     "build:client": "tsdown",
     "prepare": "npm run build",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "e2e:theme": "node tests/e2e/theme-check.mjs",
+    "e2e:polish": "node tests/e2e/polish-check.mjs",
+    "e2e:contrast": "node tests/e2e/contrast-audit.mjs"
   }
 }

@@ -259,7 +259,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # installs devDependencies (typescript/tsdown/vitest, …)
 pnpm build      # builds host lib/*.js and the browser bundle lib/client.js
-pnpm test       # runs the 41 vitest tests
+pnpm test       # runs the 420 vitest tests
 ```
 
 > Tests need harness peer packages such as `dsh-llm`/`dsh-system-prompt`; inside the harness monorepo these resolve via workspace links.
@@ -267,13 +267,53 @@ pnpm test       # runs the 41 vitest tests
 Common commands:
 
 ```sh
-pnpm test          # unit + integration tests (vitest, 41)
+pnpm test          # unit + integration tests (vitest, 420)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
 npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
-All 41 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+All 420 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+
+Browser checks run against a real `dsh web` instead of vitest, and every one of
+them refuses to operate on the default vault:
+
+```sh
+node tests/e2e/theme-check.mjs      # dual-theme tokens, ring track, attach row
+node tests/e2e/polish-check.mjs     # empty-state copy, relative-age hover hints
+node tests/e2e/contrast-audit.mjs   # WCAG sweep over all eight tabs, both themes
+```
+
+See `tests/e2e/README.md` for the safety rules and for the two traps that make a
+contrast audit lie (serialised `color(srgb …)` values, and `opacity` counting as
+part of the colour).
+
+## Theming
+
+The UI reads the host's design tokens instead of hard-coded colours. A local
+semantic layer maps onto the real `--dsw-alias-*` namespace, with literal
+fallbacks so the page still renders outside DeepSeek Harness:
+
+```css
+--v-text: var(--dsw-alias-label-primary, #1f2328);
+--v-border: var(--dsw-alias-border-l2, #d9d9d9);
+--v-success-text: color-mix(in srgb, var(--v-success) 55%, var(--v-text));
+```
+
+Because the aliases flip with `body[data-ds-dark-theme]`, light and dark follow
+the host automatically — there is no second stylesheet and no theme prop.
+
+Two rules the layer exists to enforce:
+
+- **Never use `state-*-primary` as body text.** Those tokens are tuned for fills
+  and icons: on white they measure 2.28:1 (success) and 2.15:1 (warn), far below
+  WCAG AA. The `--v-*-text` variants mix them towards the theme's own text colour,
+  so one declaration darkens on light and lightens on dark (light 5.8/5.6/7.5:1,
+  dark 12+/11+/6.5:1).
+- **Never dim text with `opacity`.** `opacity: .8` turns a 5.8:1 colour into
+  3.9:1. Express "secondary" with a token (`--v-text-2`), not with transparency.
+
+`tests/e2e/contrast-audit.mjs` verifies both across every tab in both themes.
 
 ## Packaging & Publishing
 

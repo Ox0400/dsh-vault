@@ -232,7 +232,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
-pnpm test       # 运行 41 项 vitest 测试
+pnpm test       # 运行 420 项 vitest 测试
 ```
 
 > 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
@@ -240,7 +240,7 @@ pnpm test       # 运行 41 项 vitest 测试
 常用命令:
 
 ```sh
-# 单元 + 集成测试（vitest，41 项）
+# 单元 + 集成测试（vitest，420 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
@@ -253,7 +253,36 @@ pnpm build           # = build:host (tsc) + build:client (tsdown)
 npm pack
 ```
 
-仓库内所有测试通过：41/41（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+仓库内所有测试通过：420/420（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+
+浏览器侧检查跑在真实 `dsh web` 上（不属于 vitest），且**一律拒绝在 default 库上运行**：
+
+```sh
+node tests/e2e/theme-check.mjs      # 双主题 token、进度环轨道、附件行
+node tests/e2e/polish-check.mjs     # 空态文案、相对时间悬停
+node tests/e2e/contrast-audit.mjs   # 8 个标签页 × 双主题的 WCAG 对比度扫描
+```
+
+安全规则与「让对比度审计说谎的两个坑」见 `tests/e2e/README.md`。
+
+## 主题适配
+
+UI 不写死颜色，而是读取宿主的设计变量：本地语义层映射到真实的 `--dsw-alias-*` 命名空间，并带字面量兜底，脱离 DeepSeek Harness 也能正常渲染。
+
+```css
+--v-text: var(--dsw-alias-label-primary, #1f2328);
+--v-border: var(--dsw-alias-border-l2, #d9d9d9);
+--v-success-text: color-mix(in srgb, var(--v-success) 55%, var(--v-text));
+```
+
+因为别名会随 `body[data-ds-dark-theme]` 翻转，浅色/深色自动跟随宿主 —— 没有第二套样式表，也没有主题参数。
+
+这层语义层要守住的两条规则：
+
+- **状态色 `state-*-primary` 不能当正文颜色。** 它们是为填充块和图标调的：白底上 success 只有 2.28:1、warn 只有 2.15:1，远低于 WCAG AA。`--v-*-text` 变体把它们与主题正文色混合，于是同一条声明在浅色下压暗、深色下提亮（浅色 5.8/5.6/7.5:1，深色 12+/11+/6.5:1）。
+- **不要用 `opacity` 弱化文字。** `opacity: .8` 会把 5.8:1 变成 3.9:1。要「次要」就用 token（`--v-text-2`），不要用透明度。
+
+`tests/e2e/contrast-audit.mjs` 会在两套主题、全部标签页上验证这两条。
 
 ## 打包与发布
 
