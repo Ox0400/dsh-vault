@@ -40,8 +40,29 @@ export const ALLOWED_FIXTURES = [
 ]
 
 /** Scan one blob of text; `where` only labels the finding. */
+/**
+ * Real vault identifiers that must never reach a published file. They are read
+ * from `.private-denylist.json` (gitignored, machine-local) so the list itself
+ * is not published — documentation examples must use invented entries.
+ */
+export function loadPrivateTerms(root = process.cwd()) {
+  try {
+    const raw = JSON.parse(readFileSync(join(root, '.private-denylist.json'), 'utf8'))
+    return Array.isArray(raw?.terms) ? raw.terms.filter(t => typeof t === 'string' && t.length > 0) : []
+  } catch {
+    return []
+  }
+}
+
+/** Terms are injected by the caller so `scanText` stays pure. */
+let privateTerms = []
+export function setPrivateTerms(terms) { privateTerms = terms }
+
 export function scanText(text, where) {
   const findings = []
+  for (const term of privateTerms) {
+    if (text.includes(term)) findings.push({ where, pattern: 'private vault data', sample: `${term.slice(0, 8)}…` })
+  }
   for (const { name, pattern } of SECRET_PATTERNS) {
     for (const match of text.matchAll(new RegExp(pattern.source, pattern.flags))) {
       const value = match[0]
@@ -85,6 +106,8 @@ export async function scanDirectory(root, options = {}) {
         continue
       }
       if (!entry.isFile() || !isTextFile(entry.name)) continue
+      // The denylist holds the terms on purpose and is gitignored/never published.
+      if (entry.name === '.private-denylist.json') continue
       if (statSync(full).size > MAX_BYTES) continue
       findings.push(...scanText(await readFile(full, 'utf8'), relative(root, full)))
     }
@@ -171,6 +194,9 @@ function report(findings, what) {
 
 async function main() {
   const root = process.cwd()
+  const terms = loadPrivateTerms(root)
+  setPrivateTerms(terms)
+  if (terms.length > 0) console.log(`note  ${terms.length} private term(s) loaded from .private-denylist.json`)
   let failures = report(await scanLocal(root), 'local (working tree + tracked files + git log)')
 
   if (process.argv.includes('--public')) {

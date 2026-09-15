@@ -7,7 +7,7 @@
 import { test, expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { scanCommitMessages, scanDirectory, scanText, scanTrackedFiles } from '../scripts/secret-scan.mjs'
+import { loadPrivateTerms, scanCommitMessages, scanDirectory, scanText, scanTrackedFiles, setPrivateTerms } from '../scripts/secret-scan.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -27,7 +27,10 @@ test('the scanner actually catches credentials', () => {
   expect(scanText(`-----BEGIN PRIVATE KEY-----\n${'A1b2C3d4'.repeat(12)}\n-----END PRIVATE KEY-----`, 'real')).toHaveLength(1)
 })
 
-test('the working tree contains no credentials', async () => {
+test('the working tree contains no credentials or real vault data', async () => {
+  // The machine-local denylist is optional; when present it also fails the suite
+  // if a real entry title/id reaches a tracked file.
+  setPrivateTerms(loadPrivateTerms(root))
   const findings = await scanDirectory(root, { includeLib: true })
   expect(findings, JSON.stringify(findings)).toEqual([])
 })
