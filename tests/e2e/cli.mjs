@@ -61,6 +61,12 @@ const keys = env.out.trim().split('\n').map(l => l.split('=')[0])
 check('env derives vendor-standard names', keys.includes('DASHSCOPE_API_KEY') && keys.includes('TAVILY_TOKEN') && keys.includes('TAVILY_TOKEN_REFRESH_TOKEN'), JSON.stringify(keys))
 check('env skips entries without the env tag', !env.out.includes('pw-not-exported'))
 
+const byEnvKey = await run(['get', 'DASHSCOPE_API_KEY'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('get resolves a derived env name', byEnvKey.out === 'sk-dash-secret\n', JSON.stringify(byEnvKey.out))
+
+const byEnvSuffix = await run(['get', 'TAVILY_TOKEN_REFRESH_TOKEN'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('get resolves <envKey>_<SUFFIX>', byEnvSuffix.out === 'rt-456\n', JSON.stringify(byEnvSuffix.out))
+
 const keysOnly = await run(['env', '--keys-only'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('env --keys-only prints names only', !keysOnly.out.includes('sk-dash-secret') && keysOnly.out.includes('DASHSCOPE_API_KEY'))
 

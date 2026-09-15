@@ -201,23 +201,62 @@ The master password comes from `--password-stdin`, then
 prompt; it is never read from the plugin's config file. Secrets go to stdout and
 everything else to stderr, so pipelines behave.
 
-**How to invoke it.** `dsh` itself has no plugin-subcommand registry: the
-launcher parses only its own flags (`--profile`, `--patch`, `--dump-config`) and
-`dsh plugin …` forwards raw arguments to `pnpm` inside the profile directory.
-`dsh-cmdline` exists so an *app* bundle can own a flag family of a profile, not
-so a plugin gains a `dsh <plugin>` command. So pick whichever fits:
+**Any exported key can be named instead of a title**, which is what a script
+usually knows:
 
 ```sh
-npx dsh-vault env                        # published package, no install
-pnpm --dir ~/.dsh/profiles/web exec dsh-vault env   # profile-installed copy
-node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env   # always works
+dsh-vault get DASHSCOPE_API_KEY             # derived key
+dsh-vault get TAVILY_TOKEN                  # the entry's envKey
+dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # envKey + field suffix
+dsh-vault get DASHSCOPE_API_KEY | my-tool   # pipe it straight in
 ```
 
-The middle form needs the bin shim that `pnpm install` creates inside the
-profile; the last form works even for a `node_modules/dsh-vault` symlink to a
-checkout, because it invokes the file directly. To get the shim, declare the
-plugin as a real dependency of the profile (`pnpm dsh plugin add dsh-vault`) and
-run `pnpm install` there once.
+Resolution order: **id → title → `envKey` → any exported key name**. `get` and
+`env` share one implementation, so every name `env` prints is retrievable by
+`get`.
+
+### How to invoke it
+
+`dsh` has no plugin-subcommand registry: the launcher parses only its own flags
+(`--profile`, `--patch`, `--dump-config`), and `dsh plugin …` is the *only*
+subcommand that forwards to pnpm. `dsh-cmdline` exists so an *app* bundle (web,
+tui) can own a flag family of its own profile — not so a plugin gains a
+`dsh <plugin>` command. `dsh web exec …` therefore hands `exec …` to the web app
+(`error: too many arguments`). Use one of:
+
+```sh
+# 1. through the harness CLI — the path most people want
+pnpm dsh plugin --profile web exec dsh-vault env      # --profile is required
+
+# 2. through the profile directory (equivalent, no dsh launcher)
+pnpm --dir ~/.dsh/profiles/web exec dsh-vault env
+
+# 3. the published package, no install at all
+npx dsh-vault env
+
+# 4. the file itself — always works, even for a symlinked checkout
+node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env
+```
+
+Forms 1–2 need the `node_modules/.bin/dsh-vault` shim that `pnpm install`
+creates for a **declared** dependency. If the plugin was linked into the profile
+by hand (`ln -s`) it has no shim, and `pnpm --dir … exec` reports
+`Command "dsh-vault" not found`; either create the shim
+
+```sh
+ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
+```
+
+or use form 4. Note the shim can be pruned by a later `pnpm install` in the
+profile, and that `pnpm dsh plugin --profile web add dsh-vault` reconciles
+`dsh.profile.bundles` from the package's `dsh.bundle` declaration — if the
+plugin is *also* inserted by your own patch layer, that mounts it twice, so
+remove the patch row first.
+
+The master password comes from `--password-stdin`, then
+`$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`), then an interactive
+prompt; it is **not** read from the plugin's config file, so the CLI never
+depends on (or leaks) whatever the profile patch happens to hold.
 
 ## Environment export
 

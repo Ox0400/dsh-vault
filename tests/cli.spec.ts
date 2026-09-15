@@ -94,6 +94,25 @@ test('get prints exactly one value, and --field / --mask / fields.<name> work', 
   })
 })
 
+test('get resolves entries by env name, not just id or title', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    // Every name `env` emits must be retrievable, including derived ones.
+    expect((await invoke(['get', 'DASHSCOPE_API_KEY', '--path', vaultPath])).out).toBe('sk-dash-secret\n')
+    expect((await invoke(['get', 'TAVILY_TOKEN', '--path', vaultPath])).out).toBe('at-123\n')
+    expect((await invoke(['get', 'TAVILY_TOKEN_REFRESH_TOKEN', '--path', vaultPath])).out).toBe('rt-456\n')
+    expect((await invoke(['get', 'TAVILY_TOKEN_SCOPE', '--path', vaultPath])).out).toBe('read write\n')
+    // An env-name lookup also honours --mask and --json.
+    expect((await invoke(['get', 'DASHSCOPE_API_KEY', '--mask', '--path', vaultPath])).out).toBe('sk-d***\n')
+    const json = JSON.parse((await invoke(['get', 'TAVILY_TOKEN_REFRESH_TOKEN', '--json', '--path', vaultPath])).out) as Record<string, unknown>
+    expect(json.field).toBe('refreshToken')
+    // Titles and ids still win over env names, and a miss says what was tried.
+    expect((await invoke(['get', 'DASHSCOPE', '--path', vaultPath])).out).toBe('sk-dash-secret\n')
+    const miss = await invoke(['get', 'NOPE_API_KEY', '--path', vaultPath])
+    expect(miss.code).toBe(1)
+    expect(miss.err).toMatch(/no entry, envKey or exported key matches/)
+  })
+})
+
 test('env renders vendor-standard names and honours the env tag', async () => {
   await withVault(async (_io, _dir, vaultPath) => {
     const r = await invoke(['env', '--path', vaultPath])
@@ -176,7 +195,7 @@ test('failures explain themselves and use distinct exit codes', async () => {
     // unknown entry → 1
     const noEntry = await invoke(['get', 'nothing-like-this', '--path', vaultPath])
     expect(noEntry.code).toBe(1)
-    expect(noEntry.err).toMatch(/no entry matches/)
+    expect(noEntry.err).toMatch(/no entry, envKey or exported key matches/)
   })
 })
 

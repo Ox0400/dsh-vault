@@ -22,7 +22,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createInterface } from 'node:readline'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultStore } from './store.ts'
-import { envLinesFor, maskSecret, primarySecret, type EnvExportable } from './env-export.ts'
+import { envLinesFor, envPairsForEntry, maskSecret, primarySecret, type EnvExportable } from './env-export.ts'
 
 export interface CliIo {
   out: (text: string) => void
@@ -51,8 +51,8 @@ Usage:
 
 Commands:
   list                    List entries (titles, ids, kinds — never secrets)
-  get <id|title>          Print one field of an entry (default: its main secret)
-  show <id|title>         Print an entry's non-secret fields as JSON
+  get <id|title|ENVKEY>   Print one field of an entry (default: its main secret)
+  show <id|title|ENVKEY>  Print an entry's non-secret fields as JSON
   env                     Print env-tagged entries as KEY=VALUE lines
   export-env <path>       Write those lines to a file (mode 0600)
   verify                  Check the master password (nothing on stdout)
@@ -81,6 +81,10 @@ env options:
   --keys-only             Print key names without values
   --mask                  Print masked values
   --file <path>           Write to a file instead of stdout
+
+An entry may be named by its id, its title, its envKey, or any key it exports
+(DASHSCOPE_API_KEY, TAVILY_TOKEN_REFRESH_TOKEN, …) — so a script that knows the
+name it exports does not need to know the title.
 
 The master password comes from --password-stdin, then $DSH_VAULT_MASTER_PASSWORD
 (or $DSH_VAULT_PASSWORD), then an interactive prompt. It is never read from the
@@ -201,18 +205,50 @@ async function resolvePassword(parsed: Parsed, io: CliIo): Promise<string> {
   return typed
 }
 
-function findEntry(store: VaultStore, needle: string): VaultEntry {
+/**
+ * Resolve an entry by id, title, `envKey`, or an exported env name
+ * (`DASHSCOPE_API_KEY`, `TAVILY_TOKEN_REFRESH_TOKEN`, …) — a script usually
+ * knows the name it exports, not the entry title.
+ *
+ * Also returns the field an env name points at, so `get DASHSCOPE_API_KEY`
+ * prints exactly the value `env` would emit for that key.
+ */
+export function resolveEntry(store: VaultStore, needle: string): { entry: VaultEntry; field?: string } {
   const entries = store.list()
   const byId = entries.find(e => e.id === needle)
-  if (byId !== undefined) return byId
-  const exact = entries.filter(e => e.title === needle)
-  if (exact.length === 1) return exact[0]!
-  const partial = exact.length > 0 ? exact : entries.filter(e => e.title.toLowerCase().includes(needle.toLowerCase()))
-  if (partial.length === 0) throw new Error(`no entry matches "${needle}"`)
-  if (partial.length > 1) {
-    throw new Error(`"${needle}" is ambiguous (${partial.map(e => e.title).join(', ')}) — use the id`)
+  if (byId !== undefined) return { entry: byId }
+
+  const exactTitle = entries.filter(e => e.title === needle)
+  if (exactTitle.length === 1) return { entry: exactTitle[0]! }
+  if (exactTitle.length > 1) {
+    throw new Error(`"${needle}" is ambiguous (${exactTitle.map(e => e.title).join(', ')}) — use the id`)
   }
-  return partial[0]!
+
+  // An explicit envKey wins over anything derived.
+  const byEnvKey = entries.filter(e => e.envKey === needle)
+  if (byEnvKey.length === 1) return { entry: byEnvKey[0]! }
+  if (byEnvKey.length > 1) {
+    throw new Error(`"${needle}" is the envKey of ${byEnvKey.map(e => e.title).join(', ')} — use the id`)
+  }
+
+  // Then any key the entry would export (derived names included).
+  const keyed: Array<{ entry: VaultEntry; field: string }> = []
+  for (const entry of entries) {
+    for (const pair of envPairsForEntry(entry as unknown as EnvExportable)) {
+      if (pair.key === needle) keyed.push({ entry, field: pair.field })
+    }
+  }
+  if (keyed.length === 1) return { entry: keyed[0]!.entry, field: keyed[0]!.field }
+  if (keyed.length > 1) {
+    throw new Error(`"${needle}" is exported by ${keyed.map(k => k.entry.title).join(', ')} — use the entry id`)
+  }
+
+  const partial = entries.filter(e => e.title.toLowerCase().includes(needle.toLowerCase()))
+  if (partial.length === 1) return { entry: partial[0]! }
+  if (partial.length === 0) {
+    throw new Error(`no entry, envKey or exported key matches "${needle}"`)
+  }
+  throw new Error(`"${needle}" is ambiguous (${partial.map(e => e.title).join(', ')}) — use the id`)
 }
 
 /** Look one field up, supporting `fields.<name>` for custom fields. */
@@ -296,19 +332,21 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     if (parsed.command === 'show') {
       const needle = parsed.positional[0]
       if (needle === undefined) { io.err('dsh-vault: show needs an entry id or title\n'); return 2 }
-      io.out(`${JSON.stringify(publicFields(findEntry(store, needle)), null, 2)}\n`)
+      io.out(`${JSON.stringify(publicFields(resolveEntry(store, needle).entry), null, 2)}\n`)
       return 0
     }
 
     if (parsed.command === 'get') {
       const needle = parsed.positional[0]
-      if (needle === undefined) { io.err('dsh-vault: get needs an entry id or title\n'); return 2 }
-      const entry = findEntry(store, needle)
+      if (needle === undefined) { io.err('dsh-vault: get needs an entry id, title or env key\n'); return 2 }
+      const resolved = resolveEntry(store, needle)
+      const entry = resolved.entry
       if (parsed.flags.get('all') === true) {
         io.out(`${JSON.stringify(entry, null, 2)}\n`)
         return 0
       }
-      let name = stringFlag(parsed, 'field')
+      // An env-key lookup already names the field it points at.
+      let name = stringFlag(parsed, 'field') ?? resolved.field
       let value: unknown
       if (name === undefined) {
         const primary = primarySecret(entry as unknown as EnvExportable)

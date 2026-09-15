@@ -61,6 +61,47 @@ export interface EnvExportOptions {
  * secondary secrets and custom fields as `<envKey>_<SUFFIX>`. First entry wins
  * when two entries would produce the same key.
  */
+export interface EnvPair {
+  /** The environment-variable name this entry would export. */
+  key: string
+  /** Which entry field the value came from (`fields.foo` for custom fields). */
+  field: string
+  value: string
+}
+
+/**
+ * Every KEY/field pair one entry contributes, **regardless of the `env` tag** —
+ * the tag only decides whether `envLinesFor` emits them. `dsh-vault get <KEY>`
+ * resolves names through this same function, so a key printed by `env` is
+ * always retrievable by `get`, and vice versa.
+ */
+export function envPairsForEntry(entry: EnvExportable, prefix = ''): EnvPair[] {
+  const explicit = typeof entry.envKey === 'string' && entry.envKey.length > 0 ? entry.envKey : undefined
+  const base = explicit ?? prefix + envKeyFrom(entry.title)
+  if (base.length === 0) return []
+  const pairs: EnvPair[] = []
+  const record = entry as unknown as Record<string, unknown>
+  const present = ENV_FIELD_ORDER.filter(field => {
+    const value = record[field]
+    return typeof value === 'string' && value.length > 0
+  })
+  present.forEach((field, index) => {
+    const value = record[field] as string
+    const suffix = ENV_FIELD_SUFFIX[field] ?? envKeyFrom(field)
+    // The primary secret takes the bare name when there is an explicit envKey,
+    // and the derived <TITLE>_<SUFFIX> form otherwise.
+    const key = index === 0 && explicit !== undefined ? explicit : `${base}_${suffix}`
+    pairs.push({ key, field, value })
+  })
+  // Custom fields (region, clientId, scope, …) export under the same base so a
+  // template's extra values are reachable from scripts too.
+  for (const [field, value] of Object.entries(entry.fields ?? {})) {
+    if (typeof value !== 'string' || value.length === 0) continue
+    pairs.push({ key: `${base}_${envKeyFrom(field)}`, field: `fields.${field}`, value })
+  }
+  return pairs
+}
+
 export function envLinesFor(entries: Iterable<EnvExportable>, options: EnvExportOptions = {}): string[] {
   const { kind, ids, prefix = '' } = options
   const lines: string[] = []
@@ -69,36 +110,10 @@ export function envLinesFor(entries: Iterable<EnvExportable>, options: EnvExport
     if (kind !== undefined && (entry.kind ?? 'login') !== kind) continue
     if (ids !== undefined && ids.length > 0 && !ids.includes(entry.id)) continue
     if (!(entry.tags ?? []).includes('env')) continue
-
-    const explicit = typeof entry.envKey === 'string' && entry.envKey.length > 0 ? entry.envKey : undefined
-    const base = explicit ?? prefix + envKeyFrom(entry.title)
-    if (base.length === 0) continue
-
-    const record = entry as unknown as Record<string, unknown>
-    const push = (key: string, value: string): void => {
-      if (key.length === 0 || seen.has(key)) return // first entry wins
-      seen.add(key)
-      lines.push(`${key}=${shellQuote(value)}`)
-    }
-
-    const present = ENV_FIELD_ORDER.filter(field => {
-      const value = record[field]
-      return typeof value === 'string' && value.length > 0
-    })
-    present.forEach((field, index) => {
-      const value = record[field] as string
-      const suffix = ENV_FIELD_SUFFIX[field] ?? envKeyFrom(field)
-      // The primary secret takes the bare name when there is an explicit
-      // envKey, and the derived <TITLE>_<SUFFIX> form otherwise.
-      if (index === 0 && explicit !== undefined) push(explicit, value)
-      else push(`${base}_${suffix}`, value)
-    })
-
-    // Custom fields (region, clientId, scope, …) export under the same base so
-    // a template's extra values are reachable from scripts too.
-    for (const [field, value] of Object.entries(entry.fields ?? {})) {
-      if (typeof value !== 'string' || value.length === 0) continue
-      push(`${base}_${envKeyFrom(field)}`, value)
+    for (const pair of envPairsForEntry(entry, prefix)) {
+      if (pair.key.length === 0 || seen.has(pair.key)) continue // first entry wins
+      seen.add(pair.key)
+      lines.push(`${pair.key}=${shellQuote(pair.value)}`)
     }
   }
   return lines
