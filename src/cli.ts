@@ -450,7 +450,14 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       return 0
     }
     io.out(rendered.join('\n') + (rendered.length > 0 ? '\n' : ''))
-    if (rendered.length === 0) io.err('dsh-vault: no env-tagged entries (add the tag "env" to an entry)\n')
+    if (rendered.length === 0) {
+      // The usual first-run wall: `env` only exports entries tagged `env`.
+      io.err('dsh-vault: no entries are tagged for environment export.\n')
+      io.err('  `env` prints the entries whose tags include "env". Tag one first:\n')
+      io.err('    - in the UI: Settings → Credentials → the entry → 标签/Fields\' "tags" → env\n')
+      io.err('    - or ask the assistant: vault_update { id, tags: ["env"] }\n')
+      io.err('  `dsh-vault list` shows each entry and the env name it would export.\n')
+    }
     return 0
   } catch (err) {
     io.err(`dsh-vault: ${err instanceof Error ? err.message : String(err)}\n`)

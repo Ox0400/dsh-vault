@@ -183,87 +183,117 @@ The tarball ships prebuilt `lib/` artifacts, so no build step or `allowBuilds` i
 
 ## Command line
 
-The plugin hands the vault to the assistant; the bundled `dsh-vault` command
+The plugin hands the vault to the assistant. The bundled `dsh-vault` command
 hands the same vault to shells and scripts, so a skill's child process can read
-a secret **without the plaintext ever entering the model's context**:
+a secret **without the plaintext ever entering the model's context**.
+
+### 0. First: which command can you actually type?
+
+**Nothing provides a `dsh-vault` binary until the package is installed** — the
+plugin is a Cordis bundle, and `dsh` has no plugin-subcommand registry (the
+launcher parses only its own flags; `dsh plugin …` just forwards to pnpm, so
+`dsh web exec …` hands its arguments to the web app and fails with
+`error: too many arguments`). Pick your row before reading the examples:
+
+| your setup | the command |
+|---|---|
+| **source checkout** (`git clone` + `pnpm build`) | **`pnpm vault`** — or `node lib/cli.js`, or `./lib/cli.js` |
+| plugin **installed into a profile** | `pnpm dsh plugin --profile web exec dsh-vault` |
+| **globally installed** (`npm i -g dsh-vault`) | `dsh-vault` |
+| **nothing installed** | `npx dsh-vault` |
 
 ```sh
-eval "$(dsh-vault env)"                    # env-tagged entries → KEY=VALUE
-dsh-vault get my-entry --field apiKey      # one field, stdout only
-dsh-vault get my-entry | pbcopy            # the entry's primary secret
-dsh-vault export-env .env                  # 0600 file for docker/systemd
-dsh-vault list                             # id, kind, title, env name — never secrets
-dsh-vault show my-entry                    # non-secret fields as JSON
+# source checkout — this repository, right now:
+pnpm vault list
+
+# after a global install (or via npx) the same commands are:
+dsh-vault list
+npx dsh-vault list
 ```
 
-> **Why not `export $(dsh-vault env)`?** Command substitution splits on
-> whitespace and does not remove the quoting `dsh-vault` emits, so a value with a
-> space breaks into the wrong words and every value keeps its literal quotes.
-> `eval "$(dsh-vault env)"` reads the emitted assignments as intended;
-> `dsh-vault export-env .env && set -a && . ./.env && set +a` avoids `eval`
-> entirely and is the better choice inside a script.
+Every example below is written as `dsh-vault …`; substitute the form from your
+row (`pnpm vault …` in a checkout).
 
-The master password comes from `--password-stdin`, then
-`$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`), then an interactive
-prompt; it is never read from the plugin's config file. Secrets go to stdout and
-everything else to stderr, so pipelines behave.
+### 1. What `env` is for
 
-**Any exported key can be named instead of a title**, which is what a script
-usually knows:
+`dsh-vault env` prints the entries you tagged `env` as shell assignments, so a
+script can pick the secrets up itself:
+
+```
+$ dsh-vault env
+DEMO_API_KEY='sk-demo-123'
+OTHER_PASSWORD='pw-not-exported'
+```
+
+`eval "$(dsh-vault env)"` reads those assignments into the **current shell** —
+the usual reason to reach for it:
 
 ```sh
-dsh-vault get DASHSCOPE_API_KEY             # derived key
-dsh-vault get TAVILY_TOKEN                  # the entry's configured name
-dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # configured name + field suffix
-dsh-vault get ACME_GITHUB_TOKEN --fields apikey   # --field/--fields, case-insensitive
-dsh-vault show ACME_GITHUB_TOKEN             # non-secret metadata as JSON
-dsh-vault get DASHSCOPE_API_KEY | my-tool   # pipe it straight in
+eval "$(dsh-vault env)"          # KEY=VALUE lines become shell variables
+echo "$DEMO_API_KEY"
 ```
 
-An unknown option is an error (`--fields apikey` is accepted as an alias of
-`--field apiKey`; `--nope` exits 2 rather than being ignored).
+Two things worth knowing:
 
-`list` prints the name to copy, so a script author never has to guess it — and
-`[env]` marks the entries `dsh-vault env` actually emits:
+- **Only `env`-tagged entries are exported.** With none tagged you get
+  "no entries are tagged for environment export"; tag one in the UI (the
+  entry's tags field) or with `vault_update { id, tags: ["env"] }`.
+- The name is derived from the title and field (`DASHSCOPE` + `apiKey` →
+  `DASHSCOPE_API_KEY`) unless the entry sets `envKeys` — see
+  [Environment export](#environment-export).
 
+### 2. The commands
+
+```sh
+dsh-vault list                             # id, kind, title, exported env name — never secrets
+dsh-vault get my-entry                     # the entry's primary secret, stdout only
+dsh-vault get my-entry --field apiKey      # one named field
+dsh-vault get my-entry --mask              # confirm it exists without printing it
+dsh-vault show my-entry                    # non-secret metadata as JSON
+dsh-vault env                              # env-tagged entries as KEY=VALUE
+dsh-vault export-env .env                  # …or write them to a 0600 file
+dsh-vault verify                           # check the master password, nothing on stdout
 ```
-a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  [env]
-5db92b44-…  oauth     Tavily                           → TAVILY_TOKEN (+2)  [env]
-9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
+
+Secrets go to stdout and everything else (progress, errors) to stderr, so
+`$(dsh-vault get …)` and pipelines behave. Exit codes: `0` ok, `1` runtime
+error, `2` usage error.
+
+### 3. Shell quoting: not `export $(…)`
+
+`eval "$(dsh-vault env)"` is right; `export $(dsh-vault env)` is wrong. Command
+substitution splits on whitespace and does **not** strip the quotes the CLI
+emits, so a value containing a space breaks into the wrong words and every value
+keeps its literal quotes:
+
+```sh
+$ export $(dsh-vault env); echo "$WITH_SPACE"
+['pass]                     # split at the space
+bash: export: `here': not a valid identifier
+$ eval "$(dsh-vault env)"; echo "$WITH_SPACE"
+[pass word here]            # read as intended
 ```
 
-`(+2)` counts the further keys that entry exports (`TAVILY_TOKEN_REFRESH_TOKEN`,
-`TAVILY_TOKEN_SCOPE`); `list --json` / `show` spell them all out, and keep the
-two ideas apart:
+In a script, prefer the file form — no `eval` at all:
 
-| field | meaning |
-|---|---|
-| `envKeys` | the names **you configured** (empty when you configured none) |
-| `exportedKeys` | the names the entry **actually exports**, i.e. what `get` accepts |
-| `envTagged` | whether `dsh-vault env` includes this entry (the `env` tag) |
+```sh
+dsh-vault export-env .env && set -a && . ./.env && set +a
+```
 
-Resolution order: **id → title → `envKey` → any exported key name**. `get` and
-`env` share one implementation, so every name `env` prints is retrievable by
-`get`.
+### 4. The master password
 
-### How to invoke it
+`--password-stdin`, then `$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`),
+then an interactive prompt. It is **not** read from the plugin's config file, so
+the CLI never depends on (or leaks) whatever the profile patch holds:
 
-**There is no `dsh-vault` binary unless the package is installed.** The plugin
-is a Cordis bundle, and `dsh` has no plugin-subcommand registry: the launcher
-parses only its own flags (`--profile`, `--patch`, `--dump-config`), and
-`dsh plugin …` is the *only* subcommand that forwards to pnpm (`dsh-cmdline`
-lets an *app* bundle own a flag family — not a plugin gain a `dsh <plugin>`
-command). So `dsh web exec …` hands `exec …` to the web app and fails with
-`error: too many arguments`. Pick the row that matches your setup:
+```sh
+DSH_VAULT_MASTER_PASSWORD=… pnpm vault list
+printf '%s\n' "$PASSWORD" | pnpm vault list --password-stdin
+```
 
-| your setup | how to run the CLI |
-|---|---|
-| **source checkout** (`git clone`, `pnpm build`) | `pnpm vault list` — or `node lib/cli.js list`, or `./lib/cli.js list` |
-| plugin **installed into a profile** | `pnpm dsh plugin --profile web exec dsh-vault list` |
-| **globally installed** | `dsh-vault list` |
-| **nothing installed** | `npx dsh-vault list` |
+### 5. Install details
 
-#### Source checkout
+**Source checkout:**
 
 ```sh
 git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
@@ -277,178 +307,34 @@ npm link                                # …or put a real `dsh-vault` on PATH
 
 To develop the *plugin* against a profile you also link the checkout into the
 profile and add a patch layer that inserts it (how this repository is normally
-developed); **the CLI does not need any of that** — it reads the vault file
-directly. A hand-linked plugin has no `node_modules/.bin/dsh-vault` shim, so
-`pnpm … exec` would report `Command "dsh-vault" not found` unless you either add
-the dependency properly (`pnpm dsh plugin --profile web add dsh-vault`) or create
-the shim by hand:
+developed); **the CLI needs none of that** — it reads the vault file directly. A
+hand-linked plugin has no `.bin/dsh-vault` shim, so `pnpm … exec` reports
+`Command "dsh-vault" not found` unless you install it as a dependency
+(`pnpm dsh plugin --profile web add dsh-vault`) or create the shim by hand:
 
 ```sh
 ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
 ```
 
-#### npm install
+**npm install:**
 
 ```sh
-# a) into a profile (recommended: plugin and CLI travel together)
-pnpm dsh plugin --profile web add dsh-vault
-pnpm dsh plugin --profile web exec dsh-vault list        # --profile is required
+pnpm dsh plugin --profile web add dsh-vault          # into a profile (plugin + CLI together)
+pnpm dsh plugin --profile web exec dsh-vault list    # --profile is required
 
-# b) globally, for any shell
-npm i -g dsh-vault
-dsh-vault list
-
-# c) without installing
-npx dsh-vault list
+npm i -g dsh-vault && dsh-vault list                 # globally
+npx dsh-vault list                                   # or not at all
 ```
 
-(a) creates the `.bin` shim `exec` uses. (b) and (c) work because the read
-commands (`list`, `get`, `env`, `show`, `verify`, `export-env`) depend on Node
-alone; only *writing* to a vault needs the harness runtime, which the plugin
-always has.
+The read commands (`list`, `get`, `env`, `show`, `verify`, `export-env`) depend
+on Node alone, which is why the global and `npx` forms work. Only *writing* to a
+vault needs the harness runtime, and the plugin always has it.
 
-#### Also worth knowing
-
-`pnpm --dir ~/.dsh/profiles/web exec dsh-vault env` is equivalent to the
-`dsh plugin` form without the launcher, and
-`node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env` always works,
-even when `node_modules/dsh-vault` is a symlink into a checkout.
-
-Two caveats on the profile route: the `.bin` shim can be pruned by a later
-`pnpm install` there, and `pnpm dsh plugin --profile web add dsh-vault`
-reconciles `dsh.profile.bundles` from the package's `dsh.bundle` declaration — if
-your own patch layer *also* inserts the plugin, that mounts it twice, so remove
-the patch row first.
-
-The master password comes from `--password-stdin`, then
-`$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`), then an interactive
-prompt; it is never read from the plugin's config file. Secrets go to stdout and
-everything else to stderr, so pipelines behave.
-
-**Any exported key can be named instead of a title**, which is what a script
-usually knows:
-
-```sh
-dsh-vault get DASHSCOPE_API_KEY             # derived key
-dsh-vault get TAVILY_TOKEN                  # the entry's configured name
-dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # configured name + field suffix
-dsh-vault get ACME_GITHUB_TOKEN --fields apikey   # --field/--fields, case-insensitive
-dsh-vault show ACME_GITHUB_TOKEN             # non-secret metadata as JSON
-dsh-vault get DASHSCOPE_API_KEY | my-tool   # pipe it straight in
-```
-
-An unknown option is an error (`--fields apikey` is accepted as an alias of
-`--field apiKey`; `--nope` exits 2 rather than being ignored).
-
-`list` prints the name to copy, so a script author never has to guess it — and
-`[env]` marks the entries `dsh-vault env` actually emits:
-
-```
-a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  [env]
-5db92b44-…  oauth     Tavily                           → TAVILY_TOKEN (+2)  [env]
-9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
-```
-
-`(+2)` counts the further keys that entry exports (`TAVILY_TOKEN_REFRESH_TOKEN`,
-`TAVILY_TOKEN_SCOPE`); `list --json` / `show` spell them all out, and keep the
-two ideas apart:
-
-| field | meaning |
-|---|---|
-| `envKeys` | the names **you configured** (empty when you configured none) |
-| `exportedKeys` | the names the entry **actually exports**, i.e. what `get` accepts |
-| `envTagged` | whether `dsh-vault env` includes this entry (the `env` tag) |
-
-Resolution order: **id → title → `envKey` → any exported key name**. `get` and
-`env` share one implementation, so every name `env` prints is retrievable by
-`get`.
-
-### How to invoke it
-
-**There is no `dsh-vault` binary unless the package is installed.** The plugin
-is a Cordis bundle, and `dsh` has no plugin-subcommand registry: the launcher
-parses only its own flags (`--profile`, `--patch`, `--dump-config`), and
-`dsh plugin …` is the *only* subcommand that forwards to pnpm (`dsh-cmdline`
-lets an *app* bundle own a flag family — not a plugin gain a `dsh <plugin>`
-command). So `dsh web exec …` hands `exec …` to the web app and fails with
-`error: too many arguments`. Pick the row that matches your setup:
-
-| your setup | how to run the CLI |
-|---|---|
-| **source checkout** (`git clone`, `pnpm build`) | `pnpm vault list` — or `node lib/cli.js list`, or `./lib/cli.js list` |
-| plugin **installed into a profile** | `pnpm dsh plugin --profile web exec dsh-vault list` |
-| **globally installed** | `dsh-vault list` |
-| **nothing installed** | `npx dsh-vault list` |
-
-#### Source checkout
-
-```sh
-git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
-npm install && npm run build            # builds lib/, including executable lib/cli.js
-
-pnpm vault list                         # the repo's own entry point (package.json script)
-node lib/cli.js list                    # same thing, spelled out
-./lib/cli.js list                       # the file is executable too
-npm link                                # …or put a real `dsh-vault` on PATH
-```
-
-To develop the *plugin* against a profile you also link the checkout into the
-profile and add a patch layer that inserts it (how this repository is normally
-developed); **the CLI does not need any of that** — it reads the vault file
-directly. A hand-linked plugin has no `node_modules/.bin/dsh-vault` shim, so
-`pnpm … exec` would report `Command "dsh-vault" not found` unless you either add
-the dependency properly (`pnpm dsh plugin --profile web add dsh-vault`) or create
-the shim by hand:
-
-```sh
-ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
-```
-
-#### npm install
-
-```sh
-# a) into a profile (recommended: plugin and CLI travel together)
-pnpm dsh plugin --profile web add dsh-vault
-pnpm dsh plugin --profile web exec dsh-vault list        # --profile is required
-
-# b) globally, for any shell
-npm i -g dsh-vault
-dsh-vault list
-
-# c) without installing
-npx dsh-vault list
-```
-
-(a) creates the `.bin` shim `exec` uses. (b) and (c) work because the read
-commands (`list`, `get`, `env`, `show`, `verify`, `export-env`) depend on Node
-alone; only *writing* to a vault needs the harness runtime, which the plugin
-always has.
-
-#### Either way
-
-Two other equivalent forms are worth knowing: `pnpm --dir ~/.dsh/profiles/web
-exec dsh-vault env` (no launcher involved) and `node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env`
-(always works, even for a symlinked checkout).
-
-`pnpm dsh plugin --profile web exec …` needs the `node_modules/.bin/dsh-vault`
-shim that `pnpm install` creates for a **declared** dependency. If the plugin was
-linked into the profile by hand (`ln -s`) it has no shim, and `exec` reports
-`Command "dsh-vault" not found`; either create the shim
-
-```sh
-ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
-```
-
-or use form 4. Note the shim can be pruned by a later `pnpm install` in the
-profile, and that `pnpm dsh plugin --profile web add dsh-vault` reconciles
-`dsh.profile.bundles` from the package's `dsh.bundle` declaration — if the
-plugin is *also* inserted by your own patch layer, that mounts it twice, so
-remove the patch row first.
-
-The master password comes from `--password-stdin`, then
-`$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`), then an interactive
-prompt; it is **not** read from the plugin's config file, so the CLI never
-depends on (or leaks) whatever the profile patch happens to hold.
+Two more caveats on the profile route: its `.bin` shim can be pruned by a later
+`pnpm install`, and `pnpm dsh plugin --profile web add dsh-vault` reconciles
+`dsh.profile.bundles` from the package's `dsh.bundle` declaration — if your own
+patch layer *also* inserts the plugin, that mounts it twice, so remove the patch
+row first.
 
 ## Environment export
 

@@ -181,222 +181,128 @@ tarball 自带预构建 `lib/` 产物,无需构建或 allowBuilds。
 
 ## 命令行
 
-插件把保险库交给助手,而自带的 `dsh-vault` 命令把**同一个保险库**交给 shell 与脚本 —— 于是技能里的子进程可以自己取密钥,**明文永远不进模型上下文**:
+插件把保险库交给助手;自带的 `dsh-vault` 命令把**同一个保险库**交给 shell 与脚本,于是技能里的子进程可以自己取密钥,**明文永远不进模型上下文**。
+
+### 0. 先确认:你能敲的是哪条命令?
+
+**没安装就没有 `dsh-vault` 这个可执行文件** —— 插件是 Cordis bundle,`dsh` 也没有插件子命令注册表(启动器只解析自己的参数;`dsh plugin …` 只是转发给 pnpm,所以 `dsh web exec …` 会把参数交给 web app,报 `error: too many arguments`)。看下面的例子前,先找到你那一行:
+
+| 你的情况 | 能敲的命令 |
+|---|---|
+| **源码 checkout**(`git clone` + `pnpm build`) | **`pnpm vault`** —— 或 `node lib/cli.js`、`./lib/cli.js` |
+| 插件**装进了 profile** | `pnpm dsh plugin --profile web exec dsh-vault` |
+| **全局安装**(`npm i -g dsh-vault`) | `dsh-vault` |
+| **什么都没装** | `npx dsh-vault` |
 
 ```sh
-eval "$(dsh-vault env)"                    # 带 env 标签的条目 → KEY=VALUE
-dsh-vault get my-entry --field apiKey      # 只取一个字段,仅 stdout
-dsh-vault get my-entry | pbcopy            # 该条目的主密钥
-dsh-vault export-env .env                  # 生成 0600 权限的 .env
-dsh-vault list                             # id、类型、标题、环境变量名,绝不含密钥
+# 源码 checkout(就是本仓库当前的状态):
+pnpm vault list
+
+# 全局安装后(npx 同理)才是:
+dsh-vault list
+npx dsh-vault list
+```
+
+下面的例子统一写成 `dsh-vault …`,**请替换成你那一行的写法**(checkout 用 `pnpm vault …`)。
+
+### 1. `env` 是干什么的
+
+`dsh-vault env` 把**打了 `env` 标签**的条目打印成 shell 赋值语句,让脚本自己把密钥取走:
+
+```
+$ dsh-vault env
+DEMO_API_KEY='sk-demo-123'
+OTHER_PASSWORD='pw-not-exported'
+```
+
+`eval "$(dsh-vault env)"` 就是把这些赋值读进**当前 shell** —— 这通常才是你要用它的原因:
+
+```sh
+eval "$(dsh-vault env)"          # KEY=VALUE 变成 shell 变量
+echo "$DEMO_API_KEY"
+```
+
+两个前提要知道:
+
+- **只有打了 `env` 标签的条目才会被导出。** 一个都没打时,输出的是
+  "no entries are tagged for environment export";先在 UI 里给条目的标签加上 `env`,或让助手执行 `vault_update { id, tags: ["env"] }`。
+- 名字默认由标题 + 字段推导(`DASHSCOPE` + `apiKey` → `DASHSCOPE_API_KEY`);想固定名字就在条目的 `envKeys` 里指定 —— 见[环境变量导出](#环境变量导出)。
+
+### 2. 有哪些命令
+
+```sh
+dsh-vault list                             # id、类型、标题、导出的变量名,绝不含密钥
+dsh-vault get my-entry                     # 取该条目的主密钥,仅 stdout
+dsh-vault get my-entry --field apiKey      # 取指定字段
+dsh-vault get my-entry --mask              # 只确认存在,不打印值
 dsh-vault show my-entry                    # 非敏感字段的 JSON
+dsh-vault env                              # 带 env 标签的条目 → KEY=VALUE
+dsh-vault export-env .env                  # ……或写成 0600 权限的 .env 文件
+dsh-vault verify                           # 校验主密码,stdout 无输出
 ```
 
-> **为什么不是 `export $(dsh-vault env)`?** 命令替换会按空白拆分,而且**不会**去掉 `dsh-vault` 输出的引号 —— 值里只要有一个空格就会被拆成多个词,所有值还会带上字面引号。`eval "$(dsh-vault env)"` 才能按原样读入这些赋值;脚本里更推荐 `dsh-vault export-env .env && set -a && . ./.env && set +a`,完全不用 `eval`。
+密钥只走 stdout,其余(进度、错误)走 stderr,所以 `$(dsh-vault get …)` 与管道都正常;退出码 `0` 成功、`1` 运行错误、`2` 用法错误。
 
-主密码来源依次为:`--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码。密钥只走 stdout,其余(进度、错误)走 stderr,所以管道与 `$(...)` 都能正常用。
+### 3. shell 引号:不是 `export $(…)`
 
-**可以用「导出的键名」代替标题** —— 脚本通常只知道这个名字:
+正确的是 `eval "$(dsh-vault env)"`;`export $(dsh-vault env)` 是错的。命令替换会**按空白拆分**,而且**不会**去掉 CLI 输出的引号 —— 值里只要有一个空格就会被拆成多个词,所有值还会带上字面引号:
 
 ```sh
-dsh-vault get DASHSCOPE_API_KEY             # 派生名
-dsh-vault get TAVILY_TOKEN                  # 条目上配置的名字
-dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # 配置名 + 字段后缀
-dsh-vault get ACME_GITHUB_TOKEN --fields apikey   # --field/--fields,字段名不区分大小写
-dsh-vault show ACME_GITHUB_TOKEN             # 非敏感元数据的 JSON
-dsh-vault get DASHSCOPE_API_KEY | my-tool   # 直接喂给工具
+$ export $(dsh-vault env); echo "$WITH_SPACE"
+['pass]                     # 在空格处被拆断
+bash: export: `here': not a valid identifier
+$ eval "$(dsh-vault env)"; echo "$WITH_SPACE"
+[pass word here]            # 按原样读入
 ```
 
-未知参数会直接报错(`--fields` 是 `--field` 的别名;`--nope` 退出码 2,不会被静默忽略)。
+脚本里更推荐用文件形式,**完全不用 `eval`**:
 
-`list` 会直接打印可复制的名字,不用猜;`[env]` 标记出真正会被 `dsh-vault env` 导出的条目:
-
-```
-a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  [env]
-5db92b44-…  oauth     Tavily                           → TAVILY_TOKEN (+2)  [env]
-9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
+```sh
+dsh-vault export-env .env && set -a && . ./.env && set +a
 ```
 
-`(+2)` 是这条目还会导出的其他键数量(如 `TAVILY_TOKEN_REFRESH_TOKEN`、`TAVILY_TOKEN_SCOPE`);`list --json` / `show` 会全部列出,并把两件事分开:
+### 4. 主密码
 
-| 字段 | 含义 |
-|---|---|
-| `envKeys` | **你配置的**名字(没配就是空数组) |
-| `exportedKeys` | 这条目**实际会导出**的名字,也就是 `get` 接受的名字 |
-| `envTagged` | 是否会被 `dsh-vault env` 包含(取决于 `env` 标签) |
+依次取 `--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码,所以 CLI 既不依赖、也不会泄露 profile patch 里那份:
 
-解析顺序:**id → 标题 → `envKey` → 该条目会导出的任意键名**。`get` 与 `env` 共用同一份实现,所以 `env` 打印出来的每个名字都能用 `get` 取回。
+```sh
+DSH_VAULT_MASTER_PASSWORD=… pnpm vault list
+printf '%s\n' "$PASSWORD" | pnpm vault list --password-stdin
+```
 
-### 怎么调用
+### 5. 安装细节
 
-**没有安装就没有 `dsh-vault` 这个命令。** 插件是 Cordis bundle,而 `dsh` 没有插件子命令注册表:启动器只解析自己的参数(`--profile`、`--patch`、`--dump-config`),`dsh plugin …` 是**唯一**转发给 pnpm 的子命令(`dsh-cmdline` 是让**应用型 bundle** 拥有 profile 参数族,不是让插件获得 `dsh <插件>` 命令)。所以 `dsh web exec …` 会把参数交给 web app,报 `error: too many arguments`。按你的情况选:
-
-| 你的情况 | 怎么跑 CLI |
-|---|---|
-| **源码 checkout**(`git clone` + `pnpm build`) | `pnpm vault list` —— 或 `node lib/cli.js list`、`./lib/cli.js list` |
-| 插件**装进了 profile** | `pnpm dsh plugin --profile web exec dsh-vault list` |
-| **全局安装** | `dsh-vault list` |
-| **什么都没装** | `npx dsh-vault list` |
-
-#### 源码 checkout
+**源码 checkout:**
 
 ```sh
 git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
 npm install && npm run build            # 生成 lib/,含可执行的 lib/cli.js
 
-pnpm vault list                         # 仓库自带的入口(package.json script)
+pnpm vault list                         # 仓库自带入口(package.json script)
 node lib/cli.js list                    # 等价写法
-./lib/cli.js list                       # 文件本身也可执行
+./lib/cli.js list                       # 文件本身可执行
 npm link                                # ……或把真正的 dsh-vault 放到 PATH
 ```
 
-另外,要**开发插件**并对接 profile,还需把 checkout 软链进 profile 并加一层 patch 插入插件(本仓库平时就是这么开发的);**CLI 完全不需要这些** —— 它直接读保险库文件。手工软链的插件**没有** `node_modules/.bin/dsh-vault` 垫片,所以 `pnpm … exec` 会报 `Command "dsh-vault" not found`;要么按依赖正常安装(`pnpm dsh plugin --profile web add dsh-vault`),要么手动建垫片:
+要**开发插件**并对接 profile,还需要把 checkout 软链进 profile 并加一层 patch 插入插件(本仓库平时就是这么开发的);**CLI 完全不需要这些** —— 它直接读保险库文件。手工软链的插件**没有** `.bin/dsh-vault` 垫片,`pnpm … exec` 会报 `Command "dsh-vault" not found`;要么按依赖正常安装(`pnpm dsh plugin --profile web add dsh-vault`),要么手动建垫片:
 
 ```sh
 ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
 ```
 
-#### npm 安装
+**npm 安装:**
 
 ```sh
-# a) 装进 profile(推荐:插件与 CLI 一起就位)
-pnpm dsh plugin --profile web add dsh-vault
-pnpm dsh plugin --profile web exec dsh-vault list     # --profile 必填
+pnpm dsh plugin --profile web add dsh-vault          # 装进 profile(插件与 CLI 一起)
+pnpm dsh plugin --profile web exec dsh-vault list    # --profile 必填
 
-# b) 全局安装,任何 shell 都能用 —— CLI 不需要任何 harness 包
-npm i -g dsh-vault
-dsh-vault list
-
-# c) 不安装直接用
-npx dsh-vault list
+npm i -g dsh-vault && dsh-vault list                 # 全局
+npx dsh-vault list                                   # 或者干脆不装
 ```
 
-(a) 会安装 bundle,并生成 `exec` 需要的 `node_modules/.bin/dsh-vault` 垫片。(b)(c) 能直接用,是因为读命令(`list`、`get`、`env`、`show`、`verify`、`export-env`)只依赖 Node;**只有写保险库**才需要 harness 运行时,而插件环境一定有。
+读命令(`list`、`get`、`env`、`show`、`verify`、`export-env`)只依赖 Node,所以全局与 `npx` 都能直接用;**只有写保险库**才需要 harness 运行时,而插件环境一定有。
 
-#### 源码安装
-
-```sh
-git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
-npm install && npm run build            # 生成 lib/,含可执行的 lib/cli.js
-
-node lib/cli.js list                    # 直接跑
-npm link                                # ……或把 dsh-vault 放到 PATH
-./lib/cli.js list                       # 文件本身也可执行
-```
-
-要**开发插件**并对接某个 profile,需要把 checkout 软链进 profile 并加一层 patch 插入插件(本仓库平时就是这么开发的);**CLI 不需要这些** —— 它直接读同一个保险库文件。
-
-#### 另外值得知道
-
-`pnpm --dir ~/.dsh/profiles/web exec dsh-vault env` 等价于 `dsh plugin` 那种写法,只是不经过启动器;`node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env` **永远可用**,即使 `node_modules/dsh-vault` 只是指向 checkout 的软链。
-
-profile 这条路有两个注意点:垫片可能被之后在该目录执行的 `pnpm install` 清掉;而 `pnpm dsh plugin --profile web add dsh-vault` 会依据包的 `dsh.bundle` 声明重整 `dsh.profile.bundles` —— 如果你自己的 patch 层**也**插入了这个插件,就会**挂两份**,要先删掉 patch 层那一行。
-
-主密码来源依次为:`--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码。密钥只走 stdout,其余(进度、错误)走 stderr,所以管道与 `$(...)` 都能正常用。
-
-**可以用「导出的键名」代替标题** —— 脚本通常只知道这个名字:
-
-```sh
-dsh-vault get DASHSCOPE_API_KEY             # 派生名
-dsh-vault get TAVILY_TOKEN                  # 条目上配置的名字
-dsh-vault get TAVILY_TOKEN_REFRESH_TOKEN    # 配置名 + 字段后缀
-dsh-vault get ACME_GITHUB_TOKEN --fields apikey   # --field/--fields,字段名不区分大小写
-dsh-vault show ACME_GITHUB_TOKEN             # 非敏感元数据的 JSON
-dsh-vault get DASHSCOPE_API_KEY | my-tool   # 直接喂给工具
-```
-
-未知参数会直接报错(`--fields` 是 `--field` 的别名;`--nope` 退出码 2,不会被静默忽略)。
-
-`list` 会直接打印可复制的名字,不用猜;`[env]` 标记出真正会被 `dsh-vault env` 导出的条目:
-
-```
-a1b2c3d4-…  api-key   DASHSCOPE                        → DASHSCOPE_API_KEY  [env]
-5db92b44-…  oauth     Tavily                           → TAVILY_TOKEN (+2)  [env]
-9f8e7d6c-…  api-key   Example Billing (sandbox)        → EXAMPLE_BILLING_API_KEY
-```
-
-`(+2)` 是这条目还会导出的其他键数量(如 `TAVILY_TOKEN_REFRESH_TOKEN`、`TAVILY_TOKEN_SCOPE`);`list --json` / `show` 会全部列出,并把两件事分开:
-
-| 字段 | 含义 |
-|---|---|
-| `envKeys` | **你配置的**名字(没配就是空数组) |
-| `exportedKeys` | 这条目**实际会导出**的名字,也就是 `get` 接受的名字 |
-| `envTagged` | 是否会被 `dsh-vault env` 包含(取决于 `env` 标签) |
-
-解析顺序:**id → 标题 → `envKey` → 该条目会导出的任意键名**。`get` 与 `env` 共用同一份实现,所以 `env` 打印出来的每个名字都能用 `get` 取回。
-
-### 怎么调用
-
-**没有安装就没有 `dsh-vault` 这个命令。** 插件是 Cordis bundle,而 `dsh` 没有插件子命令注册表:启动器只解析自己的参数(`--profile`、`--patch`、`--dump-config`),`dsh plugin …` 是**唯一**转发给 pnpm 的子命令(`dsh-cmdline` 是让**应用型 bundle** 拥有 profile 参数族,不是让插件获得 `dsh <插件>` 命令)。所以 `dsh web exec …` 会把参数交给 web app,报 `error: too many arguments`。按你的情况选:
-
-| 你的情况 | 怎么跑 CLI |
-|---|---|
-| **源码 checkout**(`git clone` + `pnpm build`) | `pnpm vault list` —— 或 `node lib/cli.js list`、`./lib/cli.js list` |
-| 插件**装进了 profile** | `pnpm dsh plugin --profile web exec dsh-vault list` |
-| **全局安装** | `dsh-vault list` |
-| **什么都没装** | `npx dsh-vault list` |
-
-#### 源码 checkout
-
-```sh
-git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
-npm install && npm run build            # 生成 lib/,含可执行的 lib/cli.js
-
-pnpm vault list                         # 仓库自带的入口(package.json script)
-node lib/cli.js list                    # 等价写法
-./lib/cli.js list                       # 文件本身也可执行
-npm link                                # ……或把真正的 dsh-vault 放到 PATH
-```
-
-另外,要**开发插件**并对接 profile,还需把 checkout 软链进 profile 并加一层 patch 插入插件(本仓库平时就是这么开发的);**CLI 完全不需要这些** —— 它直接读保险库文件。手工软链的插件**没有** `node_modules/.bin/dsh-vault` 垫片,所以 `pnpm … exec` 会报 `Command "dsh-vault" not found`;要么按依赖正常安装(`pnpm dsh plugin --profile web add dsh-vault`),要么手动建垫片:
-
-```sh
-ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
-```
-
-#### npm 安装
-
-```sh
-# a) 装进 profile(推荐:插件与 CLI 一起就位)
-pnpm dsh plugin --profile web add dsh-vault
-pnpm dsh plugin --profile web exec dsh-vault list     # --profile 必填
-
-# b) 全局安装,任何 shell 都能用 —— CLI 不需要任何 harness 包
-npm i -g dsh-vault
-dsh-vault list
-
-# c) 不安装直接用
-npx dsh-vault list
-```
-
-(a) 会安装 bundle,并生成 `exec` 需要的 `node_modules/.bin/dsh-vault` 垫片。(b)(c) 能直接用,是因为读命令(`list`、`get`、`env`、`show`、`verify`、`export-env`)只依赖 Node;**只有写保险库**才需要 harness 运行时,而插件环境一定有。
-
-#### 源码安装
-
-```sh
-git clone git@github.com:Ox0400/dsh-vault.git && cd dsh-vault
-npm install && npm run build            # 生成 lib/,含可执行的 lib/cli.js
-
-node lib/cli.js list                    # 直接跑
-npm link                                # ……或把 dsh-vault 放到 PATH
-./lib/cli.js list                       # 文件本身也可执行
-```
-
-要**开发插件**并对接某个 profile,需要把 checkout 软链进 profile 并加一层 patch 插入插件(本仓库平时就是这么开发的);**CLI 不需要这些** —— 它直接读同一个保险库文件。
-
-#### 其余等价写法
-
-`pnpm --dir ~/.dsh/profiles/web exec dsh-vault env`(不经过 dsh 启动器)与 `node ~/.dsh/profiles/web/node_modules/dsh-vault/lib/cli.js env`(一定可用,软链到工作区也行)。
-
-`pnpm dsh plugin --profile web exec …` 需要 `node_modules/.bin/dsh-vault` 垫片,它只对**在清单里声明的依赖**由 `pnpm install` 生成。如果插件是你手工 `ln -s` 进 profile 的,就没有垫片,`exec` 会报 `Command "dsh-vault" not found`;此时可以手动建:
-
-```sh
-ln -sf ../dsh-vault/lib/cli.js ~/.dsh/profiles/web/node_modules/.bin/dsh-vault
-```
-
-或者直接用文件路径。注意:垫片可能被之后在 profile 目录执行的 `pnpm install` 清掉;另外 `pnpm dsh plugin --profile web add dsh-vault` 会依据包的 `dsh.bundle` 声明去重整 `dsh.profile.bundles` —— 如果你自己的 patch 层**已经**插入了这个插件,那会**挂两份**,要先删掉 patch 层那一行。
-
-主密码依次取 `--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码,所以 CLI 既不依赖、也不会泄露 profile patch 里那份。
+profile 这条路还有两个注意点:垫片可能被之后在该目录执行的 `pnpm install` 清掉;`pnpm dsh plugin --profile web add dsh-vault` 会依据包的 `dsh.bundle` 声明重整 `dsh.profile.bundles` —— 如果你自己的 patch 层**也**插入了这个插件,就会**挂两份**,要先删掉 patch 层那一行。
 
 ## 环境变量导出
 
