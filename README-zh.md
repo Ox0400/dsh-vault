@@ -252,6 +252,11 @@ dsh-vault get my-entry --field apiKey      # 取指定字段
 dsh-vault get my-entry --mask              # 只确认存在,不打印值
 dsh-vault show my-entry                    # 非敏感字段的 JSON
 dsh-vault env                              # 带 env 标签的条目 → KEY=VALUE
+dsh-vault env --mask                       # 人类视角,两段都是 KEY=VALUE:
+#   ## exported items
+#   NPM_REGISTRY_API_KEY=npm_***
+#   ## unexported items
+#   EXAMPLE_BILLING_API_KEY=***
 dsh-vault export-env .env                  # ……或写成 0600 权限的 .env 文件
 dsh-vault verify                           # 校验主密码,stdout 无输出
 ```

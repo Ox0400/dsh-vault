@@ -152,6 +152,37 @@ test('env renders vendor-standard names and honours the env tag', async () => {
   })
 })
 
+test('env --mask shows both what is exported and what is not', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const masked = await invoke(['env', '--mask', '--path', vaultPath])
+    expect(masked.code).toBe(0)
+    expect(masked.out).toContain('## exported items')
+    expect(masked.out).toContain('## unexported items')
+    // the exported value is masked, and the untagged entry is listed with the
+    // name `get` would accept — but never with a value
+    expect(masked.out).toContain('DASHSCOPE_API_KEY=sk-d***')
+    expect(masked.out).not.toContain('sk-dash-secret')
+    // the untagged entry appears in the SAME KEY=VALUE shape, value hidden
+    expect(masked.out).toContain('PLAIN_PASSWORD=***')
+    expect(masked.out).not.toContain('pw-not-exported')
+    // --explain uses real values for the exported section, but keeps the
+    // unexported one hidden (the tag is what opts a value into a shell)
+    const explained = await invoke(['env', '--explain', '--path', vaultPath])
+    expect(explained.out).toContain('## exported items')
+    expect(explained.out).toContain("DASHSCOPE_API_KEY='sk-dash-secret'")
+    expect(explained.out).toContain('PLAIN_PASSWORD=***')
+    expect(explained.out).not.toContain('pw-not-exported')
+  })
+})
+
+test('plain env stays pure KEY=VALUE so eval and pipelines keep working', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const r = await invoke(['env', '--path', vaultPath])
+    expect(r.out).not.toContain('##')
+    expect(r.out.split('\n').filter(Boolean).every(line => /^[A-Za-z_][A-Za-z0-9_]*=/.test(line))).toBe(true)
+  })
+})
+
 test('export-env writes a 0600 file', async () => {
   await withVault(async (_io, dir, vaultPath) => {
     const target = join(dir, 'nested', 'out.env')

@@ -79,6 +79,12 @@ check('get resolves a derived env name', byEnvKey.out === 'sk-dash-secret\n', JS
 const byEnvSuffix = await run(['get', 'TAVILY_TOKEN_REFRESH_TOKEN'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('get resolves <envKey>_<SUFFIX>', byEnvSuffix.out === 'rt-456\n', JSON.stringify(byEnvSuffix.out))
 
+const envMaskedView = await run(['env', '--mask'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('env --mask uses one KEY=VALUE shape for both sections', envMaskedView.out.includes('## exported items') && envMaskedView.out.includes('## unexported items') && /NOENV_PASSWORD=\*\*\*/.test(envMaskedView.out), JSON.stringify(envMaskedView.out.split('\n').slice(0, 2)))
+
+const envPlain = await run(['env'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('plain env has no section headers', !envPlain.out.includes('##'), JSON.stringify(envPlain.out.split('\n')[0]))
+
 const keysOnly = await run(['env', '--keys-only'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('env --keys-only prints names only', !keysOnly.out.includes('sk-dash-secret') && keysOnly.out.includes('DASHSCOPE_API_KEY'))
 

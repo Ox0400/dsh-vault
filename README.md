@@ -268,6 +268,11 @@ dsh-vault get my-entry --field apiKey      # one named field
 dsh-vault get my-entry --mask              # confirm it exists without printing it
 dsh-vault show my-entry                    # non-secret metadata as JSON
 dsh-vault env                              # env-tagged entries as KEY=VALUE
+dsh-vault env --mask                       # human view, both sections as KEY=VALUE:
+#   ## exported items
+#   NPM_REGISTRY_API_KEY=npm_***
+#   ## unexported items
+#   EXAMPLE_BILLING_API_KEY=***
 dsh-vault export-env .env                  # …or write them to a 0600 file
 dsh-vault verify                           # check the master password, nothing on stdout
 ```

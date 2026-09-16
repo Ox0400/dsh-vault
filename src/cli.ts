@@ -24,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createInterface } from 'node:readline'
 import { ReadStream } from 'node:tty'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultStore } from './store.ts'
-import { envLinesFor, envPairsForEntry, maskSecret, primarySecret, type EnvExportable } from './env-export.ts'
+import { envLinesFor, envPairsForEntry, maskSecret, primarySecret, shellQuote, type EnvExportable } from './env-export.ts'
 
 export interface CliIo {
   out: (text: string) => void
@@ -91,7 +91,9 @@ env options:
   --prefix <P>            Prefix for derived key names (an explicit envKey is kept verbatim)
   --kind <k>              Only entries of this kind
   --keys-only             Print key names without values
-  --mask                  Print masked values
+  --mask                  Human view: masked values PLUS an "unexported items"
+                          section (what the tag currently leaves out)
+  --explain               Same two-section view with the real values
   --file <path>           Write to a file instead of stdout
 
 Exported lines are shell-quoted (KEY='value'), so read them with
@@ -343,7 +345,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     list: ['kind', 'tag'],
     get: ['field', 'fields', 'mask', 'all'],
     show: [],
-    env: ['prefix', 'kind', 'keys-only', 'mask', 'file'],
+    env: ['prefix', 'kind', 'keys-only', 'mask', 'explain', 'file'],
     'export-env': ['prefix', 'kind', 'keys-only'],
     verify: [],
   }
@@ -459,13 +461,36 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     // env / export-env
     const prefix = stringFlag(parsed, 'prefix') ?? ''
     const kind = stringFlag(parsed, 'kind')
-    const lines = envLinesFor(store.list() as unknown as EnvExportable[], { prefix, ...(kind !== undefined ? { kind } : {}) })
+    const matching = store.list().filter(entry => kind === undefined || (entry.kind ?? 'login') === kind)
+    const lines = envLinesFor(matching as unknown as EnvExportable[], { prefix, ...(kind !== undefined ? { kind } : {}) })
     const rendered = lines.map(line => {
       if (keysOnly) return line.split('=')[0] ?? line
       if (!mask) return line
       const eq = line.indexOf('=')
       return `${line.slice(0, eq)}=${maskSecret(line.slice(eq + 1).replace(/^'|'$/g, ''))}`
     })
+    // `--mask` is the human view (masked values are useless to a script), so it
+    // also lists what is NOT exported. Without it the output stays pure
+    // `KEY=VALUE`, which is what `eval "$(…)"` and pipelines need.
+    const explain = mask || parsed.flags.get('explain') === true
+    const unexported = matching.filter(entry => !(entry.tags ?? []).includes('env'))
+    /** `KEY=***` for entries that are not exported (names visible, values not). */
+    const envPairsForEntryPairs = (entries: VaultEntry[]): string[] =>
+      pairsOf(entries, true).map(line => `${line.slice(0, line.indexOf('='))}=***`)
+
+    /** KEY=VALUE pairs of the given entries, de-duplicated, first entry wins. */
+    const pairsOf = (entries: VaultEntry[], masked: boolean): string[] => {
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const entry of entries) {
+        for (const pair of envPairsForEntry(entry as unknown as EnvExportable, prefix)) {
+          if (seen.has(pair.key)) continue
+          seen.add(pair.key)
+          out.push(`${pair.key}=${masked ? maskSecret(pair.value) : shellQuote(pair.value)}`)
+        }
+      }
+      return out
+    }
     const target = parsed.command === 'export-env' ? parsed.positional[0] : stringFlag(parsed, 'file')
     if (parsed.command === 'export-env' && target === undefined) {
       io.err('dsh-vault: export-env needs a file path\n')
@@ -480,6 +505,25 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       io.err(keysOnly
         ? `dsh-vault: wrote ${rendered.length} key names to ${file} (no values — --keys-only)\n`
         : `dsh-vault: wrote ${rendered.length} lines to ${file} (mode 0600)\n`)
+      return 0
+    }
+    if (explain) {
+      // Both sections use the same KEY=VALUE shape, so a name can be copied from
+      // either one. The unexported values stay masked even under --explain: the
+      // tag is what says "this one is meant for a shell".
+      io.out('## exported items\n')
+      if (rendered.length > 0) io.out(`${rendered.join('\n')}\n`)
+      else io.out('  (none — no entry carries the "env" tag)\n')
+      io.out('\n## unexported items\n')
+      // A fixed placeholder, not `maskSecret`: these did not opt into export, so
+      // not even a four-character prefix of a password should be shown.
+      const hidden = envPairsForEntryPairs(unexported)
+      if (hidden.length > 0) {
+        io.out(`${hidden.join('\n')}\n`)
+        io.out('  not exported (no "env" tag) — values hidden. `get <name>` still reads them.\n')
+      } else {
+        io.out('  (none — every entry is exported)\n')
+      }
       return 0
     }
     io.out(rendered.join('\n') + (rendered.length > 0 ? '\n' : ''))
