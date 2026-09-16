@@ -75,6 +75,10 @@ list options:
                           the count of further keys in parentheses, and [env]
                           when the entry is included in "dsh-vault env")
 
+JSON output ("list --json", "show") reports per entry:
+  envKeys                 the env names it exports (what "get" accepts)
+  envTagged               whether "dsh-vault env" includes it
+
 get options:
   --field <name>          apiKey | secret | accessToken | refreshToken | privateKey
                           | password | cardNumber | username | url | fields.<custom>
@@ -294,13 +298,12 @@ function publicFields(entry: VaultEntry): Record<string, unknown> {
     if (value !== undefined) out[key] = value
   }
   out.hasSecret = primarySecret(entry as unknown as EnvExportable) !== undefined
-  // Every env name this entry would export, and whether it is actually
-  // included in `dsh-vault env` (the tag decides that).
-  // `envKeys` is what the user configured; `exportedKeys` is what the entry
-  // will actually emit (and what `get` accepts). Keeping them apart is the
-  // whole point — they used to be one confusingly-similar pair of names.
-  out.envKeys = Array.isArray(entry.envKeys) ? entry.envKeys : (entry.envKey !== undefined ? [entry.envKey] : [])
-  out.exportedKeys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
+  // ONE name for "the env names this entry exports": `envKeys`. It used to be a
+  // configured `envKeys` plus a computed `exportedKeys`, which read as two
+  // similar things — the computed list is the useful one (it already starts with
+  // whatever was pinned), so only that is reported.
+  out.envKeys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
+  // Whether `dsh-vault env` includes this entry (the tag decides).
   out.envTagged = (entry.tags ?? []).includes('env')
   return out
 }
@@ -372,18 +375,30 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         io.out(`${JSON.stringify(entries.map(publicFields), null, 2)}\n`)
         return 0
       }
-      for (const entry of entries) {
+      // Group by what `env` actually does, because a bare `→ NAME` column used
+      // to read as "this is exported" for every entry: the name is only
+      // POTENTIAL until the entry carries the tag.
+      const line = (entry: VaultEntry): string => {
         const identity = [entry.username, entry.host, entry.url]
           .filter((v): v is string => typeof v === 'string' && v.length > 0).join(' · ')
-        // Show the env name `get`/`env` would use, so a script author can copy
-        // it straight out of the listing (plus how many more keys follow).
         const keys = envPairsForEntry(entry as unknown as EnvExportable).map(pair => pair.key)
-        const envSuffix = keys.length > 0
-          ? `  → ${keys[0]}${keys.length > 1 ? ` (+${keys.length - 1})` : ''}`
-          : ''
-        const tagged = (entry.tags ?? []).includes('env') ? '  [env]' : ''
-        io.out(`${entry.id}  ${(entry.kind ?? 'login').padEnd(8)}  ${entry.title}`
-          + `${identity.length > 0 ? `  (${identity})` : ''}${envSuffix}${tagged}\n`)
+        const suffix = keys.length > 0 ? `  → ${keys[0]}${keys.length > 1 ? ` (+${keys.length - 1})` : ''}` : ''
+        return `${entry.id}  ${(entry.kind ?? 'login').padEnd(8)}  ${entry.title}`
+          + `${identity.length > 0 ? `  (${identity})` : ''}${suffix}`
+      }
+      const tagged = entries.filter(entry => (entry.tags ?? []).includes('env'))
+      const untagged = entries.filter(entry => !(entry.tags ?? []).includes('env'))
+      if (tagged.length > 0) {
+        io.out(`Exported by \`env\` (tag "env") — ${tagged.length} ${tagged.length === 1 ? 'entry' : 'entries'}:\n`)
+        for (const entry of tagged) io.out(`  ${line(entry)}\n`)
+      } else {
+        io.out('Exported by `env` (tag "env"): none.\n')
+        io.out('  `env` prints only tagged entries; add the tag to one (UI: the entry\'s tags field)\n')
+        io.out('  or ask the assistant: vault_update { id, tags: ["env"] }.\n')
+      }
+      if (untagged.length > 0) {
+        io.out(`\nNot exported (no "env" tag) — ${untagged.length} ${untagged.length === 1 ? 'entry' : 'entries'}; \`get <name>\` still works for them:\n`)
+        for (const entry of untagged) io.out(`  ${line(entry)}\n`)
       }
       return 0
     }

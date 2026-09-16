@@ -228,10 +228,25 @@ echo "$DEMO_API_KEY"
   "no entries are tagged for environment export";先在 UI 里给条目的标签加上 `env`,或让助手执行 `vault_update { id, tags: ["env"] }`。
 - 名字默认由标题 + 字段推导(`DASHSCOPE` + `apiKey` → `DASHSCOPE_API_KEY`);想固定名字就在条目的 `envKeys` 里指定 —— 见[环境变量导出](#环境变量导出)。
 
+
+**命名 —— 只有三个,其中两个故意都叫 `env`:**
+
+| 名字 | 是什么 | 含义 |
+|---|---|---|
+| `env` | 条目的**标签** | 决定哪些条目会被 `dsh-vault env` 导出;不打标签就不导出 |
+| `env` | **命令** | 打印带该标签的条目 |
+| `envKeys` | 条目的**字段**(可选) | 固定确切名字,例如 `["DASHSCOPE_API_KEY"]`;旧的单数写法 `envKey` 仍作为"只写一个"的简写接受 |
+
+除此之外没有任何叫 `env*` 的东西:`list --json` / `show` 只报 `envKeys`(该条目会导出的名字,也就是 `get` 接受的名字)与 `envTagged`(是否被 `env` 包含)。
+
 ### 2. 有哪些命令
 
 ```sh
-dsh-vault list                             # id、类型、标题、导出的变量名,绝不含密钥
+dsh-vault list                             # 分组显示:哪些会被 env 导出、哪些不会
+#   Exported by `env` (tag "env") — 1 entry:
+#     a1b2c3d4-…  api-key   DASHSCOPE        → DASHSCOPE_API_KEY
+#   Not exported (no "env" tag) — 1 entry; `get <name>` still works for it:
+#     9f8e7d6c-…  api-key   Example Billing  → EXAMPLE_BILLING_API_KEY
 dsh-vault get my-entry                     # 取该条目的主密钥,仅 stdout
 dsh-vault get my-entry --field apiKey      # 取指定字段
 dsh-vault get my-entry --mask              # 只确认存在,不打印值

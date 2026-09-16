@@ -243,10 +243,26 @@ Two things worth knowing:
   `DASHSCOPE_API_KEY`) unless the entry sets `envKeys` — see
   [Environment export](#environment-export).
 
+
+**Names — there are only three, and two of them are the word `env` on purpose:**
+
+| name | what it is | meaning |
+|---|---|---|
+| `env` | an entry **tag** | which entries `dsh-vault env` exports; nothing is exported without it |
+| `env` | the **command** | prints exactly the entries carrying that tag |
+| `envKeys` | an entry **field** (optional) | pin exact names, e.g. `["DASHSCOPE_API_KEY"]`; the old singular `envKey` is accepted as a one-element shorthand |
+
+Nothing else is called `env*`: `list --json` / `show` report `envKeys` (the names
+an entry exports — what `get` accepts) and `envTagged` (whether `env` includes it).
+
 ### 2. The commands
 
 ```sh
-dsh-vault list                             # id, kind, title, exported env name — never secrets
+dsh-vault list                             # grouped: what `env` exports vs the rest
+#   Exported by `env` (tag "env") — 1 entry:
+#     a1b2c3d4-…  api-key   DASHSCOPE        → DASHSCOPE_API_KEY
+#   Not exported (no "env" tag) — 1 entry; `get <name>` still works for it:
+#     9f8e7d6c-…  api-key   Example Billing  → EXAMPLE_BILLING_API_KEY
 dsh-vault get my-entry                     # the entry's primary secret, stdout only
 dsh-vault get my-entry --field apiKey      # one named field
 dsh-vault get my-entry --mask              # confirm it exists without printing it

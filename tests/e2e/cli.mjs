@@ -40,7 +40,7 @@ function run(args, { input, env = {} } = {}) {
 const listPlain = await run(['list'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('list works without leaking secrets', listPlain.code === 0 && listPlain.out.includes('DASHSCOPE') && !listPlain.out.includes('sk-dash-secret'), `exit ${listPlain.code}`)
 
-check('list shows the env name to copy', listPlain.out.includes('DASHSCOPE_API_KEY') && /\[env\]/.test(listPlain.out) && listPlain.out.includes('TAVILY_TOKEN (+2)'), listPlain.out.split('\n')[0])
+check('list groups by what env exports, showing each name', listPlain.out.includes('DASHSCOPE_API_KEY') && /Exported by `env` \(tag "env"\) — 2 entries:/.test(listPlain.out) && listPlain.out.includes('TAVILY_TOKEN (+2)'), listPlain.out.split('\n')[0])
 
 const listJson = await run(['list', '--json'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const parsed = JSON.parse(listJson.out)
@@ -63,7 +63,7 @@ check('an unknown option is refused, not ignored', unknownFlag.code === 2 && /un
 
 const showJson = await run(['show', 'Tavily'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const shownKeys = JSON.parse(showJson.out)
-check('show separates configured from exported names', JSON.stringify(shownKeys.envKeys) === '["TAVILY_TOKEN"]' && shownKeys.exportedKeys.length === 3, JSON.stringify({ envKeys: shownKeys.envKeys, exportedKeys: shownKeys.exportedKeys }))
+check('show reports the exported names once', JSON.stringify(shownKeys.envKeys) === '["TAVILY_TOKEN","TAVILY_TOKEN_REFRESH_TOKEN","TAVILY_TOKEN_SCOPE"]' && shownKeys.envTagged === true, JSON.stringify(shownKeys.envKeys))
 
 const masked = await run(['get', 'DASHSCOPE', '--mask'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('get --mask hides the value', masked.out === 'sk-d***\n', JSON.stringify(masked.out))
@@ -112,7 +112,7 @@ check('--help exits 0 and lists the commands', help.code === 0 && /export-env/.t
 
 const show = await run(['show', 'Tavily'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const shown = JSON.parse(show.out)
-check('show exposes metadata but no secrets', JSON.stringify(shown.envKeys) === '["TAVILY_TOKEN"]' && shown.hasSecret === true && !JSON.stringify(shown).includes('at-123'), JSON.stringify(shown))
+check('show exposes metadata but no secrets', JSON.stringify(shown.envKeys) === '["TAVILY_TOKEN","TAVILY_TOKEN_REFRESH_TOKEN","TAVILY_TOKEN_SCOPE"]' && shown.hasSecret === true && !JSON.stringify(shown).includes('at-123'), JSON.stringify(shown))
 
 await rm(home, { recursive: true, force: true })
 console.log(`\n${R.filter(r => r.ok).length}/${R.length} checks passed`)

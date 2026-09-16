@@ -4275,7 +4275,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         for (const entry of entries) {
           const m = /^(.*)\.json$/.exec(entry)
           if (!m) continue
-          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
+          if (isNonVaultFile(m[1]!) || isBackupFile(entry)) continue
           names.push(m[1]!)
         }
       } catch { /* dir may not exist yet */ }
@@ -4315,7 +4315,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         for (const entry of entries) {
           const m = /^(.*)\.json$/.exec(entry)
           if (!m) continue
-          if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
+          if (isNonVaultFile(m[1]!) || isBackupFile(entry)) continue
           names.push(m[1]!)
         }
       } catch { /* no dir yet */ }
@@ -6035,9 +6035,12 @@ function resolveVaultPath(config: Config): string {
  * `access-<name>.json`, so two vaults in the same directory never share (or
  * overwrite) each other's mode / auto-capture / auto-lock settings. */
 /** Files that live beside vaults but are NOT vaults: sidecars and metadata. */
+/** Files that live beside vaults but are NOT vaults: sidecars and metadata.
+ * Accepts the name with or without its `.json` suffix. */
 function isNonVaultFile(name: string): boolean {
-  return name === 'access' || name.startsWith('access-') || name === 'tools' || name === 'meta'
-    || name.endsWith('-audit') || name.startsWith('vault-export-')
+  const base = name.replace(/\.json$/i, '')
+  return base === 'access' || base.startsWith('access-') || base === 'tools' || base === 'meta'
+    || base.endsWith('-audit') || base.startsWith('vault-export-')
 }
 
 function accessPolicyFile(config: Config): string {
@@ -6405,7 +6408,7 @@ async function listVaultRoster(config: Config, activeName?: string): Promise<Arr
     for (const entry of entries) {
       const m = /^(.*)\.json$/.exec(entry)
       if (!m) continue
-      if (['access', 'meta'].includes(m[1]!) || m[1]!.startsWith('vault-export-') || isBackupFile(entry)) continue
+      if (isNonVaultFile(m[1]!) || isBackupFile(entry)) continue
       names.push(m[1]!)
     }
   } catch { /* no dir yet */ }

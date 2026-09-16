@@ -3453,6 +3453,13 @@ test('vault listing never shows sidecars (access-*/tools/meta/audit/backups)', a
     for (const hidden of ['access-test', 'tools', 'meta', 'default-audit']) {
       assert.ok(!names.includes(hidden), `${hidden} must not be listed as a vault (got ${names.join(',')})`)
     }
+    // the vault_list TOOL must use the same filter as listVaults (it used its
+    // own, narrower one: audit/tools/access sidecars showed up as vaults)
+    const viaTool = await call(ctx, 'vault_list', {}) as { vaults: Array<{ name: string }> }
+    const toolNames = viaTool.vaults.map(v => v.name)
+    for (const hidden of ['access-test', 'tools', 'meta', 'default-audit']) {
+      assert.ok(!toolNames.includes(hidden), `vault_list must not offer ${hidden} (got ${toolNames.join(',')})`)
+    }
     // switching to a sidecar is rejected with a clear message (not a format error)
     await assert.rejects(() => gateway.switchVault('tools'), /sidecar|not a vault/i)
   }, { name: 'default' })

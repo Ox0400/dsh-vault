@@ -67,13 +67,15 @@ test('list prints entries without any secret, with the env name to copy', async 
     // the login entry is listed with its identity, still without secrets
     expect(r.out).toContain('bob')
     expect(r.out).not.toContain('pw-not-exported')
-    // the name `get`/`env` accepts is shown, with a count of the further keys
-    expect(r.out).toMatch(/DASHSCOPE.*→ DASHSCOPE_API_KEY\s+\[env\]/)
+    // grouped by what `env` actually exports, so "potential name" can never be
+    // mistaken for "already exported"
+    expect(r.out).toContain('Exported by `env` (tag "env") — 2 entries:')
+    expect(r.out).toContain('Not exported (no "env" tag) — 1 entry')
+    expect(r.out).toMatch(/DASHSCOPE.*→ DASHSCOPE_API_KEY/)
     expect(r.out).toContain('TAVILY_TOKEN (+2)')
-    // an entry that is not env-tagged still shows its name, but no [env] mark
+    // the untagged entry still shows the name `get` accepts
     const plainRow = r.out.split('\n').find(line => line.includes('Plain'))!
     expect(plainRow).toContain('→ PLAIN_PASSWORD')
-    expect(plainRow).not.toContain('[env]')
   })
 })
 
@@ -84,13 +86,11 @@ test('list --json is machine readable and flags secrets', async () => {
     expect(parsed).toHaveLength(3)
     expect(parsed.every(e => e.hasSecret === true)).toBe(true)
     expect(JSON.stringify(parsed)).not.toContain('sk-dash-secret')
-    expect(parsed[1]!.envKeys).toEqual(['TAVILY_TOKEN'])
-    // `envKeys` is what was configured; `exportedKeys` is what `get` accepts
-    expect(parsed[0]!.envKeys).toEqual([])
-    expect(parsed[0]!.exportedKeys).toEqual(['DASHSCOPE_API_KEY'])
+    expect(parsed[1]!.envKeys).toEqual(['TAVILY_TOKEN', 'TAVILY_TOKEN_REFRESH_TOKEN', 'TAVILY_TOKEN_SCOPE'])
+    // one name for "what this entry exports", plus whether `env` includes it
+    expect(parsed[0]!.envKeys).toEqual(['DASHSCOPE_API_KEY'])
     expect(parsed[0]!.envTagged).toBe(true)
-    expect(parsed[1]!.envKeys).toEqual(['TAVILY_TOKEN'])
-    expect(parsed[1]!.exportedKeys).toEqual(['TAVILY_TOKEN', 'TAVILY_TOKEN_REFRESH_TOKEN', 'TAVILY_TOKEN_SCOPE'])
+    expect(parsed[1]!.envKeys).toEqual(['TAVILY_TOKEN', 'TAVILY_TOKEN_REFRESH_TOKEN', 'TAVILY_TOKEN_SCOPE'])
     expect(parsed[2]!.envTagged).toBe(false)
   })
 })
@@ -170,8 +170,7 @@ test('verify, show and --password-stdin behave', async () => {
     expect(verify.out).toBe('')
 
     const show = JSON.parse((await invoke(['show', 'Tavily', '--path', vaultPath])).out) as Record<string, unknown>
-    expect(show.envKeys).toEqual(['TAVILY_TOKEN'])
-    expect(show.exportedKeys).toEqual(['TAVILY_TOKEN', 'TAVILY_TOKEN_REFRESH_TOKEN', 'TAVILY_TOKEN_SCOPE'])
+    expect(show.envKeys).toEqual(['TAVILY_TOKEN', 'TAVILY_TOKEN_REFRESH_TOKEN', 'TAVILY_TOKEN_SCOPE'])
     expect(show.hasSecret).toBe(true)
     expect(JSON.stringify(show)).not.toContain('at-123')
 
