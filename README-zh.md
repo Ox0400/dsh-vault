@@ -207,7 +207,7 @@ npx dsh-vault list
 
 ### 1. `env` 是干什么的
 
-`dsh-vault env` 把**打了 `env` 标签**的条目打印成 shell 赋值语句,让脚本自己把密钥取走:
+`get` 取**一个**值,不需要任何标签。`dsh-vault env` 是另一种场景:脚本要**一次拿好几个**密钥。它把**打了 `env` 标签**的条目打印成 shell 赋值语句,让脚本自己取走:
 
 ```
 $ dsh-vault env

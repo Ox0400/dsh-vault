@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.65",
+  "version": "1.10.66",
   "bin": {
     "dsh-vault": "./lib/cli.js"
   },
@@ -77,7 +77,7 @@
   },
   "scripts": {
     "build": "npm run build:host && npm run build:client",
-    "build:host": "tsc -p tsconfig.host.json && node -e \"require('node:fs').chmodSync('lib/cli.js', 0o755)\"",
+    "build:host": "tsc -p tsconfig.host.json && node -e \"require('node:fs').chmodSync('lib/cli.js', 0o755)\" && node lib/cli.js --version > /dev/null && echo \"host build ok (cli starts)\"",
     "build:client": "tsdown",
     "vault": "node lib/cli.js",
     "prepare": "npm run build",

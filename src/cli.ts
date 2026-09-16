@@ -54,7 +54,9 @@ Commands:
   list                    List entries with their env name (never secrets)
   get <id|title|ENVKEY>   Print one field of an entry (default: its main secret)
   show <id|title|ENVKEY>  Print an entry's non-secret fields as JSON
-  env                     Print env-tagged entries as KEY=VALUE lines
+  env                     Print env-TAGGED entries as KEY=VALUE lines (an entry
+                          must carry the tag "env"; "list" marks those [env]).
+                          One value only? "get <entry>" needs no tag.
   export-env <path>       Write those lines to a file (mode 0600)
   verify                  Check the master password (nothing on stdout)
 
@@ -451,12 +453,16 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     }
     io.out(rendered.join('\n') + (rendered.length > 0 ? '\n' : ''))
     if (rendered.length === 0) {
-      // The usual first-run wall: `env` only exports entries tagged `env`.
-      io.err('dsh-vault: no entries are tagged for environment export.\n')
-      io.err('  `env` prints the entries whose tags include "env". Tag one first:\n')
-      io.err('    - in the UI: Settings → Credentials → the entry → 标签/Fields\' "tags" → env\n')
-      io.err('    - or ask the assistant: vault_update { id, tags: ["env"] }\n')
-      io.err('  `dsh-vault list` shows each entry and the env name it would export.\n')
+      // The usual first-run wall: `env` only exports entries tagged `env`, and
+      // that tag exists so a shell never receives every secret in the vault.
+      io.err('dsh-vault: nothing to export — no entry carries the "env" tag.\n')
+      io.err('  `env` exports only entries whose tags include "env"; that tag is what\n')
+      io.err('  keeps the rest of the vault (cards, notes, unrelated logins) out of your shell.\n')
+      io.err('  Tag one entry and run it again:\n')
+      io.err('    UI:        Settings → Credentials → the entry → tags → env\n')
+      io.err('    assistant: vault_update { id, tags: ["env"] }\n')
+      io.err('  `dsh-vault list` marks tagged entries with [env] and shows the name each exports.\n')
+      io.err('  Only need one value? `dsh-vault get <entry>` needs no tag at all.\n')
     }
     return 0
   } catch (err) {

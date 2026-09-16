@@ -216,8 +216,9 @@ row (`pnpm vault …` in a checkout).
 
 ### 1. What `env` is for
 
-`dsh-vault env` prints the entries you tagged `env` as shell assignments, so a
-script can pick the secrets up itself:
+`get` fetches **one** value and needs no tag. `dsh-vault env` is for the other
+case: a script that needs **several** secrets at once. It prints the entries you
+tagged `env` as shell assignments, so the script picks them up itself:
 
 ```
 $ dsh-vault env
