@@ -278,7 +278,7 @@ dsh-vault export-env .env && set -a && . ./.env && set +a
 
 ### 4. 主密码
 
-依次取 `--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示;它**不会**去读插件配置文件里的密码,所以 CLI 既不依赖、也不会泄露 profile patch 里那份:
+依次取 `--password-stdin` → `$DSH_VAULT_MASTER_PASSWORD`(或 `$DSH_VAULT_PASSWORD`)→ 交互式提示(**输入不回显**,终端会切到 raw mode;`tests/e2e/cli-prompt.mjs` 会验证这一点);它**不会**去读插件配置文件里的密码,所以 CLI 既不依赖、也不会泄露 profile patch 里那份:
 
 ```sh
 DSH_VAULT_MASTER_PASSWORD=… pnpm vault list

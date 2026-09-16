@@ -17,11 +17,12 @@
  * The core is `runCli(argv, io)`, which tests drive directly without spawning.
  */
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, openSync, realpathSync, writeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createInterface } from 'node:readline'
+import { ReadStream } from 'node:tty'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultStore } from './store.ts'
 import { envLinesFor, envPairsForEntry, maskSecret, primarySecret, type EnvExportable } from './env-export.ts'
 
@@ -161,37 +162,52 @@ export function resolveCliVaultPath(parsed: Parsed, env: Record<string, string |
 
 /** Interactive prompt with echo off, read from the terminal rather than stdin. */
 async function promptHidden(prompt: string): Promise<string> {
-  const { open } = await import('node:fs/promises')
-  let handle: Awaited<ReturnType<typeof open>> | undefined
+  // The terminal echoes what you type unless it is switched to raw mode: the
+  // first version of this opened /dev/tty but left echo on, so the master
+  // password appeared in clear text. Raw mode also means we handle Enter,
+  // backspace and Ctrl-C ourselves (below).
+  let fd: number
   try {
-    handle = await open('/dev/tty', 'r+')
+    fd = openSync('/dev/tty', 'r+')
   } catch {
+    // No controlling terminal (piped input): read a plain line from stdin.
     const rl = createInterface({ input: process.stdin, output: process.stderr })
     const answer = await new Promise<string>(res => rl.question(prompt, res))
     rl.close()
     return answer
   }
-  const reader = handle.createReadStream()
-  const writer = handle.createWriteStream()
-  writer.write(prompt)
-  reader.setEncoding('utf8')
-  return await new Promise<string>((res, rej) => {
-    let value = ''
-    const finish = (result: string): void => {
-      reader.destroy()
-      void handle?.close()
-      res(result)
-    }
-    reader.on('data', (chunk: string | Buffer) => {
-      for (const ch of String(chunk)) {
-        if (ch === '\n' || ch === '\r') { writer.write('\n'); finish(value); return }
-        if (ch === '\u0003') { reader.destroy(); void handle?.close(); rej(new Error('aborted')); return }
-        if (ch === '\u007f' || ch === '\b') { value = value.slice(0, -1); continue }
-        value += ch
+
+  const input = new ReadStream(fd)
+  input.setRawMode(true)
+  input.setEncoding('utf8')
+  writeSync(fd, prompt)
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      let value = ''
+      const finish = (result: string): void => {
+        writeSync(fd, '\n')
+        resolve(result)
       }
+      input.on('data', (chunk: string | Buffer) => {
+        for (const ch of String(chunk)) {
+          if (ch === '\n' || ch === '\r') { finish(value); return }
+          if (ch === '\u0003') { // Ctrl-C
+            writeSync(fd, '\n')
+            reject(new Error('aborted'))
+            return
+          }
+          if (ch === '\u007f' || ch === '\b') { value = value.slice(0, -1); continue }
+          if (ch === '\u0015') { value = ''; continue } // Ctrl-U clears the line
+          if (ch < ' ') continue // ignore other control characters
+          value += ch
+        }
+      })
+      input.on('error', err => reject(err instanceof Error ? err : new Error(String(err))))
     })
-    reader.on('error', rej)
-  })
+  } finally {
+    input.setRawMode(false)
+    input.destroy() // owns the fd
+  }
 }
 
 async function readStdinLine(): Promise<string> {

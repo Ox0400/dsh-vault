@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.67",
+  "version": "1.10.68",
   "bin": {
     "dsh-vault": "./lib/cli.js"
   },
@@ -87,6 +87,7 @@
     "scan:public": "node scripts/secret-scan.mjs --public",
     "e2e:theme": "node tests/e2e/theme-check.mjs",
     "e2e:polish": "node tests/e2e/polish-check.mjs",
-    "e2e:contrast": "node tests/e2e/contrast-audit.mjs"
+    "e2e:contrast": "node tests/e2e/contrast-audit.mjs",
+    "e2e:prompt": "node tests/e2e/cli-prompt.mjs"
   }
 }

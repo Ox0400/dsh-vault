@@ -300,7 +300,8 @@ dsh-vault export-env .env && set -a && . ./.env && set +a
 ### 4. The master password
 
 `--password-stdin`, then `$DSH_VAULT_MASTER_PASSWORD` (or `$DSH_VAULT_PASSWORD`),
-then an interactive prompt. It is **not** read from the plugin's config file, so
+then an interactive prompt that **hides what you type** (the terminal is switched
+to raw mode; verify with `tests/e2e/cli-prompt.mjs`). It is **not** read from the plugin's config file, so
 the CLI never depends on (or leaks) whatever the profile patch holds:
 
 ```sh

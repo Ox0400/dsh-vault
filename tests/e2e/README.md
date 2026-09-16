@@ -12,6 +12,7 @@ node tests/e2e/oauth-crash.mjs      # template/kind -> OAuth must not crash the 
 node tests/e2e/envkey-ui.mjs        # env-var name field round-trip
 node tests/e2e/cli.mjs              # the built CLI as a child process (needs npm run build:host)
 node tests/e2e/cli-standalone.mjs   # the published layout (no node_modules) must still run
+node tests/e2e/cli-prompt.mjs       # the password prompt must not echo (pseudo-terminal)
 ```
 
 ## Safety rules (enforced by the helper)
