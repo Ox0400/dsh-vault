@@ -392,19 +392,23 @@ rather than a verdict.
 ## Strength indicator
 
 Each entry row shows a three-star indicator after its title — **☆☆☆ = 0 score,
-★★★ = full marks** — in six half-star steps. A half star is the coloured copy of
-the same three glyphs clipped to a percentage (Unicode has no half-star glyph
-most fonts can render):
+★★★ = full marks** — in six half-star steps:
 
-| score | shows | band |
+![strength indicator: the seven states](docs/strength-stars.svg)
+
+A half star is a real half-filled star, not a `½` next to it: the coloured copy
+of the same three glyphs is clipped to a percentage, and `★`/`☆` share an advance
+width so the clip lands exactly on a star boundary.
+
+| score | filled stars | band |
 |---|---|---|
-| 0–8 | ☆☆☆ | weak |
-| 9–24 | ½☆☆ | weak |
-| 25–41 | ★☆☆ | weak |
-| 42–58 | ★½☆ | fair |
-| 59–74 | ★★☆ | fair |
-| 75–91 | ★★½ | strong |
-| 92–100 | ★★★ | strong |
+| 0–8 | 0 | weak |
+| 9–24 | ½ | weak |
+| 25–41 | 1 | weak |
+| 42–58 | 1½ | fair |
+| 59–74 | 2 | fair |
+| 75–91 | 2½ | strong |
+| 92–100 | 3 | very strong |
 
 Hovering it shows the exact score and verdict. The score is computed **host-side**
 (the list never receives the secret) and covers the entry's **password or card

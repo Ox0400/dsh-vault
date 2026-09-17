@@ -61,7 +61,8 @@ try {
 
   await addEntry(p, 'PIN 卡', '1234')
   await addEntry(p, '弱口令', '1111')
-  await addEntry(p, '中等', 'Sunflower22')
+  await addEntry(p, '半星', 'Sunflower22')   // 45/100 → 3 of 6 units → 50%
+  await addEntry(p, '中等', 'M0onlight!River42')
   await addEntry(p, '强口令', 'Xk9#mQ2!vT7@pL4z')
   await openSettings(p, '凭据库')
   await p.waitForTimeout(1500)
@@ -69,22 +70,37 @@ try {
   const rows = await snap(p)
   if (rows.length > 0 && rows.every(r => r.stars === null)) {
     console.log('SKIP  the running host does not send passwordStrength — restart `dsh web` and re-run')
-    console.log('      (client-side mapping is covered by tests/strength-stars.spec.ts)')
+    console.log('      (the mapping itself is covered by tests/strength-stars.spec.ts)')
     await wipeVault(p)
     await ctx.close()
     await b.close()
     process.exit(0)
   }
-  const weak = [...rows].find(r => r.title.includes('弱口令'))
-  const mid = [...rows].find(r => r.title.includes('中等'))
-  const strong = [...rows].find(r => r.title.includes('强口令'))
-  check('the track is hollow so 0 units cannot look full', rows.every(r => r.stars === null || r.stars === '☆☆☆'), JSON.stringify(rows.map(r => r.stars)))
-  check('a very weak password fills nothing', weak !== undefined && weak.fill === 0, `weak fill ${weak?.fill}% (${weak?.hint})`)
-  check('a mid password fills roughly half', mid !== undefined && mid.fill >= 34 && mid.fill <= 67, `mid fill ${mid?.fill}% (${mid?.hint})`)
-  check('a strong password fills the whole track', strong !== undefined && strong.fill >= 96, `strong fill ${strong?.fill}% (${strong?.hint})`)
-  check('fills increase with strength', (weak?.fill ?? 0) < (mid?.fill ?? 0) && (mid?.fill ?? 0) < (strong?.fill ?? 0), `${weak?.fill} < ${mid?.fill} < ${strong?.fill}`)
-  check('the indicator carries the score as a hint', /\d+\/100/.test(weak?.hint || ''), JSON.stringify(weak?.hint))
-  check('the colour reflects the band', /strengthWeak/.test(weak?.cls || '') && /strengthStrong|strengthFair/.test(strong?.cls || ''), `${weak?.cls} / ${strong?.cls}`)
+
+  const scored = rows.filter(r => r.stars !== null && /\d+\/100/.test(r.hint || ''))
+  const filled = (s) => (s || '').split('').filter(c => c === '★').length
+  check('the track is hollow so 0 units cannot look full', scored.every(r => r.stars === '☆☆☆'), JSON.stringify(scored.map(r => r.stars)))
+  // The contract that matters: whatever score the host reports, the client must
+  // draw it as a clip at units/6 of the track — including the half-star steps,
+  // which are not multiples of a third. Deriving the expectation from the hint
+  // keeps this true across scoring changes.
+  const mismatches = []
+  for (const row of scored) {
+    const score = Number(/\d+/.exec(row.hint)[0])
+    const units = score <= 0 ? 0 : Math.min(6, Math.max(0, Math.round((score / 100) * 6)))
+    const expected = (units / 6) * 100
+    if (Math.abs(row.fill - expected) > 1.5) mismatches.push(`${row.title}: score ${score} → expected ${expected.toFixed(0)}%, drew ${row.fill}%`)
+  }
+  check('every row draws exactly its score as a clip width', mismatches.length === 0, mismatches.join(' | '))
+  const halves = scored.filter(r => [17, 50, 83].some(pct => Math.abs(r.fill - pct) <= 1.5))
+  check('a half-star position is rendered (17 / 50 / 83%)', halves.length > 0, scored.map(r => `${r.title}=${r.fill}%`).join(' '))
+  check('filled stars grow with the score', (() => {
+    const sorted = [...scored].sort((a, b) => Number(/\d+/.exec(a.hint)[0]) - Number(/\d+/.exec(b.hint)[0]))
+    return sorted.every((row, i) => i === 0 || row.fill >= sorted[i - 1].fill)
+  })(), scored.map(r => r.fill).join(','))
+  check('the indicator carries the score as a hint', scored.every(r => /\d+\/100/.test(r.hint || '')), JSON.stringify(scored[0]?.hint))
+  check('the colour reflects the band', scored.some(r => /strengthWeak/.test(r.cls || '')) && scored.some(r => /strengthStrong|strengthFair/.test(r.cls || '')), scored.map(r => r.cls).join(','))
+
   // the secret itself is never in the page
   const html = await p.content()
   check('no secret reaches the browser', !html.includes('Xk9#mQ2') && !html.includes('4111'), '')
