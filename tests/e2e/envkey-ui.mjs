@@ -22,8 +22,8 @@ try {
   installDialogs(p)
   const errors = []
   p.on('pageerror', e => errors.push(String(e).slice(0, 200)))
-  await useVault(p, 'test')
-  await wipeVault(p, 'test')
+  await useVault(p)
+  await wipeVault(p)
   await p.waitForTimeout(1000)
 
   await p.evaluate(() => { [...document.querySelectorAll('button')].find(x => String(x.className).includes('addButton') && /新增凭据/.test(x.textContent || ''))?.click() })
@@ -59,7 +59,7 @@ try {
   await p.waitForTimeout(700)
   check('no page errors', errors.length === 0, errors.join(' | ').slice(0, 160))
 
-  await wipeVault(p, 'test')
+  await wipeVault(p)
   await ctx.close()
 } catch (e) {
   console.log('SCRIPT-ERR:', e && e.message ? e.message : String(e))

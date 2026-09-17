@@ -73,7 +73,7 @@ try {
   const ctx = await authedContext(b); const p = await ctx.newPage()
   installDialogs(p)
   p.on('pageerror', e => console.log('PAGEERR:', String(e).slice(0, 160)))
-  await useVault(p, 'test')
+  await useVault(p)
 
   // give the vaults content so the panels are not all empty
   await p.evaluate(() => { [...document.querySelectorAll('button')].find(x => /新增凭据/.test((x.textContent || '').trim()))?.click() })

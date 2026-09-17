@@ -18,9 +18,11 @@ node tests/e2e/strength-stars.mjs    # title strength indicator (skips until the
 
 ## Safety rules (enforced by the helper)
 
-Every script must run against a **throwaway vault**, never the real one:
+Every script runs in a vault **reserved for automation** (`e2e`, or
+`DSH_E2E_VAULT`), never the real one and never a scratch vault a human may be
+using — `wipeVault` really does delete and empty the trash:
 
-- `useVault(page, 'test')` creates the vault if needed and then verifies that it
+- `useVault(page)` creates the vault if needed and then verifies that it
   is really the active one — it **throws** otherwise.
 - `useVault(page, 'default')` is refused unless `DSH_E2E_ALLOW_DEFAULT=1`
   (read-only checks only).

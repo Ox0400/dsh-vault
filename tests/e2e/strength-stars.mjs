@@ -36,11 +36,12 @@ const addEntry = async (p, title, password) => {
   await p.waitForTimeout(1100)
   await p.evaluate(([t, pw]) => {
     const exact = (el, re) => { const l = el.closest('label'); if (!l) return false; return re.test((l.textContent || '').replace(/[*\s]+$/g, '').trim()) }
+    const starts = (el, re) => { const l = el.closest('label'); if (!l) return false; return re.test((l.textContent || '').trim()) }
     const dlg = document.querySelector('[role=dialog][aria-label="新增凭据"]')
     const inputs = [...dlg.querySelectorAll('input,textarea')]
     const setV = (el, v) => { const s = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value').set; s.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) }
     const titleInput = inputs.find(i => exact(i, /^(标题|Title)$/))
-    const pwInput = inputs.find(i => exact(i, /^(密码|Password)$/))
+    const pwInput = inputs.find(i => exact(i, /^(密码|Password)$/)) ?? inputs.find(i => starts(i, /^(密码|Password)/))
     if (titleInput) setV(titleInput, t)
     if (pwInput) setV(pwInput, pw)
     ;[...dlg.querySelectorAll('button')].find(x => /^(保存|Save)$/.test((x.textContent || '').trim()))?.click()
@@ -54,12 +55,13 @@ try {
   installDialogs(p)
   const errors = []
   p.on('pageerror', e => errors.push(String(e).slice(0, 200)))
-  await useVault(p, 'test')
-  await wipeVault(p, 'test')
+  await useVault(p)
+  await wipeVault(p)
   await p.waitForTimeout(1000)
 
   await addEntry(p, 'PIN 卡', '1234')
-  await addEntry(p, '弱口令', '123456')
+  await addEntry(p, '弱口令', '1111')
+  await addEntry(p, '中等', 'Sunflower22')
   await addEntry(p, '强口令', 'Xk9#mQ2!vT7@pL4z')
   await openSettings(p, '凭据库')
   await p.waitForTimeout(1500)
@@ -68,17 +70,19 @@ try {
   if (rows.length > 0 && rows.every(r => r.stars === null)) {
     console.log('SKIP  the running host does not send passwordStrength — restart `dsh web` and re-run')
     console.log('      (client-side mapping is covered by tests/strength-stars.spec.ts)')
-    await wipeVault(p, 'test')
+    await wipeVault(p)
     await ctx.close()
     await b.close()
     process.exit(0)
   }
   const weak = [...rows].find(r => r.title.includes('弱口令'))
+  const mid = [...rows].find(r => r.title.includes('中等'))
   const strong = [...rows].find(r => r.title.includes('强口令'))
-  check('every scored entry shows a three-star track', weak !== undefined && strong !== undefined && weak.stars === '★★★' && strong.stars === '★★★', JSON.stringify(rows.map(r => r.stars)))
-  check('a weak password fills under half the track', weak !== undefined && weak.fill <= 34, `fill ${weak?.fill}%`)
-  check('a strong password fills the whole track', strong !== undefined && strong.fill >= 96, `fill ${strong?.fill}%`)
-  check('the fill is clipped, not a different glyph', rows.every(r => r.stars === null || r.stars === '★★★'), '')
+  check('the track is hollow so 0 units cannot look full', rows.every(r => r.stars === null || r.stars === '☆☆☆'), JSON.stringify(rows.map(r => r.stars)))
+  check('a very weak password fills nothing', weak !== undefined && weak.fill === 0, `weak fill ${weak?.fill}% (${weak?.hint})`)
+  check('a mid password fills roughly half', mid !== undefined && mid.fill >= 34 && mid.fill <= 67, `mid fill ${mid?.fill}% (${mid?.hint})`)
+  check('a strong password fills the whole track', strong !== undefined && strong.fill >= 96, `strong fill ${strong?.fill}% (${strong?.hint})`)
+  check('fills increase with strength', (weak?.fill ?? 0) < (mid?.fill ?? 0) && (mid?.fill ?? 0) < (strong?.fill ?? 0), `${weak?.fill} < ${mid?.fill} < ${strong?.fill}`)
   check('the indicator carries the score as a hint', /\d+\/100/.test(weak?.hint || ''), JSON.stringify(weak?.hint))
   check('the colour reflects the band', /strengthWeak/.test(weak?.cls || '') && /strengthStrong|strengthFair/.test(strong?.cls || ''), `${weak?.cls} / ${strong?.cls}`)
   // the secret itself is never in the page
@@ -87,7 +91,7 @@ try {
 
   check('no page errors', errors.length === 0, errors.join(' | ').slice(0, 160))
 
-  await wipeVault(p, 'test')
+  await wipeVault(p)
   await ctx.close()
 } catch (e) {
   console.log('SCRIPT-ERR:', e && e.message ? e.message : String(e))

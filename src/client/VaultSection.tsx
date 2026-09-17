@@ -3521,7 +3521,11 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       const label = `${t('strengthLabel')}: ${score}/100 (${verdict})`
                       return (
                         <span className={css.strengthStars} title={label} role="img" aria-label={label}>
-                          <span className={css.strengthTrack} aria-hidden="true">★★★</span>
+                          {/* The track is hollow (☆) and the clipped fill is
+                              solid (★) — the two glyphs share an advance width,
+                              so the clip lands on star boundaries. A solid track
+                              would read as "three stars" even at 0. */}
+                          <span className={css.strengthTrack} aria-hidden="true">☆☆☆</span>
                           <span
                             className={`${css.strengthFill} ${toneCss}`}
                             style={{ width: `${strengthWidthPercent(units)}%` }}

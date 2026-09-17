@@ -1,5 +1,5 @@
 import { chromium } from '/Users/zhipeng/Desktop/work/codes/deepseek-harness/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/index.mjs'
-import { authedContext, EXE, useVault, activeVault, installDialogs, openSettings } from './helper.mjs'
+import { EXE, TEST_VAULT, activeVault, authedContext, installDialogs, openSettings, useVault } from './helper.mjs'
 
 const b = await chromium.launch({ executablePath: EXE, headless: true })
 const R = []
@@ -51,8 +51,8 @@ try {
   const ctx = await authedContext(b); const p = await ctx.newPage()
   installDialogs(p)
   p.on('pageerror', e => console.log('PAGEERR:', String(e).slice(0, 160)))
-  await useVault(p, 'test')
-  check('E2E runs in the throwaway vault', (await activeVault(p)) === 'test', `active=${await activeVault(p)}`)
+  await useVault(p)
+  check('E2E runs in the throwaway vault', (await activeVault(p)) === TEST_VAULT, `active=${await activeVault(p)}`)
 
   // ---- seed one entry so the audit log has a fresh event to show ----
   await p.evaluate(() => { [...document.querySelectorAll('button')].find(x => /新增凭据/.test((x.textContent || '').trim()))?.click() })

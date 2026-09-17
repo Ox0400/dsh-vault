@@ -1,5 +1,5 @@
 import { chromium } from '/Users/zhipeng/Desktop/work/codes/deepseek-harness/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/index.mjs'
-import { authedContext, EXE, useVault, assertActiveVault, activeVault, installDialogs } from './helper.mjs'
+import { EXE, TEST_VAULT, activeVault, assertActiveVault, authedContext, installDialogs, useVault } from './helper.mjs'
 import { writeFileSync } from 'node:fs'
 
 const b = await chromium.launch({ executablePath: EXE, headless: true })
@@ -38,11 +38,11 @@ try {
   installDialogs(p)
   p.on('pageerror', e => console.log('PAGEERR:', String(e).slice(0, 160)))
 
-  await useVault(p, 'test')
+  await useVault(p)
   // pin the theme so the "light" probe really is light
   await tab(p, '通用设置'); await p.waitForTimeout(1000); await theme(p, '浅色'); await p.waitForTimeout(1100)
   await tab(p, '凭据库'); await p.waitForTimeout(1600)
-  check('E2E runs in the throwaway vault', (await activeVault(p)) === 'test', `active=${await activeVault(p)}`)
+  check('E2E runs in the throwaway vault', (await activeVault(p)) === TEST_VAULT, `active=${await activeVault(p)}`)
 
   // ---- seed one entry (the guard above proves this cannot hit the real vault) ----
   const made = await p.evaluate(() => {

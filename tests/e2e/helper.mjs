@@ -1,6 +1,7 @@
 // Shared helpers for browser E2E against the real dsh web.
-// Tests run against a dedicated vault (default: 'test') so the user's real
-// 'default' vault is never touched. Requires playwright-core + an authed page.
+// Tests run against a vault reserved for automation (`e2e` by default, override
+// with DSH_E2E_VAULT) so neither the real vault nor anything a human happens to
+// keep in a scratch vault can be touched — `wipeVault` really does purge.
 // CALLERS must attach page.on('dialog') accepting prompts (vault name) & confirms.
 import { createHash, createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -8,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 export const EXE = path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright', 'chromium-1228', 'chrome-mac-arm64', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing')
-export const TEST_VAULT = process.env.DSH_E2E_VAULT ?? 'test'
+export const TEST_VAULT = process.env.DSH_E2E_VAULT ?? 'e2e'
 
 export async function authedContext(browser) {
   const raw = readFileSync(path.join(os.homedir(), '.dsh', '.credentials.yaml'), 'utf8')

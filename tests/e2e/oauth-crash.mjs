@@ -22,8 +22,8 @@ try {
   p.on('pageerror', e => { errors.push(String(e).slice(0, 300)); console.log('>>> PAGEERROR:', String(e).slice(0, 300)) })
   p.on('console', m => { if (m.type() === 'error') { errors.push(m.text()); console.log('>>> CONSOLE-ERR:', m.text().slice(0, 300)) } })
 
-  await useVault(p, 'test')
-  await wipeVault(p, 'test')
+  await useVault(p)
+  await wipeVault(p)
   await p.waitForTimeout(1000)
 
   // ---- path 1: the 套用模板 dropdown -> OAuth (the user's crash) ----
@@ -89,7 +89,7 @@ try {
   check('no page errors during the whole flow', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 200))
 
   await openSettings(p, '凭据库')
-  await wipeVault(p, 'test')
+  await wipeVault(p)
   await ctx.close()
 } catch (e) {
   console.log('SCRIPT-ERR:', e && e.message ? e.message : String(e))
