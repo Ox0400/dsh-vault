@@ -359,6 +359,36 @@ Two more caveats on the profile route: its `.bin` shim can be pruned by a later
 patch layer *also* inserts the plugin, that mounts it twice, so remove the patch
 row first.
 
+## Privacy of the breach check
+
+`vault_breach_check` (and the security page) can check passwords against Have I
+Been Pwned. Exactly one thing leaves this machine:
+
+```
+GET https://api.pwnedpasswords.com/range/<FIRST 5 HEX CHARS OF SHA-1(password)>
+Add-Padding: true
+```
+
+The response lists every suffix in that bucket (hundreds of hashes) and the match
+is computed **locally** — the full hash, the password, and the entry it belongs to
+never leave. A password already in the bundled common-password list is answered
+offline and produces **no request at all**; repeat lookups of the same prefix are
+cached in memory for an hour.
+
+What k-anonymity does *not* hide, stated plainly:
+
+- the **five-character prefix** (20 bits, one bucket in ~1M) goes to Cloudflare,
+  together with your IP;
+- an observer who can guess candidate passwords can compute each candidate's
+  prefix and see whether you queried that bucket — that is the known limit of
+  this protocol, not something the header fixes;
+- `Add-Padding` only removes the *response-size* signal (without it, a bucket's
+  response length correlates with how common the password is).
+
+To keep even the prefix on your machine, pass `online: false` — the check then
+uses only the offline list, which is far smaller, so treat it as a screening aid
+rather than a verdict.
+
 ## Strength indicator
 
 Each entry row shows a three-star indicator after its title — **☆☆☆ = 0 score,

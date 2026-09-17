@@ -30,7 +30,8 @@ import { envLinesFor, shellQuote, type EnvExportable } from './env-export.ts'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultEntryKind, type VaultEntryPatch, type VaultEntrySummary, type VaultStore, type CookieData } from './store.ts'
 import { totp, parseTotpSecret, hotp, base32Decode } from './totp.ts'
 import { generatePassword, generatePassphrase } from './password.ts'
-import { checkPassword } from './breach.ts'
+import { checkPassword, WEAK_PASSWORDS } from './breach.ts'
+import { estimateStrength as estimateStrengthPure } from './password-strength.ts'
 import { readChromeLogins, defaultChromeLoginData, defaultChromeLocalState } from './chrome.ts'
 import { readKeychainPasswords, listKeychainEntries } from './keychain.ts'
 import { analyzeVault, analyzeEntry } from './watchtower.ts'
@@ -5947,6 +5948,16 @@ function entryPasswordStrength(entry: VaultEntry | VaultEntrySummary): number | 
   return secret === undefined ? undefined : estimateStrength(secret).score
 }
 
+
+/** Strength with the bundled common-password list wired in, so a known-common
+ * password cannot score well on length alone. */
+function estimateStrength(password: string): { score: number; verdict: string; feedback: string; bits: number } {
+  const { score, verdict, feedback, bits } = estimateStrengthPure(password, WEAK_PASSWORDS)
+  // The tools and the UI meter take one line of prose; the array stays available
+  // to tests and to anything that wants the individual reasons.
+  return { score, verdict, feedback: feedback.join('; '), bits }
+}
+
 function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire {
   const strength = entryPasswordStrength(entry)
   return {
@@ -6595,40 +6606,8 @@ function pickDefinedFromRecord(record: Record<string, unknown>): Record<string, 
 
 /** Zero-dependency password strength estimator: score 0–100 from length,
  * character-class coverage, and penalties for common weak patterns. */
-function estimateStrength(password: string): { score: number; verdict: string; feedback: string; bits: number } {
-  let score = 0
-  const length = password.length
-  // Length is the dominant factor.
-  score += Math.min(45, length * 3)
-  const classes = [
-    /[a-z]/.test(password),
-    /[A-Z]/.test(password),
-    /[0-9]/.test(password),
-    /[^A-Za-z0-9]/.test(password),
-  ].filter(Boolean).length
-  score += classes * 8
-  // Diversity bonus for longer unique characters.
-  const unique = new Set(password).size
-  score += Math.min(15, unique)
-  // Penalties for common weak patterns.
-  let feedback: string[] = []
-  if (length < 8) feedback.push('too short (aim ≥ 12)')
-  if (/^(password|123456|qwerty|letmein|admin|welcome|abc123)$/i.test(password)) { score -= 40; feedback.push('common password') }
-  if (/(.)\1{2,}/.test(password)) { score -= 8; feedback.push('repeated characters') }
-  if (/^\d+$/.test(password)) { score -= 15; feedback.push('digits only') }
-  if (/^[a-z]+$/i.test(password)) { score -= 10; feedback.push('letters only') }
-  if (password.length > 0 && new Set(password).size <= Math.max(3, Math.floor(length / 2))) feedback.push('low diversity')
-  score = Math.max(0, Math.min(100, Math.round(score)))
-  const verdict = score >= 80 ? 'very strong' : score >= 60 ? 'strong' : score >= 40 ? 'fair' : 'weak'
-  // Entropy estimate in bits: log2(pool size) per character.
-  let pool = 0
-  if (/[a-z]/.test(password)) pool += 26
-  if (/[A-Z]/.test(password)) pool += 26
-  if (/[0-9]/.test(password)) pool += 10
-  if (/[^A-Za-z0-9]/.test(password)) pool += 33
-  const bits = password.length > 0 && pool > 0 ? Math.round(password.length * Math.log2(pool)) : 0
-  return { score, verdict, feedback: feedback.length > 0 ? feedback.join('; ') : 'no obvious weaknesses', bits }
-}
+// Strength lives in its own module so the CLI, the tools and the UI meter all
+// share one estimator (see src/password-strength.ts).
 
 
 /** Quote a value for safe use in .env / shell export (single-quote, escaping

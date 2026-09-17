@@ -21,5 +21,5 @@
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/index.ts", "src/cli.ts", "src/env-export.ts", "src/home-paths.ts", "src/store.ts", "src/crypto.ts", "src/totp.ts", "src/password.ts", "src/session.ts", "src/keychain.ts"]
+  "include": ["src/index.ts", "src/cli.ts", "src/env-export.ts", "src/home-paths.ts", "src/password-strength.ts", "src/store.ts", "src/crypto.ts", "src/totp.ts", "src/password.ts", "src/session.ts", "src/keychain.ts"]
 }

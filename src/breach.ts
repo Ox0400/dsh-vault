@@ -22,8 +22,9 @@ const QUERY_TIMEOUT_MS = 12_000
 /** How long a fetched prefix range is cached in memory. */
 const CACHE_TTL_MS = 60 * 60 * 1000
 
-/** Common / weak passwords checked offline (rockyou-style head). */
-const WEAK_PASSWORDS = new Set([
+/** Common / weak passwords checked offline (rockyou-style head). Also used by
+ * the strength estimator, so both agree on what "known-common" means. */
+export const WEAK_PASSWORDS = new Set([
   '123456', 'password', '12345678', 'qwerty', '123456789', '12345', '1234', '111111',
   '1234567', 'dragon', '123123', 'baseball', 'abc123', 'football', 'monkey', 'letmein',
   'shadow', 'master', '666666', 'qwertyuiop', '123321', 'mustang', '1234567890', 'michael',
@@ -56,7 +57,13 @@ export function sha1Hex(password: string): string {
 async function queryRange(prefix: string): Promise<Set<string>> {
   const res = await fetch(`${HIBP_RANGE_URL}${prefix}`, {
     signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
-    headers: { 'User-Agent': 'dsh-vault' },
+    headers: {
+      'User-Agent': 'dsh-vault',
+      // HIBP's own privacy knob: pad every response to a similar size so an
+      // observer cannot correlate a lookup with how many passwords share that
+      // prefix (which would leak information about how common yours is).
+      'Add-Padding': 'true',
+    },
   })
   if (!res.ok) throw new Error(`Pwned Passwords returned HTTP ${res.status}`)
   const text = await res.text()
