@@ -5919,6 +5919,10 @@ export type VaultEntrySummaryWire = {
   hasOtp?: boolean
   /** Custom key/value fields (non-secret metadata the user chose to store). */
   fields?: Record<string, string>
+  /** 0–100 strength of the entry's password or PIN (absent when it has neither),
+   * so the list can render a strength indicator without any secret crossing the
+   * wire. A machine-generated API key is deliberately not scored. */
+  passwordStrength?: number
   createdAt?: number
   updatedAt?: number
 }
@@ -5927,7 +5931,24 @@ export type VaultEntrySummaryWire = {
 export type VaultEntryWire = Omit<VaultEntry, 'createdAt' | 'updatedAt'>
 
 /** Project a stored entry onto its wire summary. */
+/** The secret a "weak credential" glance cares about: a password, or a card PIN.
+ * API keys and private keys are machine-generated, so scoring them would paint
+ * every entry five stars and tell the user nothing. */
+function passwordLikeSecret(entry: VaultEntry): string | undefined {
+  const { password, cardCvv } = entry
+  if (typeof password === 'string' && password.length > 0) return password
+  if (typeof cardCvv === 'string' && cardCvv.length > 0) return cardCvv
+  return undefined
+}
+
+/** 0–100 strength of that secret, or undefined when the entry has none. */
+function entryPasswordStrength(entry: VaultEntry | VaultEntrySummary): number | undefined {
+  const secret = passwordLikeSecret(entry as VaultEntry)
+  return secret === undefined ? undefined : estimateStrength(secret).score
+}
+
 function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire {
+  const strength = entryPasswordStrength(entry)
   return {
     id: entry.id,
     title: entry.title,
@@ -5953,6 +5974,9 @@ function toSummary(entry: VaultEntry | VaultEntrySummary): VaultEntrySummaryWire
     ...(entry.fields !== undefined && Object.keys(entry.fields).length > 0
       ? { fields: Object.fromEntries(Object.entries(entry.fields).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])) as Record<string, string> }
       : {}),
+    // Strength of the entry's password/PIN, so the list can show it without the
+    // client ever receiving the secret itself.
+    ...(strength !== undefined ? { passwordStrength: strength } : {}),
   }
 }
 

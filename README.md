@@ -359,6 +359,28 @@ Two more caveats on the profile route: its `.bin` shim can be pruned by a later
 patch layer *also* inserts the plugin, that mounts it twice, so remove the patch
 row first.
 
+## Strength indicator
+
+Each entry row shows a three-star indicator after its title — **☆☆☆ = 0 score,
+★★★ = full marks** — in six half-star steps. A half star is the coloured copy of
+the same three glyphs clipped to a percentage (Unicode has no half-star glyph
+most fonts can render):
+
+| score | shows | band |
+|---|---|---|
+| 0–8 | ☆☆☆ | weak |
+| 9–24 | ½☆☆ | weak |
+| 25–41 | ★☆☆ | weak |
+| 42–58 | ★½☆ | fair |
+| 59–74 | ★★☆ | fair |
+| 75–91 | ★★½ | strong |
+| 92–100 | ★★★ | strong |
+
+Hovering it shows the exact score and verdict. The score is computed **host-side**
+(the list never receives the secret) and covers the entry's **password or card
+PIN**; machine-generated API keys and private keys are deliberately not scored,
+so every key does not sit at full marks.
+
 ## Environment export
 
 Entries tagged `env` can be materialised as `KEY=VALUE` lines (`vault_env`,

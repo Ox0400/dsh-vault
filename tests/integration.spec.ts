@@ -622,6 +622,32 @@ test('the import tools may declare every field a dry run returns', async () => {
   })
 })
 
+test('summaries carry a password/PIN strength so the list can show stars', async () => {
+  await withContext(async ctx => {
+    const gateway = ctx.get('vault') as VaultPlugin.VaultGateway
+    await gateway.add({ title: 'weak', kind: 'login', password: '123456' })
+    await gateway.add({ title: 'strong', kind: 'login', password: 'Xk9#mQ2!vT7@pL4z' })
+    await gateway.add({ title: 'pin', kind: 'card', cardNumber: '4111111111111111', cardCvv: '1234' })
+    await gateway.add({ title: 'machine', kind: 'api-key', apiKey: 'sk-machine-generated-key' })
+    const entries = (await gateway.list()).entries
+    const byTitle = new Map(entries.map(e => [e.title, e]))
+    const weak = byTitle.get('weak')!.passwordStrength
+    const strong = byTitle.get('strong')!.passwordStrength
+    const pin = byTitle.get('pin')!.passwordStrength
+    expect(typeof weak).toBe('number')
+    expect(typeof strong).toBe('number')
+    // a PIN is scored too (it is what a "weak credential" glance is about) …
+    expect(typeof pin).toBe('number')
+    expect(strong!).toBeGreaterThan(weak!)
+    // … while a machine-generated API key is deliberately NOT scored, so the
+    // list does not paint every key five stars
+    expect(byTitle.get('machine')!.passwordStrength).toBeUndefined()
+    // the score never carries the secret itself
+    expect(JSON.stringify(entries)).not.toContain('Xk9#mQ2')
+    expect(JSON.stringify(entries)).not.toContain('123456')
+  })
+})
+
 test('vault emits read/write audit events that listeners can observe', async () => {
   await withContext(async ctx => {
     const events: Array<{ kind: string; tool: string }> = []

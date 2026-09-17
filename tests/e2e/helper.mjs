@@ -117,9 +117,14 @@ export async function useVault(page, name = TEST_VAULT) {
     await page.evaluate(() => { [...document.querySelectorAll('button')].find(x => /新建保险库/.test((x.textContent || '').trim()))?.click() })
     await page.waitForTimeout(2500)
   }
-  await switchVault(page, name)
-  await openSettings(page, '凭据库')
-  await page.waitForTimeout(800)
+  // The profile reload inside openSettings can race the switch, so retry a
+  // couple of times — but never proceed on the wrong vault.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await switchVault(page, name)
+    await openSettings(page, '凭据库')
+    await page.waitForTimeout(900)
+    if (await activeVault(page) === name) return name
+  }
   await assertActiveVault(page, name)
   return name
 }

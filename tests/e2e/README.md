@@ -13,6 +13,7 @@ node tests/e2e/envkey-ui.mjs        # env-var name field round-trip
 node tests/e2e/cli.mjs              # the built CLI as a child process (needs npm run build:host)
 node tests/e2e/cli-standalone.mjs   # the published layout (no node_modules) must still run
 node tests/e2e/cli-prompt.mjs       # the password prompt must not echo (pseudo-terminal)
+node tests/e2e/strength-stars.mjs    # title strength indicator (skips until the host is restarted)
 ```
 
 ## Safety rules (enforced by the helper)

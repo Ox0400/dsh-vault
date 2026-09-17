@@ -505,6 +505,32 @@
   font-size: inherit;
 }
 
+/* Password/PIN strength in the entry list: three stars in half-star steps.
+   The track is the muted outline glyphs; the fill is the same three glyphs in
+   the band colour, clipped to a percentage, which renders the fractions. */
+.strengthStars {
+  position: relative;
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  line-height: 1;
+  vertical-align: -1px;
+  cursor: help;
+  white-space: nowrap;
+}
+.strengthTrack { color: var(--v-text-3); }
+.strengthFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.strengthWeak { color: var(--v-danger-text); }
+.strengthFair { color: var(--v-warn-text); }
+.strengthStrong { color: var(--v-success-text); }
+
 /* Absolute timestamp of an audit event; its hover hint carries the relative
    age ("3 分钟前"), so the line stays narrow. */
 .auditWhen {

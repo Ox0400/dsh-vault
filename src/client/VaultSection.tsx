@@ -10,6 +10,7 @@ import type { VaultLocaleKey } from './locales.ts'
 import { siteGlyph } from './site-icons.ts'
 import { judgePasswordRisk } from './password-risk.ts'
 import { localDateTimeValue, templateHints, templateKind } from './editor-form.ts'
+import { strengthTone, strengthUnits, strengthWidthPercent } from './strength-stars.ts'
 import css from './VaultSection.module.css'
 
 /** Wire shapes shared with the host gateway (mirror of src/index.ts types). */
@@ -32,6 +33,8 @@ export interface VaultSummaryWire {
   cardHolder?: string
   hasOtp?: boolean
   attachmentCount?: number
+  /** 0–100 strength of the entry's password/PIN, computed host-side. */
+  passwordStrength?: number
   createdAt?: number
   updatedAt?: number
 }
@@ -3501,6 +3504,32 @@ export function VaultSection(props: VaultSectionProps): ReactNode {
                       onKeyDown={event => event.stopPropagation()}
                     >{(entry as VaultSummaryWire & { favorite?: boolean }).favorite ? '★' : '☆'}</button>
                     {highlightText(entry.title, query)}
+                    {(() => {
+                      // Five stars, filled = stronger (host computes the score;
+                      // the secret itself never reaches the browser). Only
+                      // passwords/PINs are scored — a machine-generated API key
+                      // would just be five stars everywhere.
+                      const score = entry.passwordStrength
+                      if (score === undefined) return null
+                      // Three stars, in SIX half-star steps: 0 = ☆☆☆, 3 = ★★★.
+                      // A half star is a second, clipped copy of the same three
+                      // glyphs (Unicode half-star characters are missing from
+                      // most fonts); the clip width is what carries the fraction.
+                      const units = strengthUnits(score)
+                      const toneCss = { weak: css.strengthWeak, fair: css.strengthFair, strong: css.strengthStrong }[strengthTone(units)]
+                      const verdict = score >= 60 ? t('verdictGood') : score >= 40 ? t('verdictFair') : t('verdictPoor')
+                      const label = `${t('strengthLabel')}: ${score}/100 (${verdict})`
+                      return (
+                        <span className={css.strengthStars} title={label} role="img" aria-label={label}>
+                          <span className={css.strengthTrack} aria-hidden="true">★★★</span>
+                          <span
+                            className={`${css.strengthFill} ${toneCss}`}
+                            style={{ width: `${strengthWidthPercent(units)}%` }}
+                            aria-hidden="true"
+                          >★★★</span>
+                        </span>
+                      )
+                    })()}
                     {(entry as VaultSummaryWire & { sensitivity?: string }).sensitivity === 'high' && (
                       <span className={css.highBadge}>{t('highSensitivity')}</span>
                     )}
