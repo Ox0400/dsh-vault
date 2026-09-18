@@ -72,16 +72,34 @@ export function answerPrompt(page, value) {
   installDialogs(page).push(value)
 }
 
-/** Name of the vault the UI currently has selected ('' when unavailable). */
+/**
+ * Name of the vault the UI currently has selected ('' when unavailable).
+ *
+ * Prefers the header switcher by its exact label. The 权限 tab renders a second
+ * select that also offers `default`, but its value is a *management target*, not
+ * the active vault — reading that one made the guard believe a switch had
+ * happened while writes still landed in the previously active vault.
+ */
 export async function activeVault(page) {
   return page.evaluate(() => {
-    const sel = ([...document.querySelectorAll('select')].find(function (x) {
-      const al = (x.getAttribute('aria-label') || '').toLowerCase()
-      if (al.indexOf('vault') >= 0 || al.indexOf('保险库') >= 0) return true
-      return [...x.querySelectorAll('option')].some(function (o) { return o.value === 'default' })
-    }))
+    const all = [...document.querySelectorAll('select')]
+    const byLabel = all.find(x => /^(当前保险库|Active vault)$/.test((x.getAttribute('aria-label') || '').trim()))
+    const sel = byLabel ?? all.find(x => [...x.querySelectorAll('option')].some(o => o.value === 'default'))
     return sel ? String(sel.value) : ''
   })
+}
+
+/**
+ * The automation vault must be EMPTY before a suite seeds it. The real vault is
+ * never empty, so this refuses to continue rather than writing test entries into
+ * whatever happens to be active.
+ */
+export async function assertVaultEmpty(page) {
+  const rows = await page.evaluate(() => [...document.querySelectorAll('[class*="rowMain"]')].map(r => (r.textContent || '').slice(0, 24)))
+  if (rows.length > 0) {
+    throw new Error(`E2E aborted: the target vault is not empty (${rows.length} entries: ${rows.slice(0, 3).join(', ')}) — refusing to seed.`)
+  }
+  return true
 }
 
 /**
@@ -127,6 +145,16 @@ export async function useVault(page, name = TEST_VAULT) {
     if (await activeVault(page) === name) return name
   }
   await assertActiveVault(page, name)
+  return name
+}
+
+/** Wipe the automation vault and prove it really is the empty one in use. */
+export async function prepareVault(page, name = TEST_VAULT) {
+  await useVault(page, name)
+  await wipeVault(page, name)
+  await page.waitForTimeout(800)
+  await assertActiveVault(page, name)
+  await assertVaultEmpty(page)
   return name
 }
 

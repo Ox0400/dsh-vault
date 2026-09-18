@@ -2,7 +2,7 @@
 // ☆☆☆ = 0 score, ★★★ = full marks. The score is computed
 // host-side, so the browser never receives the secret.
 import { chromium } from '/Users/zhipeng/Desktop/work/codes/deepseek-harness/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/index.mjs'
-import { authedContext, EXE, useVault, wipeVault, installDialogs, openSettings } from './helper.mjs'
+import { EXE, authedContext, installDialogs, openSettings, prepareVault, useVault, wipeVault } from './helper.mjs'
 
 const b = await chromium.launch({ executablePath: EXE, headless: true })
 const R = []
@@ -55,8 +55,7 @@ try {
   installDialogs(p)
   const errors = []
   p.on('pageerror', e => errors.push(String(e).slice(0, 200)))
-  await useVault(p)
-  await wipeVault(p)
+  await prepareVault(p)
   await p.waitForTimeout(1000)
 
   await addEntry(p, 'PIN 卡', '1234')
