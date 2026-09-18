@@ -88,6 +88,8 @@
     "e2e:theme": "node tests/e2e/theme-check.mjs",
     "e2e:polish": "node tests/e2e/polish-check.mjs",
     "e2e:contrast": "node tests/e2e/contrast-audit.mjs",
-    "e2e:prompt": "node tests/e2e/cli-prompt.mjs"
+    "e2e:prompt": "node tests/e2e/cli-prompt.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "postpublish": "node scripts/release-check.mjs --version"
   }
 }
