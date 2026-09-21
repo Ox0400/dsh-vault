@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openVault } from '../src/store.ts'
 import { runCli, resolveCliVaultPath, type CliIo } from '../src/cli.ts'
+import { totp } from '../src/totp.ts'
 
 const PASSWORD = 'cli-test-pw'
 
@@ -287,4 +288,98 @@ test('resolveCliVaultPath prefers --path and honours $DSH_HOME for named vaults'
   expect(named.startsWith('/tmp/home')).toBe(true)
   const fallback = resolveCliVaultPath(parse(['list']), { DSH_HOME: '/tmp/home' })
   expect(fallback.endsWith(join('vault', 'default.json'))).toBe(true)
+})
+
+/** RFC 6238 test secret (ASCII "12345678901234567890") — a published vector. */
+const TOTP_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+
+test('totp prints the code alone on stdout', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const store = await openVault({ path: vaultPath, masterPassword: PASSWORD })
+    await store.add({ title: 'TwoFactor', kind: 'login', otpSecret: TOTP_SECRET })
+    await store.lock()
+    const r = await invoke(['totp', 'TwoFactor', '--path', vaultPath])
+    expect(r.code).toBe(0)
+    // Digits only, so `code=$(dsh-vault totp …)` is the whole interface.
+    expect(r.out).toMatch(/^\d{6}\n$/)
+    // Allow the wall clock to move across a 30-second boundary while running.
+    const now = Date.now()
+    expect([totp(TOTP_SECRET, now - 1000), totp(TOTP_SECRET, now), totp(TOTP_SECRET, now + 1000)]).toContain(r.out.trim())
+    expect(r.err).toBe('')
+  })
+})
+
+test('totp --json reports digits, period and secondsRemaining', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const store = await openVault({ path: vaultPath, masterPassword: PASSWORD })
+    await store.add({ title: 'TwoFactor', kind: 'login', otpSecret: TOTP_SECRET })
+    await store.lock()
+    const r = await invoke(['totp', 'TwoFactor', '--json', '--path', vaultPath])
+    expect(r.code).toBe(0)
+    const parsed = JSON.parse(r.out) as { code: string; digits: number; period: number; secondsRemaining: number; title: string }
+    expect(parsed.title).toBe('TwoFactor')
+    expect(parsed.code).toMatch(/^\d{6}$/)
+    expect(parsed.digits).toBe(6)
+    expect(parsed.period).toBe(30)
+    // What a script needs to avoid racing an expiring code.
+    expect(parsed.secondsRemaining).toBeGreaterThanOrEqual(1)
+    expect(parsed.secondsRemaining).toBeLessThanOrEqual(30)
+  })
+})
+
+test('an otpauth URI decides its own digits and period', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const store = await openVault({ path: vaultPath, masterPassword: PASSWORD })
+    await store.add({
+      title: 'Uri2FA', kind: 'login',
+      otpSecret: `otpauth://totp/GitHub:ada?secret=${TOTP_SECRET}&issuer=GitHub&digits=8&period=60`,
+    })
+    await store.lock()
+    const r = await invoke(['totp', 'Uri2FA', '--json', '--path', vaultPath])
+    expect(r.code).toBe(0)
+    const parsed = JSON.parse(r.out) as { code: string; digits: number; period: number; secondsRemaining: number }
+    expect(parsed.digits).toBe(8)
+    expect(parsed.period).toBe(60)
+    expect(parsed.code).toMatch(/^\d{8}$/)
+    expect(parsed.secondsRemaining).toBeLessThanOrEqual(60)
+  })
+})
+
+test('totp explains an entry that has no TOTP secret', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const r = await invoke(['totp', 'Plain', '--path', vaultPath])
+    expect(r.code).toBe(1)
+    expect(r.out).toBe('')
+    expect(r.err).toMatch(/no TOTP secret/)
+    // Point at where the secret goes instead of leaving the user to guess.
+    expect(r.err).toMatch(/otpSecret/)
+  })
+})
+
+test('totp without an entry name and with an unknown option exits 2', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const missing = await invoke(['totp', '--path', vaultPath])
+    expect(missing.code).toBe(2)
+    const badFlag = await invoke(['totp', 'Plain', '--mask', '--path', vaultPath])
+    expect(badFlag.code).toBe(2)
+    expect(badFlag.err).toMatch(/unknown option/)
+    // The accepted set is printed, so the fix is in the message itself.
+    expect(badFlag.err).toMatch(/--totp|--json/)
+  })
+})
+
+test('list --json and show report hasTotp without any secret', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const store = await openVault({ path: vaultPath, masterPassword: PASSWORD })
+    await store.add({ title: 'TwoFactor', kind: 'login', otpSecret: TOTP_SECRET })
+    await store.lock()
+    const listed = JSON.parse((await invoke(['list', '--json', '--path', vaultPath])).out) as
+      { title: string; hasTotp: boolean }[]
+    expect(listed.find(e => e.title === 'TwoFactor')?.hasTotp).toBe(true)
+    expect(listed.find(e => e.title === 'Plain')?.hasTotp).toBe(false)
+    const shown = await invoke(['show', 'TwoFactor', '--path', vaultPath])
+    expect(JSON.parse(shown.out).hasTotp).toBe(true)
+    // Presence is reported; the secret itself never is.
+    expect(shown.out).not.toContain(TOTP_SECRET)
+  })
 })

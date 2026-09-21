@@ -1,6 +1,7 @@
 // Requires lib/ to be built first (npm run build:host).
 // Build a throwaway vault, then drive the REAL built CLI (lib/cli.js) as a child process.
 import { spawn } from 'node:child_process'
+import { createHmac } from 'node:crypto'
 import { mkdtemp, rm, stat, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,6 +18,9 @@ const store = await openVault({ path: vaultPath, masterPassword: 'cli-pw' })
 await store.add({ title: 'DASHSCOPE', kind: 'api-key', apiKey: 'sk-dash-secret', tags: ['env'], username: 'ada' })
 await store.add({ title: 'Tavily', kind: 'oauth', envKey: 'TAVILY_TOKEN', accessToken: 'at-123', refreshToken: 'rt-456', fields: { scope: 'read write' }, tags: ['env'] })
 await store.add({ title: 'NoEnv', kind: 'login', password: 'pw-not-exported', username: 'bob' })
+// RFC 6238 test secret (ASCII "12345678901234567890") — a published vector.
+const TOTP_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+await store.add({ title: 'TwoFactor', kind: 'login', otpSecret: TOTP_SECRET, username: 'ada' })
 await store.lock()
 
 const R = []
@@ -44,7 +48,7 @@ check('list groups by what env exports, showing each name', listPlain.out.includ
 
 const listJson = await run(['list', '--json'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const parsed = JSON.parse(listJson.out)
-check('list --json is machine readable', Array.isArray(parsed) && parsed.length === 3 && parsed[0].hasSecret === true, JSON.stringify(parsed.map(e => e.title)))
+check('list --json is machine readable', Array.isArray(parsed) && parsed.length === 4 && parsed[0].hasSecret === true, JSON.stringify(parsed.map(e => e.title)))
 
 const get = await run(['get', 'DASHSCOPE'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 check('get prints only the primary secret', get.out === 'sk-dash-secret\n' && get.code === 0, JSON.stringify(get.out))
@@ -115,6 +119,56 @@ check('an unknown command exits 2', unknown.code === 2 && /unknown command/.test
 
 const help = await run(['--help'])
 check('--help exits 0 and lists the commands', help.code === 0 && /export-env/.test(help.out) && /env +Print/.test(help.out), '')
+
+// ── totp: an INDEPENDENT RFC 6238 implementation decides what is correct ─────
+// Written here from the RFC rather than imported, so a bug in src/totp.ts cannot
+// agree with itself. Checked against a published vector before it is trusted.
+function referenceTotp(base32, nowMs = Date.now(), digits = 6, period = 30) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = ''
+  for (const ch of base32.replace(/=+$/, '').toUpperCase()) {
+    const v = alphabet.indexOf(ch)
+    if (v < 0) throw new Error(`bad base32 character: ${ch}`)
+    bits += v.toString(2).padStart(5, '0')
+  }
+  const bytes = []
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2))
+  const counter = Buffer.alloc(8)
+  counter.writeBigUInt64BE(BigInt(Math.floor(nowMs / 1000 / period)))
+  const hmac = createHmac('sha1', Buffer.from(bytes)).update(counter).digest()
+  const offset = hmac[hmac.length - 1] & 0x0f
+  const binary = ((hmac[offset] & 0x7f) << 24) | ((hmac[offset + 1] & 0xff) << 16)
+    | ((hmac[offset + 2] & 0xff) << 8) | (hmac[offset + 3] & 0xff)
+  return (binary % 10 ** digits).toString().padStart(digits, '0')
+}
+check('the reference TOTP matches the RFC 6238 vector', referenceTotp(TOTP_SECRET, 59_000, 8) === '94287082', referenceTotp(TOTP_SECRET, 59_000, 8))
+
+const totpPlain = await run(['totp', 'TwoFactor'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+const nowMs = Date.now()
+const expectedCodes = [nowMs - 1000, nowMs, nowMs + 1000].map(t => referenceTotp(TOTP_SECRET, t))
+check('totp prints the code the RFC says, and nothing else', totpPlain.code === 0 && expectedCodes.includes(totpPlain.out.trim()) && /^\d{6}\n$/.test(totpPlain.out), JSON.stringify(totpPlain.out))
+
+const totpJson = await run(['totp', 'TwoFactor', '--json'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+const totpParsed = JSON.parse(totpJson.out)
+check('totp --json reports the window a script must respect', totpParsed.code === totpPlain.out.trim() && totpParsed.digits === 6 && totpParsed.period === 30 && totpParsed.secondsRemaining >= 1 && totpParsed.secondsRemaining <= 30, JSON.stringify(totpParsed))
+
+const totpMissing = await run(['totp', 'NoEnv'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('totp explains an entry without a TOTP secret', totpMissing.code === 1 && totpMissing.out === '' && /no TOTP secret/.test(totpMissing.err), JSON.stringify(totpMissing.err.split('\n')[0]))
+
+const totpByEnvKey = await run(['totp', 'DASHSCOPE_API_KEY'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('totp resolves an entry the same way get does', totpByEnvKey.code === 1 && /no TOTP secret/.test(totpByEnvKey.err), JSON.stringify(totpByEnvKey.err.split('\n')[0]))
+
+const totpFlag = await run(['totp', 'TwoFactor', '--mask'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('totp refuses an option it does not implement', totpFlag.code === 2 && /unknown option/.test(totpFlag.err), JSON.stringify(totpFlag.err.split('\n')[0]))
+
+const showTwoFactor = JSON.parse((await run(['show', 'TwoFactor'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })).out)
+check('show says an entry has TOTP without printing the secret', showTwoFactor.hasTotp === true && !JSON.stringify(showTwoFactor).includes(TOTP_SECRET), JSON.stringify(showTwoFactor))
+
+const listHasTotp = JSON.parse((await run(['list', '--json'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })).out)
+check('list --json flags exactly the entries totp accepts', listHasTotp.filter(e => e.hasTotp).map(e => e.title).join(',') === 'TwoFactor', JSON.stringify(listHasTotp.map(e => [e.title, e.hasTotp])))
+
+const helpMentionsTotp = await run(['--help'])
+check('--help documents totp', /totp <id\|title\|ENVKEY>/.test(helpMentionsTotp.out) && /totp options:/.test(helpMentionsTotp.out))
 
 const show = await run(['show', 'Tavily'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
 const shown = JSON.parse(show.out)

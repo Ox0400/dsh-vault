@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.73",
+  "version": "1.10.74-rc.1",
   "bin": {
     "dsh-vault": "./lib/cli.js"
   },

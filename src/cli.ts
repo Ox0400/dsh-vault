@@ -25,6 +25,7 @@ import { createInterface } from 'node:readline'
 import { ReadStream } from 'node:tty'
 import { openVault, defaultVaultPath, type VaultEntry, type VaultStore } from './store.ts'
 import { envLinesFor, envPairsForEntry, maskSecret, primarySecret, shellQuote, type EnvExportable } from './env-export.ts'
+import { parseTotpSecret, totp } from './totp.ts'
 
 export interface CliIo {
   out: (text: string) => void
@@ -55,8 +56,9 @@ Commands:
   list                    List entries with their env name (never secrets)
   get <id|title|ENVKEY>   Print one field of an entry (default: its main secret)
   show <id|title|ENVKEY>  Print an entry's non-secret fields as JSON
+  totp <id|title|ENVKEY>  Print the entry's current TOTP code (needs otpSecret)
   env                     Print env-TAGGED entries as KEY=VALUE lines (an entry
-                          must carry the tag "env"; "list" marks those [env]).
+                          must carry the tag "env"; "list" groups those first).
                           One value only? "get <entry>" needs no tag.
   export-env <path>       Write those lines to a file (mode 0600)
   verify                  Check the master password (nothing on stdout)
@@ -72,13 +74,13 @@ Options:
 list options:
   --kind <k>              Only entries of this kind
   --tag <t>               Only entries carrying this tag
-                          (each row also shows the env name that "get" accepts,
-                          the count of further keys in parentheses, and [env]
-                          when the entry is included in "dsh-vault env")
+                          (each row also shows the env name that "get" accepts
+                          and the count of further keys in parentheses)
 
 JSON output ("list --json", "show") reports per entry:
   envKeys                 the env names it exports (what "get" accepts)
   envTagged               whether "dsh-vault env" includes it
+  hasTotp                 whether "totp <entry>" can produce a code
 
 get options:
   --field <name>          apiKey | secret | accessToken | refreshToken | privateKey
@@ -86,6 +88,14 @@ get options:
                           (case-insensitive; --fields is accepted as an alias)
   --mask                  Print a masked value (first 4 chars + ***)
   --all                   Print the whole entry as JSON (every secret — opt-in)
+
+totp options:
+  (none beyond the common options; --json adds digits, period and secondsRemaining)
+
+  The code is the only thing on stdout, so 2FA can be automated:
+    code=$(dsh-vault totp TwoFactor)
+  "get <entry> --field otpSecret" prints the long-lived SECRET instead — use
+  "totp" when a script needs a code, so the secret stays out of logs and history.
 
 env options:
   --prefix <P>            Prefix for derived key names (an explicit envKey is kept verbatim)
@@ -316,6 +326,9 @@ function publicFields(entry: VaultEntry): Record<string, unknown> {
     if (value !== undefined) out[key] = value
   }
   out.hasSecret = primarySecret(entry as unknown as EnvExportable) !== undefined
+  // Presence only — the same level of detail as hasSecret, so a script can find
+  // the entries `totp` accepts without pulling any secret into a transcript.
+  out.hasTotp = typeof entry.otpSecret === 'string' && entry.otpSecret.length > 0
   // ONE name for "the env names this entry exports": `envKeys`. It used to be a
   // configured `envKeys` plus a computed `exportedKeys`, which read as two
   // similar things — the computed list is the useful one (it already starts with
@@ -326,7 +339,7 @@ function publicFields(entry: VaultEntry): Record<string, unknown> {
   return out
 }
 
-const COMMANDS = new Set(['list', 'get', 'show', 'env', 'export-env', 'verify'])
+const COMMANDS = new Set(['list', 'get', 'show', 'totp', 'env', 'export-env', 'verify'])
 
 /** Run one CLI invocation; returns the process exit code. */
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
@@ -345,6 +358,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     list: ['kind', 'tag'],
     get: ['field', 'fields', 'mask', 'all'],
     show: [],
+    totp: [],
     env: ['prefix', 'kind', 'keys-only', 'mask', 'explain', 'file'],
     'export-env': ['prefix', 'kind', 'keys-only'],
     verify: [],
@@ -455,6 +469,41 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       const textual = name === 'username' || name === 'url' || name === 'notes' || name.startsWith('fields.')
       const shown = mask && !textual ? maskSecret(value) : value
       io.out(json ? `${JSON.stringify({ id: entry.id, title: entry.title, field: name, value: shown })}\n` : `${shown}\n`)
+      return 0
+    }
+
+    if (parsed.command === 'totp') {
+      const needle = parsed.positional[0]
+      if (needle === undefined) { io.err('dsh-vault: totp needs an entry id, title or env key\n'); return 2 }
+      const entry = resolveEntry(store, needle).entry
+      const secret = typeof entry.otpSecret === 'string' && entry.otpSecret.length > 0 ? entry.otpSecret : undefined
+      if (secret === undefined) {
+        io.err(`dsh-vault: "${entry.title}" has no TOTP secret\n`)
+        io.err('hint: "show <entry>" lists non-secret fields; the secret goes in the entry\'s otpSecret field.\n')
+        return 1
+      }
+      const nowMs = Date.now()
+      let parsedSecret: ReturnType<typeof parseTotpSecret>
+      let code: string
+      try {
+        parsedSecret = parseTotpSecret(secret)
+        code = totp(secret, nowMs)
+      } catch (err) {
+        io.err(`dsh-vault: "${entry.title}" has an unusable otpSecret: ${err instanceof Error ? err.message : String(err)}\n`)
+        return 1
+      }
+      if (!json) {
+        // Digits only: the whole point is `code=$(dsh-vault totp …)` in a script.
+        io.out(`${code}\n`)
+        return 0
+      }
+      // `secondsRemaining` is what lets a caller wait for a fresh window instead
+      // of racing an expiring code, which is the classic 2FA automation bug.
+      const secondsRemaining = parsedSecret.periodSeconds - Math.floor(nowMs / 1000) % parsedSecret.periodSeconds
+      io.out(`${JSON.stringify({
+        id: entry.id, title: entry.title, code,
+        digits: parsedSecret.digits, period: parsedSecret.periodSeconds, secondsRemaining,
+      })}\n`)
       return 0
     }
 

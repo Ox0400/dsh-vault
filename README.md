@@ -253,7 +253,8 @@ Two things worth knowing:
 | `envKeys` | an entry **field** (optional) | pin exact names, e.g. `["DASHSCOPE_API_KEY"]`; the old singular `envKey` is accepted as a one-element shorthand |
 
 Nothing else is called `env*`: `list --json` / `show` report `envKeys` (the names
-an entry exports — what `get` accepts) and `envTagged` (whether `env` includes it).
+an entry exports — what `get` accepts), `envTagged` (whether `env` includes it)
+and `hasTotp` (whether `totp` can produce a code for it).
 
 ### 2. The commands
 
@@ -267,6 +268,8 @@ dsh-vault get my-entry                     # the entry's primary secret, stdout 
 dsh-vault get my-entry --field apiKey      # one named field
 dsh-vault get my-entry --mask              # confirm it exists without printing it
 dsh-vault show my-entry                    # non-secret metadata as JSON
+dsh-vault totp my-entry                    # the current TOTP code (digits only)
+dsh-vault totp my-entry --json             # + digits, period, secondsRemaining
 dsh-vault env                              # env-tagged entries as KEY=VALUE
 dsh-vault env --mask                       # human view, both sections as KEY=VALUE:
 #   ## exported items
@@ -280,6 +283,13 @@ dsh-vault verify                           # check the master password, nothing 
 Secrets go to stdout and everything else (progress, errors) to stderr, so
 `$(dsh-vault get …)` and pipelines behave. Exit codes: `0` ok, `1` runtime
 error, `2` usage error.
+
+`totp` exists so a script can automate two-factor login without ever handling the
+long-lived secret: `code=$(dsh-vault totp my-entry)` prints six digits and nothing
+else. `get my-entry --field otpSecret` would print the **secret** instead — use it
+only when a tool genuinely needs to enrol the secret elsewhere. `--json` adds
+`secondsRemaining`, which is what lets a caller wait for a fresh window rather
+than race an expiring code.
 
 ### 3. Shell quoting: not `export $(…)`
 
@@ -349,7 +359,7 @@ npm i -g dsh-vault && dsh-vault list                 # globally
 npx dsh-vault list                                   # or not at all
 ```
 
-The read commands (`list`, `get`, `env`, `show`, `verify`, `export-env`) depend
+The read commands (`list`, `get`, `env`, `show`, `totp`, `verify`, `export-env`) depend
 on Node alone, which is why the global and `npx` forms work. Only *writing* to a
 vault needs the harness runtime, and the plugin always has it.
 

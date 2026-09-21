@@ -237,7 +237,7 @@ echo "$DEMO_API_KEY"
 | `env` | **命令** | 打印带该标签的条目 |
 | `envKeys` | 条目的**字段**(可选) | 固定确切名字,例如 `["DASHSCOPE_API_KEY"]`;旧的单数写法 `envKey` 仍作为"只写一个"的简写接受 |
 
-除此之外没有任何叫 `env*` 的东西:`list --json` / `show` 只报 `envKeys`(该条目会导出的名字,也就是 `get` 接受的名字)与 `envTagged`(是否被 `env` 包含)。
+除此之外没有任何叫 `env*` 的东西:`list --json` / `show` 只报 `envKeys`(该条目会导出的名字,也就是 `get` 接受的名字)、`envTagged`(是否被 `env` 包含)与 `hasTotp`(`totp` 能否为它生成动态码)。
 
 ### 2. 有哪些命令
 
@@ -251,6 +251,8 @@ dsh-vault get my-entry                     # 取该条目的主密钥,仅 stdout
 dsh-vault get my-entry --field apiKey      # 取指定字段
 dsh-vault get my-entry --mask              # 只确认存在,不打印值
 dsh-vault show my-entry                    # 非敏感字段的 JSON
+dsh-vault totp my-entry                    # 当前的 TOTP 动态码(只有 6 位数字)
+dsh-vault totp my-entry --json             # 附带 digits / period / secondsRemaining
 dsh-vault env                              # 带 env 标签的条目 → KEY=VALUE
 dsh-vault env --mask                       # 人类视角,两段都是 KEY=VALUE:
 #   ## exported items
@@ -262,6 +264,8 @@ dsh-vault verify                           # 校验主密码,stdout 无输出
 ```
 
 密钥只走 stdout,其余(进度、错误)走 stderr,所以 `$(dsh-vault get …)` 与管道都正常;退出码 `0` 成功、`1` 运行错误、`2` 用法错误。
+
+`totp` 是为了让脚本能自动完成两步验证、又完全不碰长期密钥:`code=$(dsh-vault totp my-entry)` 只输出六位数字。如果你用 `get my-entry --field otpSecret`,打印的是**密钥本身** —— 只有确实要把密钥导入别处时才那么做。`--json` 会多给一个 `secondsRemaining`,脚本据此等一个新窗口,而不是硬闯即将过期的码。
 
 ### 3. shell 引号:不是 `export $(…)`
 
@@ -320,7 +324,7 @@ npm i -g dsh-vault && dsh-vault list                 # 全局
 npx dsh-vault list                                   # 或者干脆不装
 ```
 
-读命令(`list`、`get`、`env`、`show`、`verify`、`export-env`)只依赖 Node,所以全局与 `npx` 都能直接用;**只有写保险库**才需要 harness 运行时,而插件环境一定有。
+读命令(`list`、`get`、`env`、`show`、`totp`、`verify`、`export-env`)只依赖 Node,所以全局与 `npx` 都能直接用;**只有写保险库**才需要 harness 运行时,而插件环境一定有。
 
 profile 这条路还有两个注意点:垫片可能被之后在该目录执行的 `pnpm install` 清掉;`pnpm dsh plugin --profile web add dsh-vault` 会依据包的 `dsh.bundle` 声明重整 `dsh.profile.bundles` —— 如果你自己的 patch 层**也**插入了这个插件,就会**挂两份**,要先删掉 patch 层那一行。
 
