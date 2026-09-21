@@ -4,7 +4,7 @@
  * process; `tests/e2e/cli.mjs` covers the built bin as a child process.
  */
 import { test, expect } from 'vitest'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openVault } from '../src/store.ts'
@@ -381,5 +381,121 @@ test('list --json and show report hasTotp without any secret', async () => {
     expect(JSON.parse(shown.out).hasTotp).toBe(true)
     // Presence is reported; the secret itself never is.
     expect(shown.out).not.toContain(TOTP_SECRET)
+  })
+})
+
+// ── flags that were documented but never exercised ──────────────────────────
+
+test('list --kind and --tag actually filter', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const byKind = await invoke(['list', '--kind', 'oauth', '--path', vaultPath])
+    expect(byKind.code).toBe(0)
+    expect(byKind.out).toContain('Tavily')
+    expect(byKind.out).not.toContain('Plain')
+
+    const byTag = await invoke(['list', '--tag', 'env', '--path', vaultPath])
+    expect(byTag.out).toContain('DASHSCOPE')
+    expect(byTag.out).toContain('Tavily')
+    expect(byTag.out).not.toContain('Plain')
+
+    const noMatch = await invoke(['list', '--tag', 'nope', '--path', vaultPath])
+    expect(noMatch.code).toBe(0)
+    expect(noMatch.out).not.toContain('DASHSCOPE')
+  })
+})
+
+test('get --all is the opt-in full dump, plain get is one value', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const one = await invoke(['get', 'Tavily', '--path', vaultPath])
+    expect(one.out).toBe('at-123\n')
+    const all = await invoke(['get', 'Tavily', '--all', '--path', vaultPath])
+    const parsed = JSON.parse(all.out) as { accessToken: string; refreshToken: string; fields: Record<string, string> }
+    expect(parsed.accessToken).toBe('at-123')
+    expect(parsed.refreshToken).toBe('rt-456')
+    expect(parsed.fields.scope).toBe('read write')
+  })
+})
+
+test('env --file writes 0600, creates the directory and keeps stdout clean', async () => {
+  await withVault(async (_io, dir, vaultPath) => {
+    const file = join(dir, 'nested', 'out.env')
+    const r = await invoke(['env', '--file', file, '--path', vaultPath])
+    expect(r.code).toBe(0)
+    // stdout stays a clean stream so the same command can be piped elsewhere.
+    expect(r.out).toBe('')
+    expect(r.err).toMatch(/mode 0600/)
+    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    const body = await readFile(file, 'utf8')
+    expect(body).toContain("DASHSCOPE_API_KEY='sk-dash-secret'")
+  })
+})
+
+// ── regressions found by audit ──────────────────────────────────────────────
+
+test('an empty entry name is refused instead of matching everything', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const r = await invoke(['get', '', '--path', vaultPath])
+    expect(r.code).toBe(1)
+    expect(r.out).toBe('')
+    expect(r.err).toMatch(/empty name/)
+  })
+})
+
+test('a string option without a value is a usage error, not a silent default', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const r = await invoke(['get', 'Tavily', '--field', '--path', vaultPath])
+    expect(r.code).toBe(2)
+    // The dangerous old behaviour: printing the primary secret instead.
+    expect(r.out).toBe('')
+    expect(r.err).toMatch(/--field needs a value/)
+    const vaultFlag = await invoke(['list', '--vault', '--path', vaultPath])
+    expect(vaultFlag.code).toBe(2)
+    expect(vaultFlag.err).toMatch(/--vault needs a value/)
+  })
+})
+
+test('a non-string field reports its value instead of "no field"', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const store = await openVault({ path: vaultPath, masterPassword: PASSWORD })
+    await store.add({ title: 'Meta', kind: 'login', password: 'pw', tags: ['a', 'b'], favorite: true })
+    await store.lock()
+    const tags = await invoke(['get', 'Meta', '--field', 'tags', '--path', vaultPath])
+    expect(tags.code).toBe(0)
+    expect(tags.out.trim()).toBe('["a","b"]')
+    const favorite = await invoke(['get', 'Meta', '--field', 'favorite', '--path', vaultPath])
+    expect(favorite.out.trim()).toBe('true')
+    // A field that genuinely is absent still says so.
+    const absent = await invoke(['get', 'Meta', '--field', 'nope', '--path', vaultPath])
+    expect(absent.code).toBe(1)
+    expect(absent.err).toMatch(/has no field/)
+  })
+})
+
+test('a corrupt vault file is reported with its path, not a raw TypeError', async () => {
+  await withVault(async (_io, dir) => {
+    const cases: Array<[string, RegExp]> = [
+      ['null', /is not a vault file/],
+      ['not json at all', /is not valid JSON/],
+      ['{"version":"1"}', /unsupported vault format version/],
+      ['{}', /unsupported vault format version/],
+    ]
+    for (const [content, expected] of cases) {
+      const bad = join(dir, `bad-${content.length}.json`)
+      await writeFile(bad, content)
+      const r = await invoke(['list', '--path', bad])
+      expect(r.code).toBe(1)
+      expect(r.out).toBe('')
+      expect(r.err).toMatch(expected)
+      // Naming the file is the whole point: --path can point anywhere.
+      expect(r.err).toContain(bad)
+    }
+  })
+})
+
+test('--password-stdin with nothing on stdin fails fast instead of hanging', async () => {
+  await withVault(async (_io, _dir, vaultPath) => {
+    const r = await invoke(['list', '--password-stdin', '--path', vaultPath], { readStdinLine: async () => '' })
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/no password on stdin/)
   })
 })

@@ -86,10 +86,14 @@ function originSlug() {
   return match[1]
 }
 
+async function publishedVersions() {
+  const registry = await getJson(`https://registry.npmjs.org/${PACKAGE_NAME}`)
+  return Object.keys(registry.versions ?? {})
+}
+
 async function collect() {
   const slug = originSlug()
-  const registry = await getJson(`https://registry.npmjs.org/${PACKAGE_NAME}`)
-  const versions = Object.keys(registry.versions ?? {})
+  const versions = await publishedVersions()
   const tags = execFileSync('git', ['ls-remote', '--tags', 'origin'], { cwd: ROOT, encoding: 'utf8' })
     .split('\n')
     .map(line => line.split('refs/tags/')[1]?.replace(/\^\{\}$/, ''))
@@ -103,11 +107,30 @@ async function collect() {
   return { slug, versions, tags, releases }
 }
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * `npm publish` is asynchronous: the registry answers `202 Accepted` and the
+ * version only appears in the packument minutes later. Checking once, right
+ * after publishing, therefore proved nothing — the version was simply not there
+ * yet and the check passed vacuously. Wait for it instead.
+ */
+async function waitForVersion(version, { attempts = 12, delayMs = 20_000 } = {}) {
+  let versions = await publishedVersions()
+  for (let attempt = 1; attempt <= attempts && !versions.includes(version); attempt += 1) {
+    console.log(`  wait  ${version} 还没出现在注册表里(异步发布),${delayMs / 1000}s 后重查 [${attempt}/${attempts}]`)
+    await sleep(delayMs)
+    versions = await publishedVersions()
+  }
+  return versions
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const only = process.argv.includes('--version')
   const strict = process.argv.includes('--strict')
   const current = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
-  const { slug, versions, tags, releases } = await collect()
+  const { slug, tags, releases } = await collect()
+  const versions = only ? await waitForVersion(current) : await publishedVersions()
   // Always audit against every published version; `--version` only narrows what
   // is reported, so the other 261 releases are not mistaken for orphans.
   const gaps = only
@@ -118,7 +141,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log(`release check — ${slug}: npm ${versions.length} 个版本 / tag ${tags.length} 个 / release ${releases.length} 个`)
 
   if (only && !versions.includes(current)) {
-    console.log(`  note  npm 上还没有 ${current}(注册表尚未同步?);无法核对 release`)
+    console.log(`  note  npm 上还没有 ${current}(等了 ${12 * 20}s);无法核对 release`)
   }
   if (gaps.untagged.length > 0) {
     console.log(`  note  ${gaps.untagged.length} 个 npm 版本没有对应 tag:${gaps.untagged.join(', ')}`)

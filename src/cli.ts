@@ -224,7 +224,13 @@ async function promptHidden(prompt: string): Promise<string> {
 
 async function readStdinLine(): Promise<string> {
   const rl = createInterface({ input: process.stdin })
-  const line = await new Promise<string>(res => rl.once('line', res))
+  // Zero-byte input (</dev/null, a `pass` lookup that failed, a CI step with no
+  // secret set) emits `close` but never `line`, so waiting only for `line` hung
+  // forever and the empty-password check below was unreachable.
+  const line = await new Promise<string>(res => {
+    rl.once('line', res)
+    rl.once('close', () => res(''))
+  })
   rl.close()
   return line
 }
@@ -259,6 +265,11 @@ async function resolvePassword(parsed: Parsed, io: CliIo): Promise<string> {
  * prints exactly the value `env` would emit for that key.
  */
 export function resolveEntry(store: VaultStore, needle: string): { entry: VaultEntry; field?: string } {
+  // `''` is a substring of every title, so an empty argument used to match a
+  // single entry and print its secret with exit 0.
+  if (needle.trim().length === 0) {
+    throw new Error('an empty name matches every entry — pass an id, a title, an envKey or an exported key')
+  }
   const entries = store.list()
   const byId = entries.find(e => e.id === needle)
   if (byId !== undefined) return { entry: byId }
@@ -371,6 +382,15 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     io.err(`accepted: ${[...allowed].map(f => `--${f}`).join(' ')}\n`)
     return 2
   }
+  // `get my-entry --field` (no value) set the flag to `true`, which stringFlag
+  // reads as "not given" — so the command quietly printed the primary secret
+  // instead of the field the user asked for.
+  const needsValue = ['field', 'fields', 'kind', 'tag', 'prefix', 'file', 'vault', 'path']
+  const valueless = needsValue.filter(name => parsed.flags.get(name) === true)
+  if (valueless.length > 0) {
+    io.err(`dsh-vault: ${valueless.map(f => `--${f}`).join(', ')} needs a value\n`)
+    return 2
+  }
 
   const json = parsed.flags.get('json') === true
   const mask = parsed.flags.get('mask') === true
@@ -462,12 +482,23 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       } else {
         value = fieldValue(entry, name)
       }
-      if (typeof value !== 'string' || value.length === 0) {
+      // Absent, empty and non-string are three different answers. Reporting all
+      // of them as "has no field" made `--field expiresAt` (a number) and
+      // `--field tags` (an array) look like fields that do not exist.
+      if (value === undefined) {
         io.err(`dsh-vault: "${entry.title}" has no field "${name}"\n`)
         return 1
       }
+      if (value === null || (typeof value === 'string' && value.length === 0)) {
+        io.err(`dsh-vault: "${entry.title}" field "${name}" is empty\n`)
+        return 1
+      }
       const textual = name === 'username' || name === 'url' || name === 'notes' || name.startsWith('fields.')
-      const shown = mask && !textual ? maskSecret(value) : value
+      // Strings keep the old masking rule; anything else is printed as JSON so
+      // booleans, timestamps and tags stay usable from a script.
+      const shown = typeof value === 'string'
+        ? (mask && !textual ? maskSecret(value) : value)
+        : JSON.stringify(value)
       io.out(json ? `${JSON.stringify({ id: entry.id, title: entry.title, field: name, value: shown })}\n` : `${shown}\n`)
       return 0
     }
@@ -585,7 +616,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       io.err('  Tag one entry and run it again:\n')
       io.err('    UI:        Settings → Credentials → the entry → tags → env\n')
       io.err('    assistant: vault_update { id, tags: ["env"] }\n')
-      io.err('  `dsh-vault list` marks tagged entries with [env] and shows the name each exports.\n')
+      io.err('  `dsh-vault list` groups tagged entries under "Exported by `env`" and shows each name.\n')
       io.err('  Only need one value? `dsh-vault get <entry>` needs no tag at all.\n')
     }
     return 0

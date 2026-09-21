@@ -80,7 +80,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_duplicates` | Find duplicate groups: `mode` = `both` (default) / `title` / `content` (no secrets) |
 | `vault_report` | Printable inventory with expiry/rotation columns and a stats footer (no secrets) |
 | `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
-| `vault_backup` / `vault_backup_now` | Timestamped encrypted backup named `<vault>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json` (owning vault + date visible); retention pruning keeps the newest N |
+| `vault_backup` / `vault_backup_now` | Timestamped encrypted backup named `<vault>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json` (owning vault + date visible); retention pruning keeps the newest N (`maxBackups`, default 10) |
 | `vault_restore_backup` | Restore from a backup: `mode: "merge"` (default) copies the backup entries INTO the current vault so they appear in the entries list; `mode: "replace"` overwrites the whole vault with a safety snapshot first |
 | `vault_vault_rename` / `vault_vault_delete` | Rename a named vault (file moves, active session follows) or permanently delete one (default vault protected) |
 | `vault_match_url` | Find login entries matching a URL (Bitwarden/1Password-style: exact host, subdomain, parent domain, path-prefix; www./port normalization) with a 0–100 score — never returns the password |
@@ -237,7 +237,7 @@ echo "$DEMO_API_KEY"
 Two things worth knowing:
 
 - **Only `env`-tagged entries are exported.** With none tagged you get
-  "no entries are tagged for environment export"; tag one in the UI (the
+  `dsh-vault: nothing to export — no entry carries the "env" tag.`; tag one in the UI (the
   entry's tags field) or with `vault_update { id, tags: ["env"] }`.
 - The name is derived from the title and field (`DASHSCOPE` + `apiKey` →
   `DASHSCOPE_API_KEY`) unless the entry sets `envKeys` — see
@@ -474,7 +474,7 @@ Switch profiles in **Settings → Credentials → Permissions → Model tools** 
 | **Full** | everything, incl. bulk import/export, browser sessions, backups and vault-file operations |
 | **Custom…** | core + any of: Management / Import-export / Browser sessions / Backups & files |
 
-`tools: basic|standard|full|custom` can also be set in the plugin config; the UI choice wins and is stored in `<vault dir>/access.json`.
+`tools: basic|standard|full|custom` can also be set in the plugin config; the UI choice wins and is stored in `<vault dir>/tools.json` (the process-wide tool catalog is not per vault).
 
 ## Configuration
 
@@ -539,7 +539,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # installs devDependencies (typescript/tsdown/vitest, …)
 pnpm build      # builds host lib/*.js and the browser bundle lib/client.js
-pnpm test       # runs the 420 vitest tests
+pnpm test       # runs the 489 vitest tests
 ```
 
 > Tests need harness peer packages such as `dsh-llm`/`dsh-system-prompt`; inside the harness monorepo these resolve via workspace links.
@@ -547,13 +547,13 @@ pnpm test       # runs the 420 vitest tests
 Common commands:
 
 ```sh
-pnpm test          # unit + integration tests (vitest, 420)
+pnpm test          # unit + integration tests (vitest, 489)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
 npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
-All 420 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+All 489 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
 
 Browser checks run against a real `dsh web` instead of vitest, and every one of
 them refuses to operate on the default vault:
@@ -611,7 +611,8 @@ This package is a standard npm bundle:
 - `dsh.bundle.patch` → `cordis.patch.yml` (the layer applied automatically when a profile lists this bundle)
 - `dsh.client` → browser-side declaration (`exports["./client"]` points at `lib/client.js`)
 - `prepare` script → self-contained build on git install (`tsc` host + `tsdown` client)
-- Runtime dependencies are all `peerDependencies` (provided by the host harness — no duplicate instances)
+- Runtime dependencies: only `playwright-core` (lazily `require`d, used by browser login sessions).
+  Everything else the host provides via `peerDependencies`, so there are no duplicate instances
 
 Distribution options:
 

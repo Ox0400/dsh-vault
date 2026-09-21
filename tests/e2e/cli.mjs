@@ -2,7 +2,7 @@
 // Build a throwaway vault, then drive the REAL built CLI (lib/cli.js) as a child process.
 import { spawn } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { mkdtemp, rm, stat, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, stat, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,16 +26,21 @@ await store.lock()
 const R = []
 const check = (n, ok, x = '') => { R.push({ n, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  — ' + x : ''}`) }
 const CLI = joinPath(repo, 'lib', 'cli.js')
-function run(args, { input, env = {} } = {}) {
+function run(args, { input, env = {}, timeoutMs } = {}) {
   return new Promise(resolve => {
     const child = spawn(process.execPath, [CLI, ...args], {
       env: { ...process.env, DSH_HOME: home, ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
-    let out = '', err = ''
+    let out = '', err = '', timer
+    if (timeoutMs !== undefined) {
+      // A command that hangs must be reported as a hang, not left to block the
+      // whole suite — that is exactly how the empty-stdin bug went unnoticed.
+      timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'TIMEOUT', out, err }) }, timeoutMs)
+    }
     child.stdout.on('data', d => { out += d })
     child.stderr.on('data', d => { err += d })
-    child.on('close', code => resolve({ code, out, err }))
+    child.on('close', code => { if (timer) clearTimeout(timer); resolve({ code, out, err }) })
     if (input !== undefined) { child.stdin.write(input); }
     child.stdin.end()
   })
@@ -166,6 +171,26 @@ check('show says an entry has TOTP without printing the secret', showTwoFactor.h
 
 const listHasTotp = JSON.parse((await run(['list', '--json'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })).out)
 check('list --json flags exactly the entries totp accepts', listHasTotp.filter(e => e.hasTotp).map(e => e.title).join(',') === 'TwoFactor', JSON.stringify(listHasTotp.map(e => [e.title, e.hasTotp])))
+
+// ── regressions found by audit ──────────────────────────────────────────────
+// The empty-stdin hang only reproduces against the real readline, so it has to
+// be exercised as a child process: nothing may block forever.
+const emptyStdin = await run(['list', '--password-stdin'], { input: '', env: {}, timeoutMs: 10_000 })
+check('--password-stdin with empty stdin exits instead of hanging', emptyStdin.code === 1 && /no password on stdin/.test(emptyStdin.err), JSON.stringify(emptyStdin.code))
+
+const blankName = await run(['get', ''], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('an empty entry name is refused', blankName.code === 1 && blankName.out === '' && /empty name/.test(blankName.err), JSON.stringify(blankName.err.split('\n')[0]))
+
+const valuelessFlag = await run(['get', 'DASHSCOPE', '--field'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('--field without a value is a usage error, not the primary secret', valuelessFlag.code === 2 && valuelessFlag.out === '' && /needs a value/.test(valuelessFlag.err), JSON.stringify(valuelessFlag.err.split('\n')[0]))
+
+const nonStringField = await run(['get', 'DASHSCOPE', '--field', 'createdAt'], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('a non-string field prints its value', nonStringField.code === 0 && /^\d+$/.test(nonStringField.out.trim()), JSON.stringify(nonStringField.out))
+
+const corruptPath = join(home, 'corrupt.json')
+await writeFile(corruptPath, 'not json at all')
+const corrupt = await run(['list', '--path', corruptPath], { env: { DSH_VAULT_MASTER_PASSWORD: 'cli-pw' } })
+check('a corrupt vault names the file it could not read', corrupt.code === 1 && corrupt.err.includes(corruptPath) && /not valid JSON/.test(corrupt.err), JSON.stringify(corrupt.err.split('\n')[0]))
 
 const helpMentionsTotp = await run(['--help'])
 check('--help documents totp', /totp <id\|title\|ENVKEY>/.test(helpMentionsTotp.out) && /totp options:/.test(helpMentionsTotp.out))

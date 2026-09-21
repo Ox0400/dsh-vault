@@ -1165,15 +1165,26 @@ export class VaultStore {
       }
       throw error
     }
-    const parsed = JSON.parse(raw) as VaultFile
+    // Name the file in every failure below: a vault can live at an explicit
+    // --path, and "Unexpected token 'o'" or "version undefined" told the user
+    // neither which file was damaged nor that it was damaged at all.
+    let parsed: VaultFile
+    try {
+      parsed = JSON.parse(raw) as VaultFile
+    } catch {
+      throw new Error(`${this.path} is not valid JSON — it is corrupt or not a vault file`)
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${this.path} is not a vault file (expected a JSON object)`)
+    }
     if (parsed.version !== VAULT_FORMAT_VERSION) {
-      throw new Error(`unsupported vault format version ${parsed.version} (expected ${VAULT_FORMAT_VERSION})`)
+      throw new Error(`${this.path} has unsupported vault format version ${JSON.stringify(parsed.version)} (expected ${VAULT_FORMAT_VERSION})`)
     }
     if (!parsed.kdf || parsed.kdf.algo !== 'scrypt' || !parsed.kdf.saltHex) {
-      throw new Error('vault document is missing valid KDF parameters')
+      throw new Error(`${this.path} is missing valid KDF parameters`)
     }
     if (!parsed.verify) {
-      throw new Error('vault document is missing its password-verification envelope')
+      throw new Error(`${this.path} is missing its password-verification envelope`)
     }
     return { file: parsed, created: false }
   }

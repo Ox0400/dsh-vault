@@ -8,6 +8,8 @@
 [![已收录: awesome-dsh-plugin](https://img.shields.io/badge/已收录-awesome--dsh--plugin-2ea44f)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/README.zh.md#L2869)
 [![已收录: awesome-deepseek-harness](https://img.shields.io/badge/已收录-awesome--deepseek--harness-2ea44f)](https://github.com/Dominic789654/awesome-deepseek-harness/blob/main/README.zh-CN.md#L903)
 
+[English](README.md) | **中文**
+
 dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使用 AI 过程中产生的**用户名、邮箱、手机号、密码、二次动态密钥（TOTP）** 以及开发工作流中常用的 **SSH 连接、API Key、Secret、OAuth access/refresh token** 等敏感凭据加密存储，并通过模型工具提供增删改查、检索、密码生成与动态验证码生成能力。
 
 **安全性与实现**
@@ -225,7 +227,7 @@ echo "$DEMO_API_KEY"
 两个前提要知道:
 
 - **只有打了 `env` 标签的条目才会被导出。** 一个都没打时,输出的是
-  "no entries are tagged for environment export";先在 UI 里给条目的标签加上 `env`,或让助手执行 `vault_update { id, tags: ["env"] }`。
+  `dsh-vault: nothing to export — no entry carries the "env" tag.`;先在 UI 里给条目的标签加上 `env`,或让助手执行 `vault_update { id, tags: ["env"] }`。
 - 名字默认由标题 + 字段推导(`DASHSCOPE` + `apiKey` → `DASHSCOPE_API_KEY`);想固定名字就在条目的 `envKeys` 里指定 —— 见[环境变量导出](#环境变量导出)。
 
 
@@ -405,9 +407,32 @@ k-anonymity **没有**隐藏的东西,直说:
 | **完整** | 全部,含批量导入导出、浏览器会话、备份与保险库文件操作 |
 | **自定义…** | 基础 + 任选: 管理 / 导入导出 / 浏览器会话 / 备份与文件 |
 
-也可在插件配置里写 `tools: basic|standard|full|custom`;界面选择优先,并保存在 `<vault 目录>/access.json`。
+也可在插件配置里写 `tools: basic|standard|full|custom`;界面选择优先,并保存在 `<vault 目录>/tools.json`(工具集是进程级设置,不随保险库变化)。
 
 ## 配置
+
+> [!WARNING] 安全:不要把主密码明文写进配置
+> profile patch(`cordis.patch.yml` / `cordis.yml`)是很容易被提交进 git、截图或进日志的配置文件 ——
+> 一行明文的 `masterPassword:` 就等于泄露了整个加密保险库的钥匙。请一律使用
+> `masterPasswordEnv` 并把真实密码放进进程/ shell 环境(例如 `export DSH_VAULT_PASSWORD='…'`)。
+> 凭据类插件的证据化检查清单见
+> [community-plugin-audit handbook](https://github.com/sandbaseai/deepseek-harness-handbook/blob/main/docs/en/security/community-plugin-audit.md)。
+>
+> ```yaml
+> # ✗ 不要 —— 配置文件里写明文主密码
+> - id: vault
+>   name: dsh-vault
+>   config:
+>     masterPassword: 'my-secret'
+> ```
+>
+> ```yaml
+> # ✓ 应该 —— 引用环境变量,并让文件本身保持 0600
+> - id: vault
+>   name: dsh-vault
+>   config:
+>     masterPasswordEnv: DSH_VAULT_PASSWORD
+> ```
 
 | 配置项 | 说明 |
 |---|---|
@@ -445,7 +470,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
-pnpm test       # 运行 420 项 vitest 测试
+pnpm test       # 运行 489 项 vitest 测试
 ```
 
 > 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
@@ -453,7 +478,7 @@ pnpm test       # 运行 420 项 vitest 测试
 常用命令:
 
 ```sh
-# 单元 + 集成测试（vitest，420 项）
+# 单元 + 集成测试（vitest，489 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
@@ -466,7 +491,7 @@ pnpm build           # = build:host (tsc) + build:client (tsdown)
 npm pack
 ```
 
-仓库内所有测试通过：420/420（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+仓库内所有测试通过：489/489（crypto/TOTP/密码生成/store CRUD/网关/集成）。
 
 浏览器侧检查跑在真实 `dsh web` 上（不属于 vitest），且**一律拒绝在 default 库上运行**：
 
@@ -508,7 +533,8 @@ UI 不写死颜色，而是读取宿主的设计变量：本地语义层映射�
 - `dsh.bundle.patch` → `cordis.patch.yml`(安装到 profile 后自动应用的 layer)
 - `dsh.client` → 浏览器端声明(`exports["./client"]` 指向 `lib/client.js`)
 - `prepare` 脚本 → git 安装时自包含构建(`tsc` host + `tsdown` client)
-- 运行时依赖全部走 `peerDependencies`(由宿主 harness 提供,避免重复实例)
+- 运行时依赖只有 `playwright-core`(懒加载,仅浏览器登录会话使用);其余全部由宿主通过
+  `peerDependencies` 提供,不会产生重复实例
 
 可选发布途径:
 
