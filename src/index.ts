@@ -3682,7 +3682,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       + 'vault_session_collect with the returned sessionId to save the session cookies into the vault '
       + '— including HttpOnly session cookies, which a page script can never read. '
       + 'This is the portable way to capture login state for sites that block embedding. '
-      + 'Requires playwright-core and a Chromium build (the standard Playwright cache or a system browser). '
+      + 'Requires playwright-core (an optional peer dependency, not installed by default) and a Chromium '
+      + 'build (the standard Playwright cache or a system browser). '
       + 'Pass headless: true for automation (no visible window — use only when no human login is needed).',
     parameters: {
       url: { type: 'string', required: true, description: 'Site to open, e.g. "https://example.com/login" (https:// is added when missing).' },

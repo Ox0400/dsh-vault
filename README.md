@@ -97,7 +97,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (macOS keychain / Linux keyring or `peanuts` / Windows DPAPI) or the macOS Keychain (internet passwords `inet` by default — the ones that actually back website logins — or generic `genp` via `classes`; session cache + preview, no prompt spam); every file import supports `dryRun` preview |
 | `vault_import_firefox` | Firefox profile import (logins.json + key4.db, NSS 3DES / PBES2-AES, primary-password aware) |
 | `vault_search_system` | Search Chrome / Keychain for sites & usernames — never exposes passwords |
-| `vault_session_open` | Open a real headed browser window at a URL so the user can log in manually (password, 2FA, captcha) — the portable way to capture login state for sites that block embedding |
+| `vault_session_open` | Open a real headed browser window at a URL so the user can log in manually (password, 2FA, captcha) — the portable way to capture login state for sites that block embedding — requires the optional `playwright-core` |
 | `vault_session_collect` | Collect every cookie of an open browser session (incl. HttpOnly) and save it as a `cookie` entry |
 | `vault_session_import` | Save session cookies from pasted JSON (devtools export shape) or a raw `Cookie` header string — the no-browser alternative |
 | `vault_session_import_file` | Import a Netscape cookie-jar file (curl `-b` / wget / browser-extension export; the same format `vault_session_export` writes) |
@@ -539,7 +539,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # installs devDependencies (typescript/tsdown/vitest, …)
 pnpm build      # builds host lib/*.js and the browser bundle lib/client.js
-pnpm test       # runs the 489 vitest tests
+pnpm test       # runs the 492 vitest tests
 ```
 
 > Tests need harness peer packages such as `dsh-llm`/`dsh-system-prompt`; inside the harness monorepo these resolve via workspace links.
@@ -547,13 +547,13 @@ pnpm test       # runs the 489 vitest tests
 Common commands:
 
 ```sh
-pnpm test          # unit + integration tests (vitest, 489)
+pnpm test          # unit + integration tests (vitest, 492)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
 npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
-All 489 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+All 492 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
 
 Browser checks run against a real `dsh web` instead of vitest, and every one of
 them refuses to operate on the default vault:
@@ -611,8 +611,10 @@ This package is a standard npm bundle:
 - `dsh.bundle.patch` → `cordis.patch.yml` (the layer applied automatically when a profile lists this bundle)
 - `dsh.client` → browser-side declaration (`exports["./client"]` points at `lib/client.js`)
 - `prepare` script → self-contained build on git install (`tsc` host + `tsdown` client)
-- Runtime dependencies: only `playwright-core` (lazily `require`d, used by browser login sessions).
-  Everything else the host provides via `peerDependencies`, so there are no duplicate instances
+- No runtime `dependencies`: what the host provides arrives through `peerDependencies`, so there are
+  no duplicate instances. `playwright-core` — needed only by browser login sessions, and lazily
+  `require`d — is an **optional** peer, so a normal install does not download it (~13 MB). Install it
+  into your profile when you want those tools: `cd ~/.dsh/profiles/web && npm i playwright-core`
 
 Distribution options:
 

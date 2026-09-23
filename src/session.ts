@@ -85,7 +85,11 @@ function chromium(): ChromiumLike {
     chromiumModule = pw.chromium
     return pw.chromium
   } catch {
-    chromiumError = 'playwright-core is not installed — run `npm i playwright-core` (or `pnpm add playwright-core`) to enable browser login sessions, then retry.'
+    // An optional peer dependency, so this is the expected first encounter with
+    // browser sessions — say where to put it, not just what to install.
+    chromiumError = 'playwright-core is not installed — browser login sessions need it, and it is an optional '
+      + 'peer dependency so it is not installed by default. Install it where this plugin resolves modules '
+      + '(in your DSH profile directory, e.g. `cd ~/.dsh/profiles/web && npm i playwright-core`), then retry.'
     throw new Error(chromiumError)
   }
 }

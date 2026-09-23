@@ -97,7 +97,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_import_chrome` / `vault_import_keychain` | 从 Chrome Login Data（macOS 钥匙串 / Linux 钥匙环或 peanuts / Windows DPAPI）或 macOS 钥匙串导入密码（默认只读互联网密码 `inet`——真正用于网站登录的条目,`classes: ["genp"]` 可改读通用密码；会话缓存 + 预览,避免授权弹窗轰炸）；所有文件导入均支持 dryRun 预览 |
 | `vault_import_firefox` | Firefox 配置导入（logins.json + key4.db,NSS 3DES / PBES2-AES,支持主密码） |
 | `vault_search_system` | 在 Chrome / 钥匙串中搜索站点与用户名——绝不暴露密码 |
-| `vault_session_open` | 在真实浏览器窗口中打开指定网址,供用户手动登录（密码、二次验证、验证码）——对禁止嵌入的网站也能捕获登录态 |
+| `vault_session_open` | 在真实浏览器窗口中打开指定网址,供用户手动登录（密码、二次验证、验证码）——对禁止嵌入的网站也能捕获登录态（需要可选的 `playwright-core`）|
 | `vault_session_collect` | 收集已打开浏览器会话的全部 cookie（含 HttpOnly）,保存为 `cookie` 条目 |
 | `vault_session_import` | 从粘贴的 JSON cookie 数组（开发者工具导出格式）或原始 `Cookie` 头字符串保存会话 cookie——无需浏览器的替代方案 |
 | `vault_session_import_file` | 导入 Netscape cookie-jar 文件（curl `-b` / wget / 浏览器扩展导出；与 `vault_session_export` 输出的格式一致） |
@@ -470,7 +470,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
-pnpm test       # 运行 489 项 vitest 测试
+pnpm test       # 运行 492 项 vitest 测试
 ```
 
 > 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
@@ -478,7 +478,7 @@ pnpm test       # 运行 489 项 vitest 测试
 常用命令:
 
 ```sh
-# 单元 + 集成测试（vitest，489 项）
+# 单元 + 集成测试（vitest，492 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
@@ -491,7 +491,7 @@ pnpm build           # = build:host (tsc) + build:client (tsdown)
 npm pack
 ```
 
-仓库内所有测试通过：489/489（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+仓库内所有测试通过：492/492（crypto/TOTP/密码生成/store CRUD/网关/集成）。
 
 浏览器侧检查跑在真实 `dsh web` 上（不属于 vitest），且**一律拒绝在 default 库上运行**：
 
@@ -533,8 +533,10 @@ UI 不写死颜色，而是读取宿主的设计变量：本地语义层映射�
 - `dsh.bundle.patch` → `cordis.patch.yml`(安装到 profile 后自动应用的 layer)
 - `dsh.client` → 浏览器端声明(`exports["./client"]` 指向 `lib/client.js`)
 - `prepare` 脚本 → git 安装时自包含构建(`tsc` host + `tsdown` client)
-- 运行时依赖只有 `playwright-core`(懒加载,仅浏览器登录会话使用);其余全部由宿主通过
-  `peerDependencies` 提供,不会产生重复实例
+- 没有运行时 `dependencies`:宿主提供的一切都走 `peerDependencies`,不会产生重复实例。
+  `playwright-core` 只有浏览器登录会话用得到、且是懒加载,因此声明为**可选** peer ——
+  普通安装**不会**下载它(约 13 MB)。需要那组工具时,把它装进你的 profile:
+  `cd ~/.dsh/profiles/web && npm i playwright-core`
 
 可选发布途径:
 
