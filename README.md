@@ -539,7 +539,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # installs devDependencies (typescript/tsdown/vitest, …)
 pnpm build      # builds host lib/*.js and the browser bundle lib/client.js
-pnpm test       # runs the 492 vitest tests
+pnpm test       # runs the 496 vitest tests
 ```
 
 > Tests need harness peer packages such as `dsh-llm`/`dsh-system-prompt`; inside the harness monorepo these resolve via workspace links.
@@ -547,13 +547,13 @@ pnpm test       # runs the 492 vitest tests
 Common commands:
 
 ```sh
-pnpm test          # unit + integration tests (vitest, 492)
+pnpm test          # unit + integration tests (vitest, 496)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
 npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
-All 492 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+All 496 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
 
 Browser checks run against a real `dsh web` instead of vitest, and every one of
 them refuses to operate on the default vault:

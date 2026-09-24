@@ -4446,11 +4446,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
  * instance per process). Returns the number of registered tools. */
 let reapplyToolProfile: (() => number) | undefined
 
-/** Set by tests to observe profile switches outside a gateway. */
-export function __getToolProfileApplier(): (() => number) | undefined {
-  return reapplyToolProfile
-}
-
 export class VaultGateway extends TypertRemoteService {
   static inject = ['tools']
 

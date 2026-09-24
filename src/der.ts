@@ -15,10 +15,7 @@ export interface DerNode {
 }
 
 /** DER universal tag numbers used by NSS blobs. */
-export const TAG_INTEGER = 0x02
 export const TAG_OCTET_STRING = 0x04
-export const TAG_NULL = 0x05
-export const TAG_OID = 0x06
 export const TAG_SEQUENCE = 0x30
 
 function readLength(buf: Buffer, offset: number): { length: number; size: number } {

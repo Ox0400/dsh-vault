@@ -226,20 +226,6 @@ export function parseNetscapeJar(text: string): CookieData[] {
   return out
 }
 
-/** Map a stored CookieData back into Playwright's addCookies shape. */
-export function toAddCookie(cookie: CookieData): PlaywrightCookie {
-  return {
-    name: cookie.name,
-    value: cookie.value,
-    domain: cookie.domain,
-    path: cookie.path,
-    expires: cookie.expires,
-    httpOnly: cookie.httpOnly,
-    secure: cookie.secure,
-    ...(cookie.sameSite !== undefined ? { sameSite: cookie.sameSite } : {}),
-  }
-}
-
 /** Live browser sessions opened by this process (never persisted). */
 const sessions = new Map<string, { browser: BrowserLike; context: ContextLike; url: string; openedAt: number }>()
 

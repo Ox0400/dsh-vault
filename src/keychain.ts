@@ -49,16 +49,6 @@ export interface KeychainCredential extends KeychainEntry {
  * small batches, and the preview mode. */
 const fetchCache = new Map<string, string>()
 
-/** Number of entries currently cached (diagnostics/tests). */
-export function keychainCacheSize(): number {
-  return fetchCache.size
-}
-
-/** Clear the session keychain cache. */
-export function clearKeychainCache(): void {
-  fetchCache.clear()
-}
-
 const SYSTEM_PREFIXES = ['com.apple.', 'com.apple', 'AirPlay', 'Microsoft', 'iCloud', 'CloudKit', 'Wi-Fi', 'Bluetooth', 'AirDrop', 'App Store', 'iTunes', 'FaceTime', 'Messages', 'iMessage']
 
 /** Parse a `security dump-keychain` listing into typed (class, service,

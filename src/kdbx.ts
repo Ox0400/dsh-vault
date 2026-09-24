@@ -17,7 +17,6 @@ import { chacha20Xor } from './chacha20.ts'
 import { salsa20Xor } from './salsa20.ts'
 import { argon2 } from './argon2.ts'
 
-export type KdbxField = [string, string, boolean]
 
 export interface KdbxCredential {
   title: string

@@ -128,11 +128,6 @@ export async function checkPassword(password: string, now = Date.now()): Promise
   }
 }
 
-/** Number of prefix ranges currently cached (for diagnostics/tests). */
-export function cacheSize(): number {
-  return rangeCache.size
-}
-
 /** Clear the in-memory range cache (exposed for tests and diagnostics). */
 export function clearCache(): void {
   rangeCache.clear()

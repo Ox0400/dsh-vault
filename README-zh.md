@@ -470,7 +470,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
-pnpm test       # 运行 492 项 vitest 测试
+pnpm test       # 运行 496 项 vitest 测试
 ```
 
 > 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
@@ -478,7 +478,7 @@ pnpm test       # 运行 492 项 vitest 测试
 常用命令:
 
 ```sh
-# 单元 + 集成测试（vitest，492 项）
+# 单元 + 集成测试（vitest，496 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
@@ -491,7 +491,7 @@ pnpm build           # = build:host (tsc) + build:client (tsdown)
 npm pack
 ```
 
-仓库内所有测试通过：492/492（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+仓库内所有测试通过：496/496（crypto/TOTP/密码生成/store CRUD/网关/集成）。
 
 浏览器侧检查跑在真实 `dsh web` 上（不属于 vitest），且**一律拒绝在 default 库上运行**：
 

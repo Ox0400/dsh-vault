@@ -31,9 +31,6 @@ export const KEY_LENGTH = 32
 /** GCM nonce length in bytes (the recommended 96-bit default). */
 export const IV_LENGTH = 12
 
-/** GCM authentication tag length in bytes. */
-export const TAG_LENGTH = 16
-
 /** scrypt CPU/memory cost (2^15). Chosen to make offline brute force of a
  * master password expensive while staying snappy on laptops. */
 export const SCRYPT_N = 2 ** 15
@@ -130,9 +127,4 @@ export function decrypt(blob: EncryptedBlob, key: Buffer): Buffer {
 /** Constant-time comparison of two Buffers of equal length. */
 export function safeEqual(a: Buffer, b: Buffer): boolean {
   return a.length === b.length && timingSafeEqual(a, b)
-}
-
-/** Generate `bytes` cryptographically strong random bytes as hex. */
-export function randomHex(bytes: number): string {
-  return randomBytes(bytes).toString('hex')
 }

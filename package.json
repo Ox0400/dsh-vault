@@ -1,6 +1,6 @@
 {
   "name": "dsh-vault",
-  "version": "1.10.74-rc.3",
+  "version": "1.10.74-rc.4",
   "bin": {
     "dsh-vault": "lib/cli.js"
   },
@@ -84,6 +84,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "scan:secrets": "node scripts/secret-scan.mjs",
     "scan:public": "node scripts/secret-scan.mjs --public",
+    "scan:dead": "node scripts/dead-exports.mjs",
     "e2e:theme": "node tests/e2e/theme-check.mjs",
     "e2e:polish": "node tests/e2e/polish-check.mjs",
     "e2e:contrast": "node tests/e2e/contrast-audit.mjs",
