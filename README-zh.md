@@ -27,7 +27,7 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 
 | 字段 | 说明 |
 |---|---|
-| `kind` | `login`（默认）/ `ssh` / `api-key` / `secret` / `oauth` / `custom` |
+| `kind` | `login`（默认）/ `ssh` / `api-key` / `secret` / `oauth` / `cookie` / `card` / `custom` |
 | `username` / `email` / `phone` | 账号身份 |
 | `password` | 密码 |
 | `host` / `port` | SSH 主机与端口（如 `db.internal` / `2222`） |
@@ -37,35 +37,46 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `accessToken` / `refreshToken` / `expiresAt` | OAuth 令牌对与过期时间（epoch millis） |
 | `otpSecret` | TOTP 密钥（Base32 或 otpauth:// URI） |
 | `url` / `notes` / `tags` | 元信息 |
+
+其中两种 kind 有各自的形状:`cookie` 条目保存捕获的浏览器会话;`card` 条目保存 `cardNumber` / `cardExpiry`(MM/YY)/ `cardCvv` / `cardHolder` —— 检索摘要只暴露到期日与持卡人,绝不给卡号与 CVV;导出 Bitwarden JSON 时映射为 `card` 项(type 3,品牌自动推断)。
 | `fields` | 任意附加键值（如 `{"region": "us-east-1"}`），可检索 |
 
 ## 工具
 
-| 工具 | 作用 |
+共 113 个工具,分五组。**基础**是默认安装就会注册的;其余通过[工具分级](#工具分级工具集)按需开启（设置 → 凭据库 → 权限 → 模型工具集）。
+
+### 基础（默认注册） — 11
+
+共 11 个工具。下面各组都需按需开启。
+
+| 工具 | 说明 |
 |---|---|
-| `vault_add` | 新增条目（上述字段任意组合；空字符串/空数组字段会被忽略） |
-| `vault_get` | 按 id 读取完整条目（含全部密钥） |
+| `vault_list` | 列出保险库目录下可用的保险库（一个 .json 一个,排除 access/meta/导出等旁车文件） |
 | `vault_search` | 跨标题/分类/用户名/邮箱/手机/主机/端口/URL/备注/标签/自定义字段（含数字/布尔/嵌套值；空格分隔多词 OR 命中）检索；可选 `createdAfter`/`createdBefore` 毫秒时间戳过滤；返回无密摘要；`limit` 须为 1–100 的整数 |
+| `vault_get` | 按 id 读取完整条目（含全部密钥） |
+| `vault_add` | 新增条目（上述字段任意组合；空字符串/空数组字段会被忽略） |
 | `vault_update` | 按 id 更新字段（未提供的字段保留；空字符串清除该字段；`title` 可改名；`rotationDays: 0` 清除轮换 = 永不轮换） |
-| `vault_compare` | 逐字段比较两个条目（`onlyA`/`onlyB`/`differ`/`equal`）——只返回字段名，绝不返回密钥值 |
-| `vault_rename` | 一次调用即可重命名条目（`vault_update` 的快捷方式） |
 | `vault_delete` | 软删除条目（移入回收站，磁盘上仍加密保留） |
-| `vault_restore` / `vault_purge` / `vault_restore_recent` | 从回收站恢复 / 永久删除 / 撤销最近一次删除 |
-| `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |
+| `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
+| `vault_clipboard` | 取出某条目某个字段的值用于直接复制（用户名/密码/apiKey 等） |
 | `vault_totp` | 为存储的 otpSecret（或直接传入的 Base32/otpauth URI）生成当前 6 位动态验证码 |
 | `vault_generate_password` | 生成强随机密码（长度/字符集/分组可选）**或易记口令短语**（`passphrase: true`，EFF 词表，`words`/`separator`/`wordDigits`） |
 | `vault_strength` | 零依赖密码强度评估（0–100 分，weak/fair/strong/very strong） |
+
+### 管理（标准档及以上） — 53
+
+收藏、标签、活动历史、健康检查、模板、附件,以及卡与 2FA 的细节。
+
+| 工具 | 说明 |
+|---|---|
+| `vault_compare` | 逐字段比较两个条目（`onlyA`/`onlyB`/`differ`/`equal`）——只返回字段名，绝不返回密钥值 |
+| `vault_rename` | 一次调用即可重命名条目（`vault_update` 的快捷方式） |
+| `vault_restore` / `vault_purge` / `vault_restore_recent` | 从回收站恢复 / 永久删除 / 撤销最近一次删除 |
+| `vault_lock` / `vault_unlock` | 显式锁定保险库（清空内存密钥）/ 重新解锁 |
 | `vault_password_history` | 列出条目的历史密码(1Password/Bitwarden 风格,最新在前,上限 10 条;不含当前密码) |
-| `kind: card` | 银行卡/信用卡条目:`cardNumber`/`cardExpiry`(MM/YY)/`cardCvv`/`cardHolder`;搜索摘要只暴露有效期和持卡人(绝不显示卡号和 CVV);Bitwarden JSON 导出映射为 card 条目(type 3,自动识别卡品牌) |
 | `vault_password_rollback` | 将条目密码回滚到某条历史记录(当前密码先归档,可逆) |
-| `vault_recovery_code` / `vault_verify_recovery` / `vault_recovery_status` | 一次性保险库恢复码（1Password/Bitwarden 风格）:32 位代码仅显示一次,只保存其 SHA-256 哈希;可验证代码持有;查询是否已设置 |
-| `vault_rekey` | 原地升级 scrypt KDF 参数并重加密 |
-| `vault_backup` | 带时间戳的加密备份，支持保留策略：超过 `maxBackups`（默认 10）的旧备份自动清理 |
-| `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields；`overwrite: true` 合并字段到已有条目，不再产生重复） |
-| `vault_bulk_delete` | 按 query/kind/tag 或显式 ids 批量软删除条目;需 `confirm: true`（默认仅试运行）;回收站可恢复 |
 | `vault_apply_tags` | 按查询批量增/删/替换条目标签（支持 dry-run，不含密钥） |
 | `vault_totp_uri` | 为存储的或裸 TOTP 密钥生成 otpauth:// 配置 URI |
-| `vault_switch` / `vault_list` | 按名称切换当前保险库 / 列出可用保险库 |
 | `vault_rotation` | 报告已过期 / 待轮换 / 即将过期的凭据；`soonWindowDays`（1-90，默认 7）调整即将窗口（不含密钥） |
 | `vault_health` | 保险库健康扫描：弱密码/复用凭据、未启用 2FA、不安全的 http:// 站点,以及整体安全评分（0–100） |
 | `vault_watchtower` | 每个条目的风险分析(借鉴 1Password Watchtower / Bitwarden):标记弱密码、键盘序列、嵌入年份、常见密码、跨条目复用、http 站点、缺 2FA、过期——带 0–100 评分与 good/warn/poor 判定(不含机密);条目行显示 ⚠ 徽标 |
@@ -79,13 +90,42 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_verify` | 校验单个条目或审计全部条目（`all: true`）：按 kind 检查完整性、端口/过期合理性（不含密钥） |
 | `vault_duplicates` | 查找重复分组：`mode` = `both`（默认）/ `title` / `content`（不含密钥） |
 | `vault_report` | 可打印清单，含到期/轮换列与统计页脚（不含密钥） |
-| `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
-| `vault_backup` / `vault_backup_now` | 时间戳加密备份,文件名 `<库名>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json`（库名+日期一目了然）;自动保留最近 N 份 |
-| `vault_restore_backup` | 从备份还原:`mode: "merge"`（默认）把备份条目复制进当前库,出现在条目列表;`mode: "replace"` 整体覆盖（先写安全快照） |
-| `vault_vault_rename` / `vault_vault_delete` | 重命名命名库（文件移动,当前会话跟随）或永久删除（default 库受保护） |
 | `vault_match_url` | 按 URL 查找匹配的登录条目（Bitwarden/1Password 风格:精确主机、子域、父域、路径前缀;www./端口归一化）,带 0–100 评分——绝不返回密码 |
-| `vault_fill` | 按 host/URL/用户名/标题匹配条目并返回其凭据 |
 | `vault_env` | 把标记 env 的条目（tags 含 `env`）渲染为 `KEY=VALUE` 行 —— 见[环境变量导出](#环境变量导出) |
+| `vault_copy` | 复制条目（含密钥）到另一个命名保险库 |
+| `vault_templates` | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格）;内建模板新增 Wi-Fi、服务器、数据库、身份、银行账户、银行卡（借鉴 1Password） |
+| `vault_notes` | 追加或整体替换条目的自由备注（等价于一次 `vault_update`） |
+| `vault_changes` | 列出某个时间窗内（默认 24 小时）的库内活动:新增/更新/软删除,最新在前 |
+| `vault_find` | 模糊查找:忽略大小写、标点与空白,所以 `gh` 也能命中 `GitHub` |
+| `vault_mask` | 把任意文本里像凭据的部分打码（API key、token、密码、私钥),便于安全地记录或引用 |
+| `vault_history` | 本进程内的近期活动,最新在前:写操作（增/改/删/恢复/清空/合并/回滚)与读操作（读取、验证码） |
+| `vault_recent` | 列出最近新增或更新的条目（最新在前),只含非敏感摘要 |
+| `vault_pin` | 收藏（置顶）条目,使其在搜索与列表中排在最前 |
+| `vault_unpin` | 取消收藏（移除 favorite 标记） |
+| `vault_tags` | 列出全库用到的所有标签及每个标签下的条目数 |
+| `vault_generate_username` | 生成随机用户名或匿名邮箱建议 |
+| `vault_rotate_password` | 生成新的强密码、写入条目,并把新值返回给调用方交给目标服务 |
+| `vault_touch` | 把条目标记为"最近使用"（只更新 updatedAt,不改内容） |
+| `vault_note_secret` | 用一个自动生成的标题存一条单独的密钥（临时记一条,不必先想标题）|
+| `vault_search_advanced` | 多条件组合搜索:标题子串、用户名/邮箱子串、kind、标签、创建时间区间、仅收藏 |
+| `vault_count` | 返回活跃条目数量（可按 kind / 标签过滤） |
+| `vault_set_icon` | 设置条目的 UI 图标（emoji）与强调色 |
+| `vault_describe` | 用自然语言描述一条目（kind、身份、主机/URL、标签、到期),不泄露任何密钥 |
+| `vault_last_modified` | 按最后修改时间列出条目,最新在前 |
+| `vault_has` | 快速判断库里是否存在匹配的凭据（标题/用户名/主机子串;`exact` 时按标题精确匹配） |
+| `vault_autofill_check` | 判断库里是否有可用于某 URL/主机的凭据:返回最佳匹配条目（只给用户名/邮箱,绝不给密钥）,或明确"没有" |
+| `vault_undelete_all` | 把回收站里的条目全部恢复 |
+| `vault_get_many` | 按 id 批量读取多个条目,且只返回请求的字段 |
+
+### 导入导出（完整档,或自定义 → 导入导出） — 27
+
+与其它密码管理器之间的进出、批量操作,以及 env/CSV/1Password/Bitwarden/KeePass/pass 互转。
+
+| 工具 | 说明 |
+|---|---|
+| `vault_import_csv` | 从 CSV 批量导入凭据（自定义列变为 fields；`overwrite: true` 合并字段到已有条目，不再产生重复） |
+| `vault_bulk_delete` | 按 query/kind/tag 或显式 ids 批量软删除条目;需 `confirm: true`（默认仅试运行）;回收站可恢复 |
+| `vault_export` / `vault_import` | 整库加密备份/迁移（独立导出密码） |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON 互通（完整字段映射,支持覆盖） |
 | `vault_import_bitwarden_encrypted` | 解密 Bitwarden 口令保护 JSON 导出（PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC）并导入,需提供导出口令 |
 | `vault_import_manager_csv` | 密码管理器 CSV 自动识别表头：Bitwarden（login_uri/login_username/…）、1Password 8、Dashlane、NordPass、Keeper、LastPass（fav/grouping/extra）；支持 dryRun 预览 |
@@ -96,8 +136,24 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_import_keepass_xml` | KeePass 2.x XML 导出（明文或 ****** 掩码值） |
 | `vault_import_chrome` / `vault_import_keychain` | 从 Chrome Login Data（macOS 钥匙串 / Linux 钥匙环或 peanuts / Windows DPAPI）或 macOS 钥匙串导入密码（默认只读互联网密码 `inet`——真正用于网站登录的条目,`classes: ["genp"]` 可改读通用密码；会话缓存 + 预览,避免授权弹窗轰炸）；所有文件导入均支持 dryRun 预览 |
 | `vault_import_firefox` | Firefox 配置导入（logins.json + key4.db,NSS 3DES / PBES2-AES,支持主密码） |
-| `vault_search_system` | 在 Chrome / 钥匙串中搜索站点与用户名——绝不暴露密码 |
-| `vault_session_open` | 在真实浏览器窗口中打开指定网址,供用户手动登录（密码、二次验证、验证码）——对禁止嵌入的网站也能捕获登录态（需要可选的 `playwright-core`）|
+| `vault_export_totp` | 列出所有带 TOTP 密钥的条目及其标题与签发方标签 |
+| `vault_bulk_export` | 把**全部**条目（含密钥）导出为 JSON 文件,用于审计或迁移 |
+| `vault_export_browser` | 按浏览器密码管理器 CSV 格式导出登录条目（name,url,username,password） |
+| `vault_migrate_keepass` | 按 KeePass 2.x 导入 CSV 格式导出（Group,Title,Username,Password,URL,Notes） |
+| `vault_export_keepass_xml` | 导出为 KeePassXC 兼容的 XML 文档（KeePass 2.x schema） |
+| `vault_import_browser` | 导入浏览器密码管理器 CSV（name,url,username,password,Chrome/Firefox/Edge 导出格式） |
+| `vault_export_wallet` | 导出为 `pass`(标准 Unix 密码管理器）兼容的目录树:一条目一文件,首行是密码 |
+| `vault_import_wallet` | 从 `pass` 目录树导入:每个 .gpg（或明文）文件成为一个条目,文件名即标题,首行是密码 |
+| `vault_export_env` | 把带 `env` 标签的条目写成 .env 文件（KEY=VALUE,值做 shell 引号处理） |
+| `vault_export_csv` | 把条目导出为 CSV（与 `vault_import_csv` 同格式),可按 kind 过滤 |
+
+### 浏览器会话（完整档,或自定义 → 浏览器会话） — 8
+
+捕获与复用 cookie 会话;需要可选的 `playwright-core`。
+
+| 工具 | 说明 |
+|---|---|
+| `vault_session_open` | 在真实浏览器窗口中打开指定网址,供用户手动登录（密码、二次验证、验证码）——对禁止嵌入的网站也能捕获登录态（需要可选的 `playwright-core`） |
 | `vault_session_collect` | 收集已打开浏览器会话的全部 cookie（含 HttpOnly）,保存为 `cookie` 条目 |
 | `vault_session_import` | 从粘贴的 JSON cookie 数组（开发者工具导出格式）或原始 `Cookie` 头字符串保存会话 cookie——无需浏览器的替代方案 |
 | `vault_session_import_file` | 导入 Netscape cookie-jar 文件（curl `-b` / wget / 浏览器扩展导出；与 `vault_session_export` 输出的格式一致） |
@@ -105,10 +161,25 @@ dsh-vault 是一个面向 DeepSeek Harness 的安全加密插件：把你在使�
 | `vault_session_export` | 将会话导出为 `Cookie` 请求头、Netscape cookie-jar 文件（curl `-b`）、原始 JSON（Playwright `addCookies` 格式）或可直接运行的 Playwright 片段 |
 | `vault_session_close` | 关闭已打开的浏览器登录会话（已收集的 cookie 仍保留在保险库中） |
 | `vault_session_prune` | 移除已保存会话中的过期 cookie（无过期的会话 cookie 保留）;`preview: true` 只报告不修改 |
-| `vault_copy` | 复制条目（含密钥）到另一个命名保险库 |
-| `vault_templates` | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格）;内建模板新增 Wi-Fi、服务器、数据库、身份、银行账户、银行卡（借鉴 1Password） | 内建 + 用户自定义模板（save/list/remove,KeePassXC 风格） |
 
-**典型开发场景**：存一条 SSH 凭据（`kind: ssh` + host/port/username/password 或 privateKey），开发时让模型 `vault_search` 找主机、`vault_get` 取连接信息；存 API 网关的 `api-key`/`oauth` 条目管理 access/refresh token 轮换。
+### 备份与保险库文件（完整档,或自定义 → 备份与文件） — 14
+
+备份、切换保险库、换密钥、恢复码与系统搜索。
+
+| 工具 | 说明 |
+|---|---|
+| `vault_recovery_code` / `vault_verify_recovery` / `vault_recovery_status` | 一次性保险库恢复码（1Password/Bitwarden 风格）:32 位代码仅显示一次,只保存其 SHA-256 哈希;可验证代码持有;查询是否已设置 |
+| `vault_rekey` | 原地升级 scrypt KDF 参数并重加密 |
+| `vault_switch` | 为当前会话切换活动保险库 |
+| `vault_backup` / `vault_backup_now` | 时间戳加密备份,文件名 `<库名>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json`（库名+日期一目了然）;自动保留最近 N 份 |
+| `vault_restore_backup` | 从备份还原:`mode: "merge"`（默认）把备份条目复制进当前库,出现在条目列表;`mode: "replace"` 整体覆盖（先写安全快照） |
+| `vault_vault_rename` / `vault_vault_delete` | 重命名命名库（文件移动,当前会话跟随）或永久删除（default 库受保护） |
+| `vault_search_system` | 在 Chrome / 钥匙串中搜索站点与用户名——绝不暴露密码 |
+| `vault_backup_status` | 报告距上次备份已过去多少天（1Password 式备份提醒） |
+| `vault_search_history` | 搜索时包含已软删除（回收站）的条目,并标注其删除状态 |
+| `vault_backups` | 列出可用的加密备份文件（最新在前）及其绝对路径与时间戳 |
+
+**典型用法**:把 SSH 凭据存成 `kind: ssh`(host/port/username/password 或 privateKey),让模型先 `vault_search` 找到主机、再 `vault_get` 取连接信息;`api-key`/`oauth` 条目用于 API 网关的 access/refresh token 轮换。
 
 ## 安装
 
@@ -470,7 +541,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
-pnpm test       # 运行 501 项 vitest 测试
+pnpm test       # 运行 506 项 vitest 测试
 ```
 
 > 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
@@ -488,7 +559,7 @@ pnpm gen:icons -- --check            # 与上游不一致时退出 1
 常用命令:
 
 ```sh
-# 单元 + 集成测试（vitest，501 项）
+# 单元 + 集成测试（vitest，506 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
@@ -501,7 +572,7 @@ pnpm build           # = build:host (tsc) + build:client (tsdown)
 npm pack
 ```
 
-仓库内所有测试通过：501/501（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+仓库内所有测试通过：506/506（crypto/TOTP/密码生成/store CRUD/网关/集成）。
 
 浏览器侧检查跑在真实 `dsh web` 上（不属于 vitest），且**一律拒绝在 default 库上运行**：
 

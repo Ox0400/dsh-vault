@@ -27,7 +27,7 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 
 | Field | Description |
 |---|---|
-| `kind` | `login` (default) / `ssh` / `api-key` / `secret` / `oauth` / `custom` |
+| `kind` | `login` (default) / `ssh` / `api-key` / `secret` / `oauth` / `cookie` / `card` / `custom` |
 | `username` / `email` / `phone` | Account identity |
 | `password` | The password |
 | `host` / `port` | SSH host and port (e.g. `db.internal` / `2222`) |
@@ -37,35 +37,46 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `accessToken` / `refreshToken` / `expiresAt` | OAuth token pair and expiry (epoch millis) |
 | `otpSecret` | TOTP secret (bare Base32 or otpauth:// URI) |
 | `url` / `notes` / `tags` | Metadata |
+
+Two kinds carry their own shape: a `cookie` entry stores a captured browser session, and a `card` entry stores `cardNumber` / `cardExpiry` (MM/YY) / `cardCvv` / `cardHolder` — search summaries expose only the expiry and holder, never the number or CVV, and the Bitwarden JSON export maps it to a `card` item (type 3, brand inferred).
 | `fields` | Arbitrary key/value pairs (e.g. `{"region": "us-east-1"}`), searchable |
 
 ## Tools
 
+113 tools in five groups. **Basic** is what a default install registers; the rest are switched on through [Tool profiles](#tool-profiles) (Settings → Credentials → Permissions → Model tools).
+
+### Basic (registered by default) — 11
+
+Eleven tools. Everything below is opt-in.
+
 | Tool | Purpose |
 |---|---|
-| `vault_add` | Add an entry (any combination of fields; empty strings/arrays are ignored) |
-| `vault_get` | Read a full entry by id (including all secrets) |
+| `vault_list` | List available vaults in the vault directory (one .json file per vault, excluding access/meta/export files) |
 | `vault_search` | Search titles/categories/usernames/emails/phones/hosts/ports/URLs/notes/tags/custom fields (incl. numeric/boolean/nested values; whitespace-separated terms OR-match); optional `createdAfter`/`createdBefore` epoch-millis filters; returns secret-free summaries; `limit` must be an integer 1–100 |
+| `vault_get` | Read a full entry by id (including all secrets) |
+| `vault_add` | Add an entry (any combination of fields; empty strings/arrays are ignored) |
 | `vault_update` | Update fields by id (unprovided fields kept; empty string clears a field; `title` is renamable; `rotationDays: 0` clears rotation = never rotate) |
-| `vault_compare` | Compare two entries field by field (`onlyA`/`onlyB`/`differ`/`equal`) — field names only, never secret values |
-| `vault_rename` | Rename an entry in one call (shortcut for `vault_update`) |
 | `vault_delete` | Soft-delete an entry (moves it to the trash, still encrypted on disk) |
-| `vault_restore` / `vault_purge` / `vault_restore_recent` | Bring a trashed entry back / purge it / undo the last delete |
-| `vault_lock` / `vault_unlock` | Explicitly lock the vault (wipe the in-memory key) / re-unlock it |
+| `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
+| `vault_clipboard` | Fetch one entry secret field for direct copy (username/password/apiKey/...) |
 | `vault_totp` | Generate the current 6-digit code for a stored otpSecret (or a bare Base32 / otpauth URI) |
 | `vault_generate_password` | Generate a strong random password (length/classes/grouping) **or a memorable passphrase** (`passphrase: true`, EFF-style word list, `words`/`separator`/`wordDigits`) |
 | `vault_strength` | Zero-dependency password strength estimate (score 0–100, weak/fair/strong/very strong) |
+
+### Management (Standard and up) — 53
+
+Favourites, tags, history, health, templates, attachments, card and 2FA detail.
+
+| Tool | Purpose |
+|---|---|
+| `vault_compare` | Compare two entries field by field (`onlyA`/`onlyB`/`differ`/`equal`) — field names only, never secret values |
+| `vault_rename` | Rename an entry in one call (shortcut for `vault_update`) |
+| `vault_restore` / `vault_purge` / `vault_restore_recent` | Bring a trashed entry back / purge it / undo the last delete |
+| `vault_lock` / `vault_unlock` | Explicitly lock the vault (wipe the in-memory key) / re-unlock it |
 | `vault_password_history` | List an entry's previous passwords (1Password/Bitwarden-style, newest first, capped at 10; current password excluded) |
-| `kind: card` | Bank/credit-card entries: `cardNumber`/`cardExpiry` (MM/YY)/`cardCvv`/`cardHolder`; search summaries expose expiry + holder only (never the number or CVV); Bitwarden JSON export maps to a `card` item (type 3, brand inferred) |
 | `vault_password_rollback` | Restore an entry password to a stored history entry (current password is archived first, so it is reversible) |
-| `vault_recovery_code` / `vault_verify_recovery` / `vault_recovery_status` | One-time vault recovery code (1Password/Bitwarden-style): 32-char code shown once, only its SHA-256 hash is stored; verify possession of the code; check whether one is set |
-| `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
-| `vault_backup` | Timestamped encrypted backup with retention; optional `note` |
-| `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
-| `vault_bulk_delete` | Soft-delete entries matching a query/kind/tag or explicit ids; `confirm: true` required (dry-run by default); trashed entries are restorable |
 | `vault_apply_tags` | Bulk add/remove/replace tags on every entry matching a query (dry-run supported, no secrets) |
 | `vault_totp_uri` | Build an otpauth:// provisioning URI for a stored or bare TOTP secret |
-| `vault_switch` / `vault_list` | Switch the active vault by name / list available vaults |
 | `vault_rotation` | Report expired / due-for-rotation / expiring-soon credentials; `soonWindowDays` (1-90, default 7) tunes the soon horizon (no secrets) |
 | `vault_health` | Vault health scan: weak/reused passwords, missing 2FA, insecure http:// sites, and an overall security score (0–100) |
 | `vault_watchtower` | Watchtower-style per-entry risk analysis (1Password/Bitwarden-inspired): flags short/weak passwords, keyboard sequences, embedded years, common passwords, reuse, http:// sites, missing 2FA, expiry — with a 0–100 score and good/warn/poor verdict (no secrets); entry rows show ⚠ badges |
@@ -79,13 +90,42 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_verify` | Verify one entry or audit every entry (`all: true`) for per-kind completeness, port/expiry sanity (no secrets) |
 | `vault_duplicates` | Find duplicate groups: `mode` = `both` (default) / `title` / `content` (no secrets) |
 | `vault_report` | Printable inventory with expiry/rotation columns and a stats footer (no secrets) |
-| `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
-| `vault_backup` / `vault_backup_now` | Timestamped encrypted backup named `<vault>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json` (owning vault + date visible); retention pruning keeps the newest N (`maxBackups`, default 10) |
-| `vault_restore_backup` | Restore from a backup: `mode: "merge"` (default) copies the backup entries INTO the current vault so they appear in the entries list; `mode: "replace"` overwrites the whole vault with a safety snapshot first |
-| `vault_vault_rename` / `vault_vault_delete` | Rename a named vault (file moves, active session follows) or permanently delete one (default vault protected) |
 | `vault_match_url` | Find login entries matching a URL (Bitwarden/1Password-style: exact host, subdomain, parent domain, path-prefix; www./port normalization) with a 0–100 score — never returns the password |
-| `vault_fill` | Find the entry matching a host/URL/username/title and return its credentials |
 | `vault_env` | Render env-flagged entries (tags contain `env`) as `KEY=VALUE` lines — see [Environment export](#environment-export) |
+| `vault_copy` | Copy an entry (secrets included) into another named vault |
+| `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style; built-ins now include Wi-Fi, Server, Database, Identity, Bank account, Card (1Password-inspired) |
+| `vault_notes` | Append to or replace the free-form notes of an entry (a convenient shortcut for vault_update) |
+| `vault_changes` | List vault activity within a time window (default 24h): entries created, updated, or soft-deleted, newest first |
+| `vault_find` | Fuzzy-find entries: matching ignores case, punctuation and whitespace, so `gh` reaches `GitHub` |
+| `vault_mask` | Redact likely credentials in arbitrary text (API keys, tokens, passwords, private keys) so it can be logged or quoted safely |
+| `vault_history` | Show recent activity on the vault within this process, newest first: mutations (add/update/delete/restore/purge/merge/rollback) plus reads (read, totp), searches and vault switches. Records only the action, entry title and timestamp — never passwords, keys, usernames or other secret values |
+| `vault_recent` | List the most recently created or updated entries (newest first), as secret-free summaries |
+| `vault_pin` | Pin (favorite) an entry so it ranks first in search and list |
+| `vault_unpin` | Unpin an entry (remove its favorite flag) |
+| `vault_tags` | List every tag used across entries with the number of entries per tag |
+| `vault_generate_username` | Generate a random username or an anonymous email suggestion |
+| `vault_rotate_password` | Generate a new strong password, store it on the entry, and return the new value for the caller to hand to the target service |
+| `vault_touch` | Mark an entry as recently used (update its updatedAt without changing content) |
+| `vault_note_secret` | Store a single secret under a generated title (a one-off note without naming it) |
+| `vault_search_advanced` | Search with multiple optional criteria: title substring, username/email substring, kind, tag, created-after/before (epoch millis), and favorite-only |
+| `vault_count` | Return the number of active entries (optionally filtered by kind and/or tag) |
+| `vault_set_icon` | Set the UI icon (emoji) and/or accent color on an entry |
+| `vault_describe` | Describe an entry in plain language (kind, identity, host/url, tags, expiry) without revealing secrets |
+| `vault_last_modified` | List entries most recently modified (updatedAt), newest first |
+| `vault_has` | Quickly check whether the vault contains a credential matching a title/username/host (substring, or exact title when exact is set) |
+| `vault_autofill_check` | Check whether the vault has a credential usable for a URL/host: returns the best matching entry (username/email only, never the secret) or a not-found verdict |
+| `vault_undelete_all` | Restore ALL soft-deleted (trashed) entries back to the active set |
+| `vault_get_many` | Read multiple entries by id, returning only the requested fields for each |
+
+### Import & export (Full, or Custom → Import-export) — 27
+
+Migrating in and out of other password managers, bulk operations, and env/CSV/1Password/Bitwarden/KeePass/pass interop.
+
+| Tool | Purpose |
+|---|---|
+| `vault_import_csv` | Bulk-import credentials from a CSV file (custom columns become fields; `overwrite: true` merges fields into existing entries instead of duplicating) |
+| `vault_bulk_delete` | Soft-delete entries matching a query/kind/tag or explicit ids; `confirm: true` required (dry-run by default); trashed entries are restorable |
+| `vault_export` / `vault_import` | Portable encrypted backup/migration of the whole vault (separate export password) |
 | `vault_export_bitwarden` / `vault_import_bitwarden` | Bitwarden/Vaultwarden JSON interop (full field mapping, overwrite support) |
 | `vault_import_bitwarden_encrypted` | Decrypt a Bitwarden password-protected JSON export (PBKDF2/Argon2id + HKDF → AES-256-CBC + HMAC) and import it; pass the export passphrase |
 | `vault_import_manager_csv` | Password-manager CSV auto-detected by header: Bitwarden (`login_uri`/`login_username`/…), 1Password 8, Dashlane, NordPass, Keeper, LastPass (`fav`/`grouping`/`extra`); dryRun preview |
@@ -96,7 +136,23 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_import_keepass_xml` | KeePass 2.x XML export (plaintext or `********` masked values) |
 | `vault_import_chrome` / `vault_import_keychain` | Import passwords from Chrome's Login Data (macOS keychain / Linux keyring or `peanuts` / Windows DPAPI) or the macOS Keychain (internet passwords `inet` by default — the ones that actually back website logins — or generic `genp` via `classes`; session cache + preview, no prompt spam); every file import supports `dryRun` preview |
 | `vault_import_firefox` | Firefox profile import (logins.json + key4.db, NSS 3DES / PBES2-AES, primary-password aware) |
-| `vault_search_system` | Search Chrome / Keychain for sites & usernames — never exposes passwords |
+| `vault_export_totp` | List every entry that has a TOTP secret, with its title and issuer label |
+| `vault_bulk_export` | Export ALL entries (including secrets) as a JSON file for audit or migration |
+| `vault_export_browser` | Export login entries in the browser password-manager CSV format (name,url,username,password) for importing into Chrome/Firefox/Edge |
+| `vault_migrate_keepass` | Export entries in KeePass 2.x import CSV format (Group,Title,Username,Password,URL,Notes) for migrating into KeePass |
+| `vault_export_keepass_xml` | Export entries as a KeePassXC-compatible XML document (KeePass 2.x schema) |
+| `vault_import_browser` | Import a browser password-manager CSV (name,url,username,password — Chrome/Firefox/ Edge export format) |
+| `vault_export_wallet` | Export entries as a directory tree of files compatible with pass (the standard Unix password manager): one file per entry containing the password, with metadata in comments |
+| `vault_import_wallet` | Import entries from a pass directory tree: each .gpg file (or plaintext file) becomes an entry titled by its filename; the first line is the password, remaining lines are parsed as login:/email:/url: metadata. Returns added/skipped |
+| `vault_export_env` | Write env-flagged entries (tags contain "env") to a .env file at the given path as KEY=VALUE lines (values shell-quoted) |
+| `vault_export_csv` | Export vault entries to a CSV file (the same shape vault_import_csv accepts), optionally filtered by kind |
+
+### Browser sessions (Full, or Custom → Browser sessions) — 8
+
+Capturing and replaying cookie sessions; needs the optional `playwright-core`.
+
+| Tool | Purpose |
+|---|---|
 | `vault_session_open` | Open a real headed browser window at a URL so the user can log in manually (password, 2FA, captcha) — the portable way to capture login state for sites that block embedding — requires the optional `playwright-core` |
 | `vault_session_collect` | Collect every cookie of an open browser session (incl. HttpOnly) and save it as a `cookie` entry |
 | `vault_session_import` | Save session cookies from pasted JSON (devtools export shape) or a raw `Cookie` header string — the no-browser alternative |
@@ -105,8 +161,23 @@ Each record has a `title`, an optional `kind`, and any combination of fields:
 | `vault_session_export` | Export a saved session as a `Cookie` header value, a Netscape cookie-jar file (curl `-b`), raw JSON (Playwright `addCookies` shape), or a ready-to-run Playwright snippet |
 | `vault_session_close` | Close an open browser login session (collected cookies stay in the vault) |
 | `vault_session_prune` | Remove expired cookies from a saved session (session cookies are kept); `preview: true` reports without writing |
-| `vault_copy` | Copy an entry (secrets included) into another named vault |
-| `vault_templates` | Built-in + user-defined templates (save/list/remove), KeePassXC-style; built-ins now include Wi-Fi, Server, Database, Identity, Bank account, Card (1Password-inspired) | Built-in + user-defined templates (save/list/remove), KeePassXC-style |
+
+### Backups & vault files (Full, or Custom → Backups & files) — 14
+
+Backups, vault switching, rekeying, recovery codes and system search.
+
+| Tool | Purpose |
+|---|---|
+| `vault_recovery_code` / `vault_verify_recovery` / `vault_recovery_status` | One-time vault recovery code (1Password/Bitwarden-style): 32-char code shown once, only its SHA-256 hash is stored; verify possession of the code; check whether one is set |
+| `vault_rekey` | Upgrade the vault to fresh scrypt KDF parameters in place |
+| `vault_switch` | Switch the active vault for this session |
+| `vault_backup` / `vault_backup_now` | Timestamped encrypted backup named `<vault>-backups-YYYY-MM-DD_HH-MM-SS-<hex>.json` (owning vault + date visible); retention pruning keeps the newest N (`maxBackups`, default 10) |
+| `vault_restore_backup` | Restore from a backup: `mode: "merge"` (default) copies the backup entries INTO the current vault so they appear in the entries list; `mode: "replace"` overwrites the whole vault with a safety snapshot first |
+| `vault_vault_rename` / `vault_vault_delete` | Rename a named vault (file moves, active session follows) or permanently delete one (default vault protected) |
+| `vault_search_system` | Search Chrome / Keychain for sites & usernames — never exposes passwords |
+| `vault_backup_status` | Report how many days have passed since the last backup file was written (1Password-style backup reminder; new-style `<vault>-backups-<date>.json` and legacy `vault-backup-<epoch>.json` names are both recognized). Returns daysSinceBackup and a suggestion |
+| `vault_search_history` | Search including soft-deleted (trashed) entries, marked with their deleted state |
+| `vault_backups` | List available encrypted `vault-backup-*.json` files (newest first) with their absolute paths and timestamps |
 
 **Typical workflows**: store an SSH credential (`kind: ssh` + host/port/username/password or privateKey) and have the model `vault_search` for the host then `vault_get` the connection details; keep `api-key`/`oauth` entries for API-gateway access/refresh token rotation.
 
@@ -539,7 +610,7 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # installs devDependencies (typescript/tsdown/vitest, …)
 pnpm build      # builds host lib/*.js and the browser bundle lib/client.js
-pnpm test       # runs the 501 vitest tests
+pnpm test       # runs the 506 vitest tests
 ```
 
 > Tests need harness peer packages such as `dsh-llm`/`dsh-system-prompt`; inside the harness monorepo these resolve via workspace links.
@@ -557,13 +628,13 @@ Only the glyph table is rewritten; the host→brand map (`gist.github.com`, `con
 Common commands:
 
 ```sh
-pnpm test          # unit + integration tests (vitest, 501)
+pnpm test          # unit + integration tests (vitest, 506)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
 npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
-All 501 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+All 506 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
 
 Browser checks run against a real `dsh web` instead of vitest, and every one of
 them refuses to operate on the default vault:
