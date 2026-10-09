@@ -539,21 +539,31 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # installs devDependencies (typescript/tsdown/vitest, …)
 pnpm build      # builds host lib/*.js and the browser bundle lib/client.js
-pnpm test       # runs the 496 vitest tests
+pnpm test       # runs the 501 vitest tests
 ```
 
 > Tests need harness peer packages such as `dsh-llm`/`dsh-system-prompt`; inside the harness monorepo these resolve via workspace links.
 
+The brand marks in the credential list are 68 SVG paths inlined into the browser bundle — no runtime dependency and no network call. They are generated, and the generator is committed:
+
+```sh
+npm i --no-save simple-icons@16      # 15 MB, dev-only: never a dependency of this package
+pnpm gen:icons                       # refreshes src/client/site-icons.ts
+pnpm gen:icons -- --check            # exits 1 when the table is stale
+```
+
+Only the glyph table is rewritten; the host→brand map (`gist.github.com`, `console.cloud.google.com`) is curated knowledge and is preserved. Brands that simple-icons has since removed (`amazonaws`, `slack`, `linkedin`, …) are kept and reported rather than dropped.
+
 Common commands:
 
 ```sh
-pnpm test          # unit + integration tests (vitest, 496)
+pnpm test          # unit + integration tests (vitest, 501)
 pnpm typecheck     # tsc -p tsconfig.json --noEmit
 pnpm build         # = build:host (tsc) + build:client (tsdown)
 npm pack           # optional: tarball for `dsh plugin add ./dsh-vault-0.1.1.tgz`
 ```
 
-All 496 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
+All 501 tests pass (crypto / TOTP / password generation / store CRUD / gateway / integration).
 
 Browser checks run against a real `dsh web` instead of vitest, and every one of
 them refuses to operate on the default vault:

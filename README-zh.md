@@ -470,15 +470,25 @@ git clone git@github.com:Ox0400/dsh-vault.git
 cd dsh-vault
 pnpm install    # 安装 devDependencies(typescript/tsdown/vitest 等)
 pnpm build      # 构建 host 侧 lib/*.js 与浏览器 bundle lib/client.js
-pnpm test       # 运行 496 项 vitest 测试
+pnpm test       # 运行 501 项 vitest 测试
 ```
 
 > 测试需要 harness 的 `dsh-llm`/`dsh-system-prompt` 等 peer 包,在 harness monorepo 内开发时由 workspace 链接提供。
 
+凭据列表里的品牌图标是**内联进浏览器包**的 68 条 SVG 路径 —— 没有运行时依赖,也不联网。它们是生成的,而且生成器就在仓库里:
+
+```sh
+npm i --no-save simple-icons@16      # 15 MB,仅开发用;永远不会成为本包的依赖
+pnpm gen:icons                       # 重新生成 src/client/site-icons.ts
+pnpm gen:icons -- --check            # 与上游不一致时退出 1
+```
+
+生成器只重写图标表;`gist.github.com`、`console.cloud.google.com` 这类**主机→品牌映射是人工整理的判断**,会原样保留。simple-icons 后来下架的品牌(`amazonaws`、`slack`、`linkedin` 等)会被保留并列出,而不是被静默丢掉。
+
 常用命令:
 
 ```sh
-# 单元 + 集成测试（vitest，496 项）
+# 单元 + 集成测试（vitest，501 项）
 pnpm test            # 或 npx vitest run
 
 # 类型检查
@@ -491,7 +501,7 @@ pnpm build           # = build:host (tsc) + build:client (tsdown)
 npm pack
 ```
 
-仓库内所有测试通过：496/496（crypto/TOTP/密码生成/store CRUD/网关/集成）。
+仓库内所有测试通过：501/501（crypto/TOTP/密码生成/store CRUD/网关/集成）。
 
 浏览器侧检查跑在真实 `dsh web` 上（不属于 vitest），且**一律拒绝在 default 库上运行**：
 
