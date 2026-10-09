@@ -625,10 +625,25 @@ npm publish --access public   # registry → dsh plugin add dsh-vault
 
 ## Security Boundaries & Known Limitations
 
-- Vault strength is bounded by master-password strength; use ≥ 16 characters of high entropy.
-- scrypt cost parameters (N=32768, r=8, p=1) are persisted in the document and can be raised in future versions; old documents remain decryptable.
-- Plaintext credentials exist only in process memory and during explicit `vault_get` reads; `vault_search`/`vault_update` outputs never contain passwords, keys, or tokens. Secrets returned by `vault_get` enter that tool call's result (model context) — callers should avoid repeating them in conversation.
-- This plugin targets single-machine / personal deployments; team-shared vaults are out of scope.
+### What this protects
+
+- **A vault file that leaves the machine** — a backup, a synced folder, a stolen disk. Entries are AES-256-GCM encrypted under a key derived from the master password with scrypt (N=32768, r=8, p=1, persisted in the document and raisable later; old documents stay decryptable).
+- **Other users on the same machine** — the vault and every file the CLI writes are `0600`.
+- **Secrets reaching the model's context by accident** — `vault_search` / `vault_update` never return passwords, keys or tokens, and the CLI exists so a script can read a secret without it passing through a conversation.
+- **A password embedded in config**, when you use `masterPasswordEnv` instead of `masterPassword` (see the warning above).
+
+### What this does not protect
+
+- **Another plugin in the same host process.** dsh-vault is itself a plugin: it runs in-process with the harness and decrypted entries live in that process's memory. `readonly` / `ask` / `auto` constrain **the model's tool calls** — they do not isolate plugins from one another. The harness states the same limit for its own credential store: agent tool processes run as your OS user, so it "cannot isolate secrets from the agent" ([`@deepseek-ai/dsh-credentials-local`](https://github.com/deepseek-ai/deepseek-harness/tree/main/packages/credentials/credentials-local)). Only running plugins out-of-process would change this, and no plugin can enforce that by itself.
+- **A compromised machine or user account** — a keylogger, a debugger attached to the harness process, or anything else running as you.
+- **A master password you typed into a file, a screenshot or a shell history.** Hence `masterPasswordEnv`.
+- **What the model does with a value you let it read.** `vault_get` returns it into that tool call's result, which is model context; `vault_search`/`vault_update` never expose one.
+
+### Reducing the exposure
+
+`lockTimeoutSeconds` auto-locks an idle vault and `vault_lock` locks it on demand; both wipe the in-memory key. A master key held by the OS keychain (macOS Keychain / Windows Credential Manager / libsecret) would take the plaintext password out of config and environment files — the exposure that survives a disk copy — but it would **not** create an in-process boundary, because a plugin running as you can ask the keychain for the same item. The DSH project lists an OS-keychain credentials provider as deferred work.
+
+Known limitation: this plugin targets single-machine / personal deployments; team-shared vaults are out of scope.
 
 ## Listed in
 

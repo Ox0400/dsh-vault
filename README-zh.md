@@ -547,10 +547,25 @@ npm publish --access public   # 发布 npm → dsh plugin add dsh-vault
 
 ## 安全边界与已知限制
 
-- 主密码强度决定保险库强度；建议 ≥ 16 字符高熵。
-- scrypt 成本参数（N=32768, r=8, p=1）已持久化在文档中，可随版本提升，旧文档仍可解密。
-- 明文凭据仅存在于进程内存与 `vault_get` 显式读取期间；`vault_search`/`vault_update` 的输出均不含密码、密钥与令牌。`vault_get` 返回的秘密会进入该次工具调用结果（模型上下文），调用方应避免在对话中复述。
-- 本插件面向单机/个人部署；团队共享保险库不在范围内。
+### 它保护什么
+
+- **离开这台机器的保险库文件** —— 备份、同步盘、被拿走的硬盘。条目用 AES-256-GCM 加密,密钥由主密码经 scrypt 派生(N=32768, r=8, p=1,参数持久化在文档里,以后可提升;旧文档仍可解密)。
+- **同一台机器上的其他用户** —— 保险库文件与 CLI 写出的文件都是 `0600`。
+- **秘密意外进入模型上下文** —— `vault_search` / `vault_update` 从不返回密码、密钥或令牌;CLI 的存在就是为了让脚本取密钥时不必经过一次对话。
+- **把密码写进配置文件** —— 前提是你用 `masterPasswordEnv` 而不是 `masterPassword`(见上方警告)。
+
+### 它不保护什么
+
+- **同一个宿主进程里的其他插件。** dsh-vault 自己就是个插件:它与 harness 同进程运行,解密后的条目就在那个进程的内存里。`readonly` / `ask` / `auto` 约束的是**模型的工具调用**,不是插件之间的隔离。harness 对自己的凭据存储也是同样的说法:agent 的工具进程以你的 OS 用户身份运行,因此"无法把秘密与 agent 隔离"([`@deepseek-ai/dsh-credentials-local`](https://github.com/deepseek-ai/deepseek-harness/tree/main/packages/credentials/credentials-local))。只有把插件放到独立进程运行才能改变这一点,而这不是某个插件能自己做到的。
+- **被攻陷的机器或账号** —— 键盘记录器、挂在 harness 进程上的调试器,或任何以你的身份运行的东西。
+- **你自己敲进文件、截图或 shell 历史里的主密码。** 所以才要 `masterPasswordEnv`。
+- **模型拿到值之后做什么。** `vault_get` 会把值放进该次工具调用的结果,也就是模型上下文;`vault_search`/`vault_update` 则从不暴露。
+
+### 减少暴露面
+
+`lockTimeoutSeconds` 会在空闲后自动锁库,`vault_lock` 可以随时手动锁;两者都会清空内存中的密钥。把主密钥交给操作系统钥匙串(macOS Keychain / Windows Credential Manager / libsecret)能让明文密码**不再出现在配置与环境文件里** —— 也就是"磁盘被复制后仍然存在"的那部分暴露 —— 但它**不会**造出进程内边界:以你的身份运行的插件同样可以向钥匙串索取同一个条目。DSH 项目目前把"OS 钥匙串凭据提供方"列为待做事项。
+
+已知限制:本插件面向单机/个人部署;团队共享保险库不在范围内。
 
 ## 已收录于
 
