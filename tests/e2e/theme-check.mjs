@@ -1,5 +1,5 @@
 import { chromium } from '/Users/zhipeng/Desktop/work/codes/deepseek-harness/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/index.mjs'
-import { EXE, TEST_VAULT, activeVault, assertActiveVault, authedContext, installDialogs, useVault } from './helper.mjs'
+import { EXE, TEST_VAULT, activeVault, assertActiveVault, authedContext, installDialogs, useVault, vaultSection } from './helper.mjs'
 import { writeFileSync } from 'node:fs'
 
 const b = await chromium.launch({ executablePath: EXE, headless: true })
@@ -8,12 +8,13 @@ const check = (n, ok, x = '') => { R.push({ n, ok }); console.log(`${ok ? 'PASS'
 const tab = (p, name) => p.evaluate((t) => { const el = [...document.querySelectorAll('button,[role=tab],span,li')].find(x => (x.textContent || '').trim() === t); el?.click() }, name)
 const theme = (p, name) => p.evaluate((n) => { const el = [...document.querySelectorAll('button')].find(x => (x.textContent || '').trim() === n); el?.click() }, name)
 
-const probe = (p) => p.evaluate(() => {
-  const sec = document.querySelector('section')
+// Scoped to the plugin's own section: the shell has a section pane of its own,
+// and its spinner's `circle` used to satisfy the "ring is painted" check.
+const probe = (p) => vaultSection(p).evaluate((sec) => {
   const cs = sec ? getComputedStyle(sec) : null
   const tok = (n) => cs ? cs.getPropertyValue(n).trim() : null
-  const track = document.querySelector('svg circle:first-child')
-  const box = document.querySelector('[class*="attachBox"]')
+  const track = sec ? sec.querySelector('svg circle:first-child') : null
+  const box = sec ? sec.querySelector('[class*="attachBox"]') : null
   const bs = box ? getComputedStyle(box) : null
   const parent = box ? box.parentElement : null
   return {
@@ -65,22 +66,25 @@ try {
     return { title: title.value, saved: save !== undefined }
   })
   await p.waitForTimeout(2200)
-  const rows = await p.evaluate(() => [...document.querySelectorAll('[class*="rowMain"]')].map(x => (x.textContent || '').slice(0, 24)))
+  const rows = await vaultSection(p).evaluate((sec) => [...sec.querySelectorAll('[class*="rowMain"]')].map(x => (x.textContent || '').slice(0, 24)))
   check('entry seeded in the throwaway vault', rows.length > 0, JSON.stringify(filled) + ' rows=' + JSON.stringify(rows))
 
   // ---- expand the row: the detail box (with its attach row) renders ----
-  await p.evaluate(() => { document.querySelector('[class*="rowMain"]')?.click() })
+  await vaultSection(p).evaluate((sec) => { sec.querySelector('[class*="rowMain"]')?.click() })
   await p.waitForTimeout(1500)
 
   // ---- attach a file through the real file input ----
   const tmp = '/tmp/dsh-attach-check.txt'
   writeFileSync(tmp, 'dsh-vault attachment E2E\n')
-  if (await p.locator('input[type=file]').count() > 0) {
-    await p.locator('input[type=file]').first().setInputFiles(tmp)
+  // Scoped to the attach row: the shell has its own file input, and an
+  // unscoped `.first()` sent this file to the composer instead.
+  const attachInput = vaultSection(p).locator('[class*="attachBox"] input[type=file]')
+  if (await attachInput.count() > 0) {
+    await attachInput.first().setInputFiles(tmp)
     await p.waitForTimeout(2200)
   }
-  const attachInfo = await p.evaluate(() => {
-    const box = document.querySelector('[class*="attachBox"]')
+  const attachInfo = await vaultSection(p).evaluate((sec) => {
+    const box = sec.querySelector('[class*="attachBox"]')
     return box ? { text: (box.textContent || '').trim().slice(0, 60), items: box.querySelectorAll('[class*="detailItem"]').length } : null
   })
   check('attachment uploaded and listed in the attach row', attachInfo !== null && attachInfo.items >= 1, JSON.stringify(attachInfo))
@@ -97,9 +101,9 @@ try {
   await tab(p, '凭据库'); await p.waitForTimeout(1800)
   // make sure the row is expanded in dark mode too (click only when needed)
   for (let i = 0; i < 3; i++) {
-    const open = await p.evaluate(() => document.querySelector('[class*="attachBox"]') !== null)
+    const open = await vaultSection(p).evaluate((sec) => sec.querySelector('[class*="attachBox"]') !== null)
     if (open) break
-    await p.evaluate(() => { document.querySelector('[class*="rowMain"]')?.click() })
+    await vaultSection(p).evaluate((sec) => { sec.querySelector('[class*="rowMain"]')?.click() })
     await p.waitForTimeout(1300)
   }
   const dark = await probe(p)

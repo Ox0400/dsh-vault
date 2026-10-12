@@ -1,5 +1,5 @@
 import { chromium } from '/Users/zhipeng/Desktop/work/codes/deepseek-harness/node_modules/.pnpm/playwright-core@1.61.1/node_modules/playwright-core/index.mjs'
-import { EXE, TEST_VAULT, activeVault, authedContext, installDialogs, openSettings, useVault } from './helper.mjs'
+import { EXE, TEST_VAULT, activeVault, authedContext, installDialogs, openSettings, useVault, vaultSection } from './helper.mjs'
 
 const b = await chromium.launch({ executablePath: EXE, headless: true })
 const R = []
@@ -8,8 +8,9 @@ const tab = (p, name) => p.evaluate((t) => { const el = [...document.querySelect
 const theme = (p, name) => p.evaluate((n) => { const el = [...document.querySelectorAll('button')].find(x => (x.textContent || '').trim() === n); el?.click() }, name)
 
 // Parse a computed colour into [r,g,b,a] and compute WCAG contrast over a bg.
-const probe = (p) => p.evaluate(() => {
-  const sec = document.querySelector('section')
+// The probe runs INSIDE the plugin's section, so its `--v-*` tokens and its
+// panels are read rather than the shell's own section pane.
+const probe = (p) => vaultSection(p).evaluate((sec) => {
   const paint = (el) => { if (!el) return null; const cs = getComputedStyle(el); return { color: cs.color, fontSize: cs.fontSize, opacity: cs.opacity } }
   const out = {}
   // the trash empty state lives inside OUR section (DSH has its own "空面板")

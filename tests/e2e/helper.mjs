@@ -80,6 +80,24 @@ export function answerPrompt(page, value) {
  * the active vault — reading that one made the guard believe a switch had
  * happened while writes still landed in the previously active vault.
  */
+/**
+ * Locator for the Vault settings section — never "the first `<section>`".
+ *
+ * The shell renders its own section pane ahead of the plugin's, so
+ * document-wide selectors now reach harness UI instead of this plugin's:
+ * `document.querySelector('section')` returned an element with no `--v-*`
+ * tokens (every theme probe came back empty), and an unscoped
+ * `input[type=file]` handed the attach upload to the composer's file input, so
+ * the attach row stayed empty and the assertion failed for the wrong reason.
+ *
+ * Matched by a plugin class *suffix* (`vaultHeader`), so a rebuild that changes
+ * the hashed prefix cannot break it, and `.last()` takes the innermost match
+ * because a wrapping section also "contains" the plugin's markup.
+ */
+export function vaultSection(page) {
+  return page.locator('section').filter({ has: page.locator('[class*="vaultHeader"]') }).last()
+}
+
 export async function activeVault(page) {
   return page.evaluate(() => {
     const all = [...document.querySelectorAll('select')]
