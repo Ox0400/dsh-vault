@@ -58,7 +58,7 @@ async function withContext<T>(
     ctx.registry.delete(VaultPlugin)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 }
 
@@ -726,7 +726,7 @@ test('vault_switch changes the active vault and vault_list reports it', async ()
   }, { name: 'switchtest' })
   } finally {
     process.env.DSH_HOME = oldHome
-    await rm(tmpHome, { recursive: true, force: true })
+    await rm(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 })
 
@@ -1739,7 +1739,7 @@ test('vault_import_csv with overwrite updates existing entries instead of duplic
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { password: string; username: string } }
     assert.equal(full.entry.password, 'newpass')
     assert.equal(full.entry.username, 'second')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -1920,7 +1920,7 @@ test('vault_import overwrite replaces entries by id', async () => {
     const afterMerge = await call(ctx, 'vault_get', { id: a.id }) as { entry: { title: string; username: string } }
     assert.equal(afterMerge.entry.title, 'Changed', 'merge keeps existing title')
     assert.equal(afterMerge.entry.username, 'orig-user')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW3
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW3' })
 })
@@ -1983,7 +1983,7 @@ test('vault_export_csv round-trips icon/color/favorite/rotationDays via vault_im
     assert.equal(s.favorite, true)
     const full = await call(ctx, 'vault_get', { id: s.id }) as { entry: { rotationDays?: number } }
     assert.equal(full.entry.rotationDays, 30)
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2030,7 +2030,7 @@ test('vault_env and vault_export_env support key prefix', async () => {
     const file = join(dir, '.env')
     const w = await call(ctx, 'vault_export_env', { path: file, prefix: 'APP_' }) as { lines: number }
     assert.ok(w.lines >= 1)
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2114,7 +2114,7 @@ test('vault_export_csv filters by tag and favoriteOnly', async () => {
     const content = await readFile(file, 'utf8')
     assert.ok(content.includes('CsvFav'))
     assert.ok(!content.includes('CsvPlain'))
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2167,7 +2167,7 @@ test('vault_import_browser overwrite updates existing names', async () => {
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { username: string; password: string } }
     assert.equal(full.entry.username, 'u2')
     assert.equal(full.entry.password, 'pw2')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2238,7 +2238,7 @@ test('vault_import dryRun previews without writing', async () => {
     assert.ok(preview.imported >= 1)
     const after = await call(ctx, 'vault_count', {}) as { count: number }
     assert.equal(after.count, before.count, 'dryRun wrote nothing')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW4
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW4' })
 })
@@ -2268,7 +2268,7 @@ test('vault_export since exports only recently changed entries', async () => {
     const { readFile } = await import('node:fs/promises')
     const blob = JSON.parse(await readFile(file, 'utf8'))
     assert.equal(blob.entries.length, 1, 'only the new entry exported')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW5
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW5' })
 })
@@ -2310,7 +2310,7 @@ test('vault_import accepts a blob directly', async () => {
     assert.ok(r.imported >= 1)
     const found = await call(ctx, 'vault_search', { query: 'BlobSrc' }) as { results: Array<{ id: string }> }
     assert.equal(found.results.length, 1, 're-imported via blob')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW6
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW6' })
 })
@@ -2335,7 +2335,7 @@ test('vault_export note includes the entry count', async () => {
     await call(ctx, 'vault_add', { title: 'CntB', password: 'pw' })
     const exported = await call(ctx, 'vault_export', { path: join(dir, 'e.json') }) as { note: string; count: number }
     assert.equal(exported.count, 2)
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW7
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW7' })
 })
@@ -2392,7 +2392,7 @@ test('vault_import_csv enforces a row safety limit', async () => {
       name: 'vault_import_csv', arguments: { path: file },
     })
     assert.equal(r.isError, true, 'over-limit import rejected')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2434,7 +2434,7 @@ test('vault_export_csv includeSecrets adds a weakPassword column', async () => {
     assert.equal(weakRow[weakCol], 'true', 'weak flagged true')
     const okRow = parseCsvLine(rows.find(r => r.includes('CsvWeakB'))!)
     assert.equal(okRow[weakCol], 'false', 'strong flagged false')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2476,7 +2476,7 @@ test('vault_import rejects a future export format', async () => {
       name: 'vault_import', arguments: { path: file },
     })
     assert.equal(r.isError, true, 'future format rejected')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW8
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW8' })
 })
@@ -2537,7 +2537,7 @@ test('vault_export_bitwarden / vault_import_bitwarden round-trip', async () => {
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { password: string; otpSecret: string; username: string; url: string } }
     assert.equal(full.entry.password, 'pw-1')
     assert.equal(full.entry.otpSecret, 'GEZDGNBVGY3TQOJQ')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2555,7 +2555,7 @@ test('vault_import_browser picks up otpauth and notes columns', async () => {
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { otpSecret: string; notes: string } }
     assert.ok(full.entry.otpSecret.includes('GEZDGNBVGY3TQOJQ'))
     assert.equal(full.entry.notes, 'note here')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2638,7 +2638,7 @@ test('vault_export_csv includes health marker columns', async () => {
     assert.equal(weakRow[weakCol], 'true', 'weak flag true')
     const httpRow = parseCsvLine(rows.find(r => r.includes('HHttp'))!)
     assert.equal(httpRow[httpCol], 'true', 'http flag true')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2707,7 +2707,7 @@ test('vault_import_browser handles LastPass CSV column order', async () => {
     assert.equal(full.entry.username, 'u1')
     assert.equal(full.entry.password, 'pw1')
     assert.equal(full.entry.url, 'https://lp.example')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2724,7 +2724,7 @@ test('vault_import auto-sniffs Bitwarden JSON', async () => {
     assert.ok((r.note ?? '').includes('Bitwarden'), 'sniffed format')
     const found = await call(ctx, 'vault_search', { query: 'Sniff1' }) as { results: Array<{ id: string }> }
     assert.equal(found.results.length, 1)
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2763,7 +2763,7 @@ test('vault_import sniff honors dryRun', async () => {
     assert.ok((r.note ?? '').includes('dry run'), 'dry run noted')
     const after = await call(ctx, 'vault_count', {}) as { count: number }
     assert.equal(after.count, before.count, 'dryRun wrote nothing')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2780,7 +2780,7 @@ test('vault_export_bitwarden emits an empty login object for bare entries', asyn
     const item = doc.items.find(i => i.name === 'BareEntry')
     assert.ok(item.login !== null, 'login is not null')
     assert.deepEqual(item.login, {}, 'empty login object')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2800,7 +2800,7 @@ test('vault_export_csv TSV delimiter does not corrupt quoted fields', async () =
     await call(ctx, 'vault_export_csv', { path: file2 })
     const csv = await readFile(file2, 'utf8')
     assert.ok(csv.includes('u""1'), 'double quote doubled in CSV mode')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2815,7 +2815,7 @@ test('vault_export_csv includes createdAt/updatedAt columns', async () => {
     await call(ctx, 'vault_export_csv', { path: file })
     const content = await readFile(file, 'utf8')
     assert.ok(content.includes('createdAt') && content.includes('updatedAt'))
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2898,7 +2898,7 @@ test('vault_import_browser overwrite updates otpauth and notes', async () => {
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { otpSecret?: string; notes?: string } }
     assert.ok(full.entry.otpSecret?.includes('GEZDGNBVGY3TQOJQ'))
     assert.equal(full.entry.notes, 'note2')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2928,7 +2928,7 @@ test('vault_import sniff maps Bitwarden secure notes to custom entries', async (
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { kind?: string; notes?: string } }
     assert.equal(full.entry.kind, 'custom')
     assert.equal(full.entry.notes, 'some note')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2957,7 +2957,7 @@ test('vault_import_wallet skips gpg-encrypted files', async () => {
     const full = await call(ctx, 'vault_get', { id: found.results[0]!.id }) as { entry: { username?: string; password?: string } }
     assert.equal(full.entry.username, 'u1')
     assert.equal(full.entry.password, 'pw-plain')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 })
 
@@ -2982,7 +2982,7 @@ test('vault_export document carries the source vault name', async () => {
     const exported = await call(ctx, 'vault_export', { path: join(dir, 'e.json') }) as { note: string }
     const blob = JSON.parse(await readFile(join(dir, 'e.json'), 'utf8'))
     assert.equal(blob.vaultName, 'vault', 'source vault name recorded')
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     delete process.env.DSH_VAULT_EXPORT_PW9
   }, { exportPasswordEnv: 'DSH_VAULT_EXPORT_PW9' })
 })
@@ -3103,7 +3103,7 @@ test('vault_session_import_file imports a Netscape jar and round-trips with expo
       const exported = await call(ctx, 'vault_session_export', { id: imported.id, format: 'header' }) as { text: string }
       assert.ok(exported.text.includes('sid=abc123'))
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     }
   })
 })
@@ -3214,7 +3214,7 @@ test('vault_add card entry, search summary hides secrets, export_bitwarden maps 
       expect(item.card.expMonth).toBe(8)
       expect(item.card.expYear).toBe(2030)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     }
   })
 })
@@ -3260,7 +3260,7 @@ test('vault_export_1password produces a 1PUX archive that re-imports', async () 
       assert.equal(card.category, 'CREDIT_CARD')
       assert.equal(card.details.fields.find((f: { designation: string }) => f.designation === 'cc-number').value, '4111111111111111')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     }
   })
 })
@@ -3294,7 +3294,7 @@ test('vault_attach / vault_attachments / vault_attachment / vault_detach round t
       const after = await call(ctx, 'vault_attachments', { id: a.id }) as { count: number }
       assert.equal(after.count, 0)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     }
   })
 })

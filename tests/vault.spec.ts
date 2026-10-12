@@ -140,7 +140,7 @@ async function withTempVault<T>(run: (path: string) => Promise<T>): Promise<T> {
   try {
     return await run(path)
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 }
 
@@ -600,7 +600,7 @@ test('store: password history records changes and supports rollback', async () =
   expect(after.some(h => h.password === 'pass-3')).toBe(true) // current was archived
   // Rolling back to a non-existent entry is a no-op.
   expect(await store.rollbackPassword(entry.id, 12345)).toBeUndefined()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })
 
 test('store: password history caps at 10 and persists', async () => {
@@ -616,7 +616,7 @@ test('store: password history caps at 10 and persists', async () => {
   const store2 = await openVault({ masterPassword: 'pw', path })
   const reloaded = store2.passwordHistoryOf(entry.id)
   expect(reloaded).toHaveLength(10)
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })
 
 test('store: card entries persist card fields and survive reload', async () => {
@@ -640,7 +640,7 @@ test('store: card entries persist card fields and survive reload', async () => {
   expect(sum?.cardExpiry).toBe('12/28')
   expect((sum as { cardNumber?: unknown }).cardNumber).toBeUndefined()
   expect((sum as { cardCvv?: unknown }).cardCvv).toBeUndefined()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })
 
 test('store: audit trail records reads/searches/totp with secrets never leaking', async () => {
@@ -682,7 +682,7 @@ test('store: audit trail records reads/searches/totp with secrets never leaking'
   for (const key of ['password', 'apiKey', 'username', 'otpSecret', 'secret']) {
     assert.ok(!dump.includes(key), `audit must not carry the field name "${key}"`)
   }
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })
 
 test('store: audit trail persists across reopen and stays encrypted on disk', async () => {
@@ -725,5 +725,5 @@ test('store: audit trail persists across reopen and stays encrypted on disk', as
   assert.ok(!dump.includes('x-super-long-secret-999'))
   assert.ok(!dump.includes('username'))
 
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })

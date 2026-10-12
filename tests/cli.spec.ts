@@ -42,7 +42,7 @@ async function withVault(
   try {
     await run(io, home, vaultPath)
   } finally {
-    await rm(home, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 }
 

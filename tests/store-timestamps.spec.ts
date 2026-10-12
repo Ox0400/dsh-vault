@@ -29,7 +29,7 @@ test('add/update reject a timestamp that is not a finite number', async () => {
     // zero still means "no expiry" and clears the field
     expect((await store.update(ok.id, { expiresAt: 0 }) as { expiresAt?: number }).expiresAt).toBeUndefined()
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 })
 
@@ -56,7 +56,7 @@ test('a poisoned timestamp already on disk is healed when the vault opens', asyn
     const again = await openVault({ path, masterPassword: 'pw' })
     expect(again.list()[0]!.expiresAt).toBe(4102444800000)
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 })
 
@@ -88,6 +88,6 @@ test('envKeys are validated and the legacy single name is folded in', async () =
     expect(healed.envKeys).toEqual(['OLD_SPELLING'])
     expect((healed as Record<string, unknown>).envKey).toBeUndefined()
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 })

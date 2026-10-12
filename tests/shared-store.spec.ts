@@ -34,7 +34,7 @@ async function withContext<T>(run: (ctx: Context, dir: string) => Promise<T>): P
     ctx.registry.delete(VaultPlugin)
     ctx.registry.delete(ToolRuntime)
     ctx.registry.delete(SystemPrompt)
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   }
 }
 

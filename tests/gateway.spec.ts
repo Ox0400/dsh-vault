@@ -18,7 +18,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 async function rmSafe(dir: string): Promise<void> {
   for (let attempt = 0; attempt < 40; attempt++) {
     try {
-      await rm(dir, { recursive: true, force: true })
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
       return
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw err
@@ -1105,7 +1105,7 @@ test('VaultGateway export1pux / exportBitwarden write archives', async () => {
       const doc = JSON.parse(await readFile(bw, 'utf8'))
       expect(doc.items[0].name).toBe('GWExport')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     }
   })
 })
