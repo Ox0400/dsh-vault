@@ -1,6 +1,6 @@
 # 主密钥托管方案（调研与设计草案）
 
-> 状态：**待评审**。本文先回答"怎么做、会不会弹窗、能不能用三方托管"，等确定方案后再实现。
+> 状态：**调研完成,待你拍板**（§7 有 6 个待定问题）。三路调研（macOS 语义 / Linux / 三方工具）+ 本机实测都已收进本文；确定方案后再实现。
 > 所有标 🔬 的结论都有本机实测支撑；标 📚 的来自文档（附来源）；标 ⚠️ 的是未决/有风险的假设。
 
 ## 0. 一句话结论（先给答案）
@@ -201,8 +201,19 @@ interface VaultFile { version: number; kdf: KdfParams; verify: EncryptedBlob; en
 4. **照抄 AWS 文档里的三条警告**：① **绝不要把秘密写进 stderr**（SDK/CLI 会捕获进日志）；② **能改配置的人就能改这条命令**，所以配置文件权限要收紧（README 已要求 `0600`）；③ **命令用绝对路径**，不要依赖环境变量与 `~` 展开。
 5. **必须设 `stdin = /dev/null`**：`secret-tool store`、`pass` 这类会读到 EOF 为止，继承来的 stdin 可能让它永远挂着。
 6. **可引用的真实翻车案例**：claude-code 的 issue 记录过"钥匙串条目写入时没带受信应用列表 → **每次读凭据都弹一次**"——正是我们用"`security` 写、`security` 读"避开的坑；Apple 自己对 `-A`/未签名的警告是"另一个应用可以**冒充**它来获得访问"（伪装 / TOCTOU）。
+7. **先例**：Docker 的 credential helper 协议就是同一个形状——`docker-credential-<name> get` 从 stdin 读请求、**把 JSON 写到 stdout**；`gh` 首选系统凭据库、同时保留 `GH_TOKEN` 供自动化。这说明"命令 + stdout"这条路是业界已经验证过的接口形态，不是我们的发明。
 
-### 4.4 Windows：⚠️ 预期"读回凭据"不可行（`cmdkey` 只写不读，读需要原生 addon 或 DPAPI）。备选是 **DPAPI 加密文件**（`CryptProtectData` 绑定当前用户，无弹窗），但那需要原生调用；纯 Node 方案有限。待确认。
+**这一节的诚实结论（要写进 README，别让用户误解）**：命令型 provider **并不能为每个后端消除"盘上有明文"的问题** —— 真正开箱即无提示的只有 **Vault**（token 文件）与 **sops+age**（密钥文件），而那两个本身就是盘上的秘密；`pass` 靠 gpg-agent 有货真价实的跨进程缓存；**1Password 只有服务账号才真正无提示**，其桌面集成是 tty 绑定的，更适合交互式 CLI；**Bitwarden 不保存主密码就无法无提示**；**KeePassXC 需要 key file，而 key file 也是盘上的秘密**。它**统一了接口**，让用户按自己的威胁模型在这条"便利 ↔ 安全"的曲线上选点 —— 这是能诚实给出的最大价值。
+
+### 4.4 Windows：**CLI 这条路不存在**，要支持就得接受原生依赖（建议做成可选 peer）
+
+查证结论：
+
+- **没有能从命令行读回凭据的工具**：`cmdkey` 只能增删/列出元数据，不显示密码（Microsoft Q&A 里对"用 CMD 取回密码"的回答就是做不到）。所以 §4.3 那套"命令 + stdout"的机制**在 Windows 上没有等价物**。
+- **标准做法是原生绑定**：事实上的现代选择是 [`@napi-rs/keyring`](https://registry.npmjs.org/@napi-rs/keyring)（v2.1.1，2026-10-10 发布，绑定 `keyring-rs`），支持的平台以**预编译二进制**分发（darwin-x64/arm64、linux-{x64,arm64,arm,riscv64}-{gnu,musl}、win32-{x64,ia32,arm64}、freebsd-x64 共 12 个 optionalDependencies）。它正是被弃用的 `keytar`（最后发布 2022-02-17）的接替者——MSAL 的迁移 issue 就是这么做的。
+- **由此得到的设计选择**：如果要支持 Windows，**把它做成和 `playwright-core` 一模一样的可选 peer**（懒加载、缺了就退回到"交互式提示/命令型 provider"）。这样：不用 Windows 的人一个字节都不多装；用 Windows 的人只装自己平台那一个二进制；"没有运行时依赖"这句话对默认用户仍然成立。
+
+**建议**：先不做 Windows。它是唯一需要**原生依赖**的平台，而原生依赖会引入我们一直在避免的那类成本（预编译二进制、供应链、平台矩阵）。等 macOS/Linux 的 CLI 路线跑通、且真的有人要 Windows 时，再按上面的可选 peer 形态加。
 
 ## 5. 建议的设计（先给形状，等调研补细节）
 
@@ -299,4 +310,5 @@ CLI 本身也应该支持同样的来源链（`--keychain`、`DSH_VAULT_MASTER_P
 - gpg-agent 缓存与 `gpg-preset-passphrase`：<https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html>、<https://manpages.debian.org/trixie/gpg-agent/gpg-preset-passphrase.1.en.html>
 - DSH 侧：`@deepseek-ai/dsh-credentials-local` 的 Known Limitations / Dev Note（"OS-keychain provider is deferred"、seam 预留 helper-command 与 KMS）
 - 三方：1Password CLI 会话与 service account <https://www.1password.dev/cli/app-integration-security>、<https://www.1password.dev/service-accounts/use-with-1password-cli>；Bitwarden CLI <https://bitwarden.com/help/cli/>；GnuPG agent 缓存 <https://gnupg.org/documentation/manuals/gnupg/Agent-Options.html>；Vault `kv get` <https://developer.hashicorp.com/vault/docs/commands/kv/get>；sops/age 密钥来源 <https://getsops.io/docs/usage/identities/age/>；KeePassXC CLI man page
+- Windows：`cmdkey` 无法读回密码（Microsoft Q&A <https://learn.microsoft.com/en-in/answers/questions/2186595/the-cmdkey-utility-does-not-display-a-list-of-cred>）；`@napi-rs/keyring` 的包元数据（12 个平台二进制）<https://registry.npmjs.org/@napi-rs/keyring>；`keytar` 已被弃用（最后发布 2022-02-17）
 - 前人警告：AWS `credential_process` <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html>（不要把秘密写进 stderr、配置文件写入权限即命令控制权、禁用环境变量与 `~`）
