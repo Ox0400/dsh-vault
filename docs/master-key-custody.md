@@ -180,7 +180,27 @@ interface VaultFile { version: number; kdf: KdfParams; verify: EncryptedBlob; en
 
 **对设计的直接后果**：Linux 上"钥匙串"只能当作**可用则用的便利路径**（探测通过才走），**默认降级顺序**应是：钥匙串（探测通过）→ helper command（`pass`/1Password CLI 等）→ 交互式提示；并且要在文档里明说 Linux 下它**不提供跨进程保护**。
 
-### 4.3 三方托管（helper command）：⏳ 调研中
+### 4.3 三方托管（helper command）：能做，而且**不要为每家写适配器**
+
+调研结论（📚 有来源；一条在本机实测🔬）：
+
+| 工具 | 只输出值的命令 | 弹窗频率 | 无 TTY / headless |
+|---|---|---|---|
+| **1Password** | `op read "op://Vault/Item/password"`（stdout 干净） | 桌面 App 集成：**每个新终端窗口/Tab 一次生物识别**，之后 **10 分钟滑动窗口、上限 12 小时**；服务账号：**从不** | ⚠️ **App 集成的会话凭据按 tty + 启动时间派生，无 TTY 的进程适配很差**；要稳定无提示就用 **service account token** |
+| **Bitwarden** | `bw get password <id>`（需先有 `BW_SESSION`） | 会话密钥**直到 `bw lock`/登出**，不开新终端则一直有效；**没有文档化 TTL** | ⚠️ **API key 不能替代主密码**（官方明说），所以**无法在不保存主密码的前提下做到完全无提示** |
+| **pass + gpg-agent** | `pass show <path>`（单行条目干净；多行条目会多打几行） | **由 gpg-agent 缓存决定**：默认 600s 空闲（每次访问重置）、上限 7200s | ✅ **本机实测**：先以 loopback 预热 agent，再由**另一个无 TTY、无口令**的进程执行 `gpg --batch -d` → **0 秒成功、stdout 干净**；缓存冷且无 TTY 时**约 2 秒快速失败**（不是挂住）🔬 —— **唯一"天然跨进程复用"的方案** |
+| **HashiCorp Vault** | `vault kv get -field=password -mount=secret <path>` | 无（token 来自 `VAULT_TOKEN` 或 `~/.vault-token`） | ✅ 完全无提示；**官方说它不带结尾换行**（"ideal for piping"） |
+| **sops / age** | `sops decrypt --extract '["password"]' <file>` / `age -d -i <keyfile> <file.age>` | 无（密钥文件）；sops 还支持 `SOPS_AGE_KEY_CMD`（stdout 给密钥） | ✅ 需要密钥文件在盘上 |
+| **KeePassXC** | `keepassxc-cli show -q --no-password -k <keyfile> -a Password <db> <entry>` | **无 key file 时每次调用都提示**（CLI 没有 agent/缓存） | ⚠️ **裸 `show` 会输出 Title/UserName/Password/… 摘要，把值弄脏**；必须 `-a Password` |
+
+**由此得到的设计要点（比"支持哪几家"更重要）**：
+
+1. **`op` 的桌面集成依赖 tty**：从终端启动的 harness 会继承那个 tty，可能可用；launchd/守护进程上下文就不是。文档必须写清："1Password 桌面集成只在从终端启动时可用；要稳定无提示请用 service account token"。
+2. **Bitwarden 的诚实结论**：想要"零提示"就得要么保存主密码（回到方案 A 的问题），要么让用户自己把 `BW_SESSION` 交给它。不该假装能自动搞定。
+3. **结果缓存要有显式的 per-provider TTL**：AWS 的 `credential_process` 文档明确说它**不缓存**，"要缓存就在你自己的进程里做"。而我们这里缓存直接决定**弹窗频率**（例如把 1Password 的 10 分钟窗口用到极致），所以设计里要有带 TTL 的缓存，且**锁库时清空**。
+4. **照抄 AWS 文档里的三条警告**：① **绝不要把秘密写进 stderr**（SDK/CLI 会捕获进日志）；② **能改配置的人就能改这条命令**，所以配置文件权限要收紧（README 已要求 `0600`）；③ **命令用绝对路径**，不要依赖环境变量与 `~` 展开。
+5. **必须设 `stdin = /dev/null`**：`secret-tool store`、`pass` 这类会读到 EOF 为止，继承来的 stdin 可能让它永远挂着。
+6. **可引用的真实翻车案例**：claude-code 的 issue 记录过"钥匙串条目写入时没带受信应用列表 → **每次读凭据都弹一次**"——正是我们用"`security` 写、`security` 读"避开的坑；Apple 自己对 `-A`/未签名的警告是"另一个应用可以**冒充**它来获得访问"（伪装 / TOCTOU）。
 
 ### 4.4 Windows：⚠️ 预期"读回凭据"不可行（`cmdkey` 只写不读，读需要原生 addon 或 DPAPI）。备选是 **DPAPI 加密文件**（`CryptProtectData` 绑定当前用户，无弹窗），但那需要原生调用；纯 Node 方案有限。待确认。
 
@@ -220,7 +240,10 @@ masterPasswordCommand:                            # 新增:任意 helper(覆盖�
   | 超时 | `error.killed === true` / signal | "helper 超过 N 秒未返回（可能在等 Touch ID/主密码）" |
   | 输出为空 | `stdout === ''` | "helper 没有输出，检查它的用法" |
 
-- **硬超时**（默认 10s，可配）：这是防止"等 Touch ID 弹窗"挂住 harness 的唯一保险。
+- **硬超时**（默认 10s，可配）+ **SIGKILL**：这是防止"等 Touch ID 弹窗"挂住 harness 的唯一保险。
+- **`stdin` 强制 `/dev/null`**：`secret-tool store`、`pass` 这类会读到 EOF 为止，继承来的 stdin 可能让它永远挂着。
+- **最小化环境变量**（只传必要的，如 `PATH` + provider 自己的），避免把主密码/令牌通过环境泄漏给无关子进程；**用绝对路径**调 helper，不依赖 `~` 展开。
+- **结果按 provider 缓存并带 TTL**（默认 0 = 不缓存；`pass`+gpg-agent 这类可设 0，1Password 这类可设到它的会话窗口内），**`vault_lock` 时一并清空**。AWS 的 `credential_process` 文档说它自己**不缓存**、"要缓存请在自己的进程里做" —— 我们这里缓存直接决定弹窗频率，所以必须做。
 - **绝不把 stdout 打进日志或错误信息**，非零退出时**绝不把半截输出当密码**（实测：`process.exit(3)` 前已打印 "partial"，仍必须整体拒绝🔬）。
 - **只剥掉一个结尾换行（`\n` 或 `\r\n`），不 trim 其他空白**。实测：主密码结尾多一个空格就开不了库（`vault master password is incorrect`），而 helper 几乎总是会补一个换行🔬 —— 这是"看起来配好了却打不开"的最常见原因，值得在文档里直说。若要容错更多（例如手写命令多打了空格），应做成显式选项而非常规行为。
 
@@ -259,6 +282,7 @@ CLI 本身也应该支持同样的来源链（`--keychain`、`DSH_VAULT_MASTER_P
 4. **要不要支持 Windows**（纯 Node 下读回凭据基本不可行，需要原生依赖；DPAPI 文件是另一条路）？
 5. **CLI 是否也支持托管来源**（建议支持，否则脚本侧仍要明文密码）。
 6. **`masterPasswordKeychain` 的默认 service/account 命名**（`dsh-vault` / `default`，多库用 `dsh-vault:<vault>`？）
+7. **helper 预设给几个**？调研建议只给 3–4 个（`op read` / `pass show` / `vault kv get -field` / `bw get password`）+ **永远保留"自己写命令"的逃生口**，不要为每家做 SDK 依赖。我同意这个范围——预设太多就变成维护负担。
 
 ## 8. 主要来源
 
@@ -274,3 +298,5 @@ CLI 本身也应该支持同样的来源链（`--keychain`、`DSH_VAULT_MASTER_P
 - `keyrings(7)`（持久钥匙环 3 天默认）：<https://man7.org/linux/man-pages/man7/keyrings.7.html>
 - gpg-agent 缓存与 `gpg-preset-passphrase`：<https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html>、<https://manpages.debian.org/trixie/gpg-agent/gpg-preset-passphrase.1.en.html>
 - DSH 侧：`@deepseek-ai/dsh-credentials-local` 的 Known Limitations / Dev Note（"OS-keychain provider is deferred"、seam 预留 helper-command 与 KMS）
+- 三方：1Password CLI 会话与 service account <https://www.1password.dev/cli/app-integration-security>、<https://www.1password.dev/service-accounts/use-with-1password-cli>；Bitwarden CLI <https://bitwarden.com/help/cli/>；GnuPG agent 缓存 <https://gnupg.org/documentation/manuals/gnupg/Agent-Options.html>；Vault `kv get` <https://developer.hashicorp.com/vault/docs/commands/kv/get>；sops/age 密钥来源 <https://getsops.io/docs/usage/identities/age/>；KeePassXC CLI man page
+- 前人警告：AWS `credential_process` <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html>（不要把秘密写进 stderr、配置文件写入权限即命令控制权、禁用环境变量与 `~`）
