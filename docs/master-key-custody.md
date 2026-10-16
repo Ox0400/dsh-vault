@@ -112,12 +112,38 @@ interface VaultFile { version: number; kdf: KdfParams; verify: EncryptedBlob; en
 
 **建议**：先做 A（本周能落地、收益立刻可见：配置与环境里不再有明文），把 **B 记录为下一步**，并确保 A 的实现**不挡 B 的路**（即：解析出来的东西叫"解锁材料"而不是写死"密码"，为将来替换留位置）。
 
-## 4. 平台矩阵（**待调研补全**）
+## 4. 平台矩阵
 
-- **4.1 macOS**：见 §2，已实测。
-- **4.2 Linux**：⏳ 调研中（GNOME Keyring/libsecret、KWallet、无桌面/容器/WSL 的行为与降级）。
-- **4.3 三方托管（helper command）**：⏳ 调研中（1Password `op`、Bitwarden `bw`、`pass`+gpg-agent、Vault、KeePassXC 的命令、弹窗频率、stdout 是否干净、能否无 TTY 运行）。
-- **4.4 Windows**：⚠️ 预期"读回凭据"不可行（`cmdkey` 只写不读，读需要原生 addon 或 DPAPI）。备选是 **DPAPI 加密文件**（`CryptProtectData` 绑定当前用户，无弹窗），但那需要原生调用；纯 Node 方案有限。待确认。
+### 4.1 macOS：见 §2，已实测
+
+### 4.2 Linux：能做，但**前提条件比 macOS 多得多**，而且"没有 per-app ACL"
+
+调研结论（📚 均有来源，见文末）：
+
+**用什么**：桌面环境走 freedesktop Secret Service（`org.freedesktop.secrets`），命令行工具是 `secret-tool`（GNOME Keyring）或 `kwallet-query`（KDE）。注意 **`secret-tool` 在 Debian/Ubuntu 属于单独的 `libsecret-tools` 包**（Ubuntu 在 universe），Fedora 才随 `libsecret` 一起装 —— 所以"能不能用"要先探测，不能假设存在。
+
+**弹窗与解锁**：
+- 登录钥匙环只有在 **PAM 拿到了密码**时才自动解锁，也就是要求"**钥匙环密码 == 登录密码**"；**自动登录（autologin）、指纹（fprintd 不设置 `PAM_AUTHTOK`）、智能卡登录都不会解锁它** —— 这时**第一个来取秘密的应用会弹一次解锁框**；
+- 解锁框需要有显示环境且它被导出到 session bus（`dbus-update-activation-environment DISPLAY XAUTHORITY WAYLAND_DISPLAY`），**否则 GUI 提示根本无法弹出** → 此时调用会**一直等在那里**（挂住）；
+- **Secret Service 规范明确不管访问控制**（"This specification does not mandate any form of access control"），**没有 per-app ACL、也没有 macOS 那种"始终允许"**。ArchWiki 甚至直说：只要钥匙环解锁了，**任何应用都能读**。所以 **Linux 上钥匙串托管买到的只是"不用每次输"，不是"别人读不到"** —— 这与 §1 的威胁模型一致，但比 macOS 更弱（macOS 至少有 per-app ACL 这一层）。
+
+**必须在运行期探测**（否则会挂住），调研给出的清单很具体：
+1. `DBUS_SESSION_BUS_ADDRESS` 未设置 → 没有 session bus，直接放弃（错误串形如 `Cannot autolaunch D-Bus without X11 $DISPLAY`）；
+2. `XDG_RUNTIME_DIR` 未设置 → 私有 bus 也不成立；
+3. `DISPLAY` / `WAYLAND_DISPLAY` 都没有 → **即使 bus 在，也不可能弹窗** → 若 collection 是锁的，必须**快速失败**而不是去调用会弹窗的接口；
+4. **无阻塞预检**（不弹窗地看锁定状态）：
+   `busctl --timeout=10 --user get-property org.freedesktop.secrets /org/freedesktop/secrets/collection/login org.freedesktop.Secret.Collection Locked`
+   → `true`/`false`/非零表示没有可用服务；
+5. **每次 `secret-tool lookup` 都套超时**（例如 `timeout 10`），把超时当作"不可用"；
+6. **`secret-tool store` 必须关掉 stdin**（它"读到 EOF"，继承来的 stdin 会永远挂住）。
+
+**没有桌面钥匙环时的现实**（服务器/SSH/cron/容器/WSL2/systemd 服务）：这些环境**根本没有可用的 Secret Service**，可选替代是 `systemd-creds`（TPM2 + `/var/lib/systemd/credential.secret`，可绑定 machine-id + UID，无弹窗，但 **root 能读**，且非特权桌面插件通常只能通过 unit 的 `LoadCredentialEncrypted=` 拿到）、内核 keyutils 持久钥匙环（无 D-Bus 依赖、能跨登出，但**静态不加密**、重启即失）、或**加密文件 + 显式密钥**。
+
+**对设计的直接后果**：Linux 上"钥匙串"只能当作**可用则用的便利路径**（探测通过才走），**默认降级顺序**应是：钥匙串（探测通过）→ helper command（`pass`/1Password CLI 等）→ 交互式提示；并且要在文档里明说 Linux 下它**不提供跨进程保护**。
+
+### 4.3 三方托管（helper command）：⏳ 调研中
+
+### 4.4 Windows：⚠️ 预期"读回凭据"不可行（`cmdkey` 只写不读，读需要原生 addon 或 DPAPI）。备选是 **DPAPI 加密文件**（`CryptProtectData` 绑定当前用户，无弹窗），但那需要原生调用；纯 Node 方案有限。待确认。
 
 ## 5. 建议的设计（先给形状，等调研补细节）
 
@@ -189,7 +215,21 @@ CLI 本身也应该支持同样的来源链（`--keychain`、`DSH_VAULT_MASTER_P
 ## 7. 未决问题（需要你拍板）
 
 1. **先做 A 还是直接做 B？**（我的建议：A 先落地，B 排进后续，但接口留好位置）
-2. **Linux/无桌面环境的默认行为**：读取失败时是**降级到提示输入**，还是**直接报错**？（建议：能交互就提示，不能就报错并说明）
-3. **要不要支持 Windows**（纯 Node 下读回凭据基本不可行，需要原生依赖）？
-4. **CLI 是否也支持托管来源**（建议支持，否则脚本侧仍要明文密码）。
-5. **`masterPasswordKeychain` 的默认 service/account 命名**（`dsh-vault` / `default`，多库用 `dsh-vault:<vault>`？）
+2. **Linux 上要不要支持 `secret-tool`**？调研显示它：包不总是装、无 per-app ACL、锁定且无显示时会挂、且"任何应用都能读"。我的建议是**支持但严格探测 + 超时 + 明说不提供跨进程保护**；如果你觉得收益不抵复杂度，也可以**只在 Linux 支持 helper command**（`pass`/1Password CLI/systemd-creds），完全不碰 Secret Service。这条我倾向听你的。
+3. **无桌面环境的默认行为**：读取失败时**降级到提示输入**，还是**直接报错并说明**？（建议：能交互就提示，不能就报错并给出具体指引）
+4. **要不要支持 Windows**（纯 Node 下读回凭据基本不可行，需要原生依赖；DPAPI 文件是另一条路）？
+5. **CLI 是否也支持托管来源**（建议支持，否则脚本侧仍要明文密码）。
+6. **`masterPasswordKeychain` 的默认 service/account 命名**（`dsh-vault` / `default`，多库用 `dsh-vault:<vault>`？）
+
+## 8. 主要来源
+
+- macOS：`security(1)`；本机实测（macOS 26.3 / `/usr/bin/security`）—— 见 §2 的每个数字。
+- Secret Service 规范：<https://specifications.freedesktop.org/secret-service/latest-single/>
+- `secret-tool(1)`：<https://manpages.ubuntu.com/manpages/jammy/man1/secret-tool.1.html>；打包差异见 <https://packages.debian.org/bookworm/libsecret-tools>、<https://packages.ubuntu.com/jammy/libsecret-tools>
+- GNOME Keyring 解锁条件与安全模型：<https://wiki.archlinux.org/title/GNOME/Keyring>（含"任何应用都能读"与 CVE-2018-19358 的说明）
+- `kwallet-query(1)`：<https://manpages.ubuntu.com/manpages/jammy/man1/kwallet-query.1.html>
+- `gnome-keyring-daemon(1)`（`--unlock` / `--login`）：<https://manpages.ubuntu.com/manpages/noble/man1/gnome-keyring-daemon.1.html>
+- `systemd-creds(1)`：<https://www.freedesktop.org/software/systemd/man/latest/systemd-creds.html>
+- `keyrings(7)`（持久钥匙环 3 天默认）：<https://man7.org/linux/man-pages/man7/keyrings.7.html>
+- gpg-agent 缓存与 `gpg-preset-passphrase`：<https://www.gnupg.org/documentation/manuals/gnupg/Agent-Options.html>、<https://manpages.debian.org/trixie/gpg-agent/gpg-preset-passphrase.1.en.html>
+- DSH 侧：`@deepseek-ai/dsh-credentials-local` 的 Known Limitations / Dev Note（"OS-keychain provider is deferred"、seam 预留 helper-command 与 KMS）
