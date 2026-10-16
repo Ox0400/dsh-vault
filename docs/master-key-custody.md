@@ -82,9 +82,48 @@ node 里 execFile('/usr/bin/security', ['find-generic-password','-s',…,'-a',�
 
 另外注意：`security show-keychain-info` **看起来**能查锁定状态，但它在锁定时**同样会阻塞**（实测 5s 超时🔬），所以**不能**用它做无阻塞预检。
 
-### 2.4 关于"节点二进制更新后会不会重新弹窗"
+### 2.4 文档层面的确认：为什么"走 CLI"这条路成立
 
-⚠️ 未实测（无法在不重启/不登录的前提下验证）。理论上：ACL 记录的是 `security`（稳定、Apple 签名），**不是 node**，所以 node 走 nvm/homebrew 升级、路径变化、签名变化都不应影响——这正是"用 CLI 而不是直接调 Security framework"的关键好处。但**macOS 大版本升级**后 `/usr/bin/security` 自身变化是否会让已授权条目重新校验，需要一次系统升级才能观察。建议在文档里明说这一点。
+实测之外，另一路调研从 Apple 文档与相关项目的源码/issue 里确认了同一结论，并补上了两个我原本解释不了的现象：
+
+**（1）有两个完全不同的对话框，必须分开谈**（这解释了我 §2.3 里"一次阻塞、四次快速失败"的矛盾）：
+
+| | 触发条件 | 文案（Apple 自己的字符串表） |
+|---|---|---|
+| **钥匙串锁定框** | 目标钥匙串是锁的 | "Please enter the keychain password." / "Enter the password for keychain “%@”"（`SecurityAgent.bundle/…/KeychainPassphraseUnlock.loctable`） |
+| **应用授权框（ACL）** | 钥匙串已解锁，但**发起请求的应用身份**不在该条目的受信列表里 | "%1$@ wants to use your confidential information stored in “%2$@" in your keychain."，按钮 **Always Allow / Deny / Allow**（`ConfirmAccess.loctable`） |
+
+所以：**锁定时弹的是第一种**（我 probe 1 遇到的就是它——临时钥匙串刚被我锁上）；**第二种才是"应用授权"，也才会问"始终允许"**，而我们这条路径**根本不会碰到它**。
+
+**（2）ACL 校验的对象确实是 `/usr/bin/security`，且它是 Apple 签名、身份稳定**：
+
+- `man security` 的原文：*"By default, the application which creates an item is trusted to access its data without warning."* —— "the application which creates" 就是执行 API 调用的那个进程，也就是 `security`；
+- Python `keyring` 作者在 issue 里的原话：*"ownership belongs to calling process not to 'security' app"*（`jaraco/keyring#144`）；
+- 本机验证：`codesign -d -r- /usr/bin/security` → `designated => identifier "com.apple.security" and anchor apple`。
+- 推论：**ACL 不会上溯到 node**，也不继承 node 的身份。所以"只信任 node 的条目"用 CLI 读**仍然会弹窗**，而"由 `security` 创建（默认即信任 `security`）的条目"，**从任何会 shell out 的进程读都不弹，且 node 升级后依旧不弹**。
+
+**（3）`-A` 为什么不必需、以及它的代价**：man page 写的是 *"Allow any application to access this item without warning (insecure, not recommended!)"*。它确实是**唯一**文档化的"任何应用、零弹窗"写法，但代价是钥匙串不再是一道用户确认边界，只剩余静态加密——正是我们要避免的。默认（不加 `-T`）已经够用。
+
+**（4）前人踩过的坑，正好说明我们为什么躲开了**：`aws-vault` 的 README 直接写着 *"The macOS release builds are code-signed to avoid extra prompts in Keychain."*，并且它用 `KeychainTrustApplication: true`（信任调用者）；未签名版本会遇到"点 Always Allow 也没用"——因为 **ACL 记录的是 cdhash，每次重新构建都会变**（`99designs/aws-vault#211/#219/#267`；`jaraco/keyring` 的作者也实测过"No app trusted"变体会产生约 10 次交互提示且"始终允许"不生效）。**我们不受这个影响，恰恰因为调用方是 Apple 签名的 `security` 而不是 node。**
+
+**（5）无 GUI 时的失败形态**：Apple 文档化的错误是 `errSecInteractionNotAllowed`（**-25308**，docker 的 osxkeychain helper 在代码里就专门映射了它并提示用户手动 `security -v unlock-keychain`）。但**我实测锁定时拿到的是退出码 152**，不是 -25308 —— 所以结论是：**不要按具体数字码分类**，只保证两条：**44 = 条目不存在**（可诊断），**其余任何失败（含超时）= 钥匙串当前不可用 → 降级**。
+
+**（6）fail-fast 的旋钮都不好用**：CLI **没有**任何"禁止弹窗"的 flag 或环境变量（`man security` 的 ENVIRONMENT 只有 `MallocStackLogging`）；API 侧的 `SecKeychainSetUserInteractionAllowed(FALSE)`、`kSecUseAuthenticationUIFail`、`kSecUseNoAuthenticationUI` 在当前 SDK 里**都已废弃**。所以"加超时"不是偷懒，是**唯一现实可行的 fail-fast**。
+
+**（7）仍未验证、要在实现前补的实验**（诚实标注）：
+- `security add-generic-password` 创建的条目，其 ACL 受信项究竟渲染成 `identifier … anchor apple` 还是 cdhash（用 `security dump-keychain -a` 前后对比即可，但会改动状态，没在这次只读调研里做）；
+- **最关键的待验证项**：node 升级之后（换 nvm 版本/重装），同一个条目是否仍零弹窗——理论上应如此（身份是 `security`），但没有任何文档明确写过；
+- 无 Aqua 会话的 `launchd` 上下文里 `security unlock-keychain -p` 是否可行；
+- 屏幕共享会话是否算"有 UI"（决定弹窗还是 -25308）。
+
+### 2.5 macOS 的结论
+
+**可以做，且正常路径零弹窗。** 实现上必须做到三件事：
+
+1. 写入与读取**都走 `/usr/bin/security`**，**不要加 `-T`/`-A`**（默认就信任创建者，即 `security` 自己）；
+2. 每次读取**带硬超时**（3–5s），把超时与任何非 44 的失败都当"不可用"，降级到交互式提示或清晰报错；
+3. 不要依赖具体错误码（-25308 与 152 都可能出现），只在文档里给出**可执行的修复指引**（例如"锁屏后重试 / 手动 `security unlock-keychain`"）。
+
 
 ## 3. 存"主密码"还是"包裹密钥"：两条路线的取舍
 
@@ -223,7 +262,9 @@ CLI 本身也应该支持同样的来源链（`--keychain`、`DSH_VAULT_MASTER_P
 
 ## 8. 主要来源
 
-- macOS：`security(1)`；本机实测（macOS 26.3 / `/usr/bin/security`）—— 见 §2 的每个数字。
+- macOS 实测：`security(1)`；本机（macOS 26.3 / `/usr/bin/security`）—— 见 §2 的每个数字。
+- macOS 文档确认：Apple《Access Control Lists》<https://developer.apple.com/documentation/security/access-control-lists>、《SecAccessCreate》<https://developer.apple.com/documentation/security/secaccesscreate(_:_:_:)>、《SecTrustedApplicationCreateFromPath》<https://developer.apple.com/documentation/security/sectrustedapplicationcreatefrompath(_:_:)>、`errSecInteractionNotAllowed` <https://developer.apple.com/documentation/security/errsecinteractionnotallowed>
+- 前人经验：`jaraco/keyring#144`（"ownership belongs to calling process not to 'security' app"、以及"no app trusted"变体产生约 10 次提示）、`99designs/aws-vault` README（发布版做代码签名以避免额外弹窗）与 #211/#219/#267（"Always Allow 不生效"）、`docker-credential-helpers` 的 osxkeychain（映射 -25308 并提示手动解锁）
 - Secret Service 规范：<https://specifications.freedesktop.org/secret-service/latest-single/>
 - `secret-tool(1)`：<https://manpages.ubuntu.com/manpages/jammy/man1/secret-tool.1.html>；打包差异见 <https://packages.debian.org/bookworm/libsecret-tools>、<https://packages.ubuntu.com/jammy/libsecret-tools>
 - GNOME Keyring 解锁条件与安全模型：<https://wiki.archlinux.org/title/GNOME/Keyring>（含"任何应用都能读"与 CVE-2018-19358 的说明）
